@@ -1,0 +1,23 @@
+# OpenShift: restricted-v2 assigns a per-namespace UID range, so the chart's
+# hard-coded 65532 is rejected. Setting these to null REMOVES the keys (Helm
+# treats an explicit null as a deletion), leaving OpenShift to allocate.
+deployment:
+  pod:
+    securityContext:
+      runAsUser: null
+      runAsGroup: null
+      fsGroup: null
+  envoyGateway:
+    securityContext:
+      runAsUser: null
+      runAsGroup: null
+certgen:
+  job:
+    pod:
+      securityContext:
+        runAsUser: null
+        runAsGroup: null
+        fsGroup: null
+    securityContext:
+      runAsUser: null
+      runAsGroup: null
