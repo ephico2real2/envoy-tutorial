@@ -33,17 +33,6 @@ these four, nested:
 </picture>
 <!-- markdownlint-enable MD033 -->
 
-```text
-  LISTENER            a port Envoy accepts connections on
-    └── FILTER CHAIN  what to do with a connection that arrives
-          └── FILTERS  network filters see bytes;
-                       http_connection_manager turns them into requests
-                └── ROUTES    which cluster a request belongs to
-                        │
-                        ▼
-  CLUSTER             a named group of upstream endpoints
-```
-
 Read it as a sentence: *accept on this port, speak HTTP, match this path, send
 it to that cluster.*
 
@@ -54,24 +43,6 @@ it to that cluster.*
   <img alt="curl sends GET /hello to Envoy's listener on port 8080; the filter chain's http connection manager matches route slash to cluster echo_service, STRICT_DNS and ROUND_ROBIN, which sends it to echo-1 or echo-2; the reply passes back through Envoy to curl: 200, plus headers the app never set." src="../docs/diagrams/01-what-is-envoy/request-path.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
-
-```text
-   curl                    ENVOY                         echo
-    │                ┌──────────────────┐
-    │  GET /hello    │ listener :8080   │
-    ├───────────────▶│  filter_chain    │
-    │                │   hcm            │
-    │                │    route "/" ────┼──▶ cluster echo_service
-    │                │                  │      STRICT_DNS
-    │                │                  │      ROUND_ROBIN
-    │                │                  │        │      │
-    │                │                  │        ▼      ▼
-    │                │                  │     echo-1  echo-2
-    │◀───────────────┤  reply returns   │◀───────┴──────┘
-    │                │  through Envoy   │
-    │                └──────────────────┘
-       200, plus headers the app never set
-```
 
 ## Run it
 
@@ -201,5 +172,5 @@ gets its own module. The config here is the smallest thing that is still real.
 ## Diagram sources
 
 The figures are rendered from [`docs/diagrams/01-what-is-envoy/source.html`](../docs/diagrams/01-what-is-envoy/source.html)
-(inline SVG, light and dark). The picture, its text twin and the page change
-together; re-render with the `/visual` skill's `render.py`.
+(inline SVG, light and dark). Change the page and re-render the PNGs together,
+with the `/visual` skill's `render.py`.

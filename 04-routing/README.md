@@ -25,26 +25,6 @@ chain regardless of order. Here the order is the config.
 *Both columns are measured on the running proxy — the right one with
 `./run.sh shadow`. Envoy accepts the reordered config and logs no warning.*
 
-```text
-  committed order — catch-all LAST                        catch-all FIRST — ./run.sh shadow
-  ──────────────────────────────────────────────────────  ──────────────────────────────────────────────────
-    1  path /exact                    exact-path           11  prefix /                       catch-all ← every probe
-    2  safe_regex /order/[0-9]+       regex                 1  path /exact                    never reached
-    3  prefix / + header x-canary     header-canary         2  safe_regex /order/[0-9]+       never reached
-    4  prefix / + query debug=1       query-debug           3  prefix / + header x-canary     never reached
-    5  prefix /api/v1/                prefix-rewrite        4  prefix / + query debug=1       never reached
-    6  safe_regex /user/…/profile     regex-rewrite         5  prefix /api/v1/                never reached
-    7  prefix /rewrite-host           host-rewrite          6  safe_regex /user/…/profile     never reached
-    8  prefix /slow                   504 after 0.25 s      7  prefix /rewrite-host           never reached
-   8b  path_separated_prefix /patient 200 after 1.0 s       8  prefix /slow                   never reached
-   8c  prefix /budget                 budget header 1234   8b  path_separated_prefix /patient never reached
-    9  path /old                      301 · no upstream    8c  prefix /budget                 never reached
-   10  path /healthz                  200 · no upstream     9  path /old                      never reached
-   11  prefix /                       catch-all            10  path /healthz                  never reached
-
-  tried top to bottom, first match wins; Envoy logged no warning for the right-hand order
-```
-
 ## Run it
 
 ```bash
@@ -219,19 +199,6 @@ measured `/patient` at 2.5s that way. That is the app, not Envoy.
 *Who answers depends on the route's action, not its match. Counters are the
 proxy's own `upstream_rq_total`; timings are curl's `time_total`.*
 
-```text
-  CLIENT            ENVOY — the matched route's action          UPSTREAM
-  GET /exact    ──▶ route: cluster echo_service           ──▶ echo pod answers 200
-     ◀── 200        reply gains x-envoy-upstream-service-time  10 × /exact: counter 19 → 29
-  GET /slow     ──▶ route: cluster slow_service, 0.25s    ──▶ slow pod sleeps 1 s
-     ◀── 504        Envoy stops waiting, answers itself        (that answer is not waited for)
-  GET /old      ──▶ redirect: path_redirect /exact             not contacted —
-     ◀── 301        location: http://<request Host>/exact      20 requests to /old + /healthz,
-  GET /healthz  ──▶ direct_response: 200 "ok"                  upstream_rq_total unchanged
-
-  upstreams scaled to zero:  /healthz 200 · /old 301 · /exact 503 no healthy upstream
-```
-
 `redirect` and `direct_response` name no cluster. Checked with the proxy's own
 counters: 20 requests to `/healthz` and `/old` left `upstream_rq_total` at 19 for
 `echo_service` and 2 for `slow_service`; 10 requests to `/exact` then moved
@@ -293,5 +260,5 @@ routes delivered at runtime over RDS instead of written in the file.
 ## Diagram sources
 
 The figures are rendered from [`docs/diagrams/04-routing/source.html`](../docs/diagrams/04-routing/source.html)
-(inline SVG, light and dark). The picture, its text twin and the page change
-together; re-render with the `/visual` skill's `render.py`.
+(inline SVG, light and dark). Change the page and re-render the PNGs together,
+with the `/visual` skill's `render.py`.

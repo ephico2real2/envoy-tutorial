@@ -38,9 +38,9 @@ or names the claim that failed.
 - **Options are explained, not just used.** Each module has a table of the
   fields it introduces: what the field does, its default, and when you would
   change it.
-- **Diagrams come in pairs** — a rendered figure and a text twin, so the
-  content survives a terminal, a diff, and a screen reader. Each figure is
-  drawn from the module's manifests and measured output, and its source is in
+- **Diagrams are rendered figures**, light and dark, with traffic flowing top
+  to bottom. Each is drawn from the module's manifests and measured output, its
+  `alt` text states the same claim for screen readers, and its source is in
   [`docs/diagrams/`](docs/diagrams/).
 - **References are linked** so you can go deeper than the module goes.
 

@@ -27,30 +27,6 @@ the line the org already has.
 </picture>
 <!-- markdownlint-enable MD033 -->
 
-```text
-  cluster operator                      application team
-  ┌────────────────────┐                ┌────────────────────┐
-  │ GatewayClass       │                │ HTTPRoute          │
-  │  which controller  │                │  paths, backends   │
-  ├────────────────────┤                │  in THEIR namespace│
-  │ Gateway            │◀── attaches ───┤                    │
-  │  ports, TLS, who   │   (allowedRoutes) └──────────────────┘
-  │  may attach        │
-  └─────────┬──────────┘
-            │ controller generates
-            ▼
-  ┌────────────────────┐        ┌────────────────────┐
-  │ Envoy Deployment   │───────▶│ your Service       │
-  │ + LoadBalancer Svc │        └────────────────────┘
-  │ (you do not edit)  │
-  └────────────────────┘
-
-  "in THEIR namespace" holds only where the Gateway's allowedRoutes admits it.
-  This module's Gateway says from: Same, so its HTTPRoute sits beside it in
-  gwapi-demo; a route from another namespace was measured Accepted=False,
-  NotAllowedByListeners.
-```
-
 ## Setup
 
 **Read [`setup/`](setup/README.md) first.** Installing Envoy Gateway differs
@@ -139,5 +115,5 @@ Both are in [`setup/openshift.md`](setup/openshift.md) with the real output.
 ## Diagram sources
 
 The figures are rendered from [`docs/diagrams/12-gateway-api/source.html`](../docs/diagrams/12-gateway-api/source.html)
-(inline SVG, light and dark). The picture, its text twin and the page change
-together; re-render with the `/visual` skill's `render.py`.
+(inline SVG, light and dark). Change the page and re-render the PNGs together,
+with the `/visual` skill's `render.py`.

@@ -201,76 +201,73 @@ a { color: var(--remote); }
     <h2>Who answers</h2>
     <figure>
       <div class="fig-scroll">
-<svg viewBox="0 0 980 438" role="img" aria-label="Who answers a request depends on the route action. A route to a cluster is answered by the upstream. A route whose timeout expires is answered by Envoy with a 504 after 0.25 seconds. A redirect and a direct_response are answered by Envoy alone, and the upstream request counters do not move.">
-  <defs>
-    <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
-    <marker id="ah2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker>
-  </defs>
-  <g font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">
-    <rect x="20" y="14" width="170" height="30" rx="6" fill="var(--none-wash)" stroke="var(--none)"/>
-    <text x="105" y="34" text-anchor="middle" fill="var(--none)">CLIENT</text>
-    <rect x="236" y="14" width="380" height="30" rx="6" fill="var(--remote-wash)" stroke="var(--remote)"/>
-    <text x="426" y="34" text-anchor="middle" fill="var(--remote)">ENVOY · the matched route's action</text>
-    <rect x="662" y="14" width="298" height="30" rx="6" fill="var(--host-wash)" stroke="var(--host)"/>
-    <text x="811" y="34" text-anchor="middle" fill="var(--host)">UPSTREAM CLUSTERS</text>
-  </g>
-  <line x1="213" y1="14" x2="213" y2="368" stroke="var(--rule)" stroke-width="1.5" stroke-dasharray="6 5"/>
-  <line x1="639" y1="14" x2="639" y2="368" stroke="var(--rule)" stroke-width="1.5" stroke-dasharray="6 5"/>
+<svg viewBox="0 0 980 454" role="img" aria-label="Traffic flows down from the client to Envoy and, for a route to a cluster, on to the upstream. A route to a cluster is answered by the upstream. A route whose timeout expires is answered by Envoy with a 504 after 0.25 seconds. A redirect and a direct_response are answered by Envoy alone, and the upstream request counters do not move.">
+  <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="ah2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
   <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
-<rect x="20" y="60" width="170" height="62" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
-<text x="34" y="81" font-family="IBM Plex Mono, monospace" font-size="12">GET /exact</text>
-<text x="34" y="98" fill="var(--remote)" font-weight="600">← 200 from echo</text>
-<rect x="236" y="60" width="380" height="62" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
-<text x="250" y="81" font-weight="600">route: cluster echo_service</text>
-<text x="250" y="98" font-family="IBM Plex Mono, monospace" font-size="12">match: path /exact</text>
-<text x="250" y="115" fill="var(--muted)">reply gains x-envoy-upstream-service-time</text>
-<rect x="662" y="60" width="298" height="62" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
-<text x="676" y="81" font-weight="600">echo pod (1 of 2)</text>
-<text x="676" y="98">answers 200 with a JSON echo</text>
-<text x="676" y="115" fill="var(--muted)">10 × /exact: upstream_rq_total 19 → 29</text>
-<line x1="190" y1="80" x2="234" y2="80" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
-<line x1="616" y1="80" x2="660" y2="80" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
-<line x1="662" y1="104" x2="618" y2="104" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
-<line x1="236" y1="104" x2="192" y2="104" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
-<rect x="20" y="142" width="170" height="62" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
-<text x="34" y="163" font-family="IBM Plex Mono, monospace" font-size="12">GET /slow</text>
-<text x="34" y="180" fill="var(--gap)" font-weight="600">← 504 at 0.25 s</text>
-<rect x="236" y="142" width="380" height="62" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
-<text x="250" y="163" font-weight="600">route: cluster slow_service, timeout 0.25s</text>
-<text x="250" y="180">stops waiting at 250 ms and answers 504 itself</text>
-<text x="250" y="197" fill="var(--muted)">body: upstream request timeout</text>
-<rect x="662" y="142" width="298" height="62" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
-<text x="676" y="163" font-weight="600">slow pod</text>
-<text x="676" y="180">sleeps 1 s before it answers</text>
-<text x="676" y="197" fill="var(--muted)">that answer is not waited for</text>
-<line x1="190" y1="162" x2="234" y2="162" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
-<line x1="616" y1="162" x2="660" y2="162" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
-<line x1="236" y1="186" x2="192" y2="186" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#ah2g)"/>
-<rect x="20" y="224" width="170" height="62" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
-<text x="34" y="245" font-family="IBM Plex Mono, monospace" font-size="12">GET /old</text>
-<text x="34" y="262" fill="var(--remote)" font-weight="600">← 301</text>
-<rect x="236" y="224" width="380" height="62" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
-<text x="250" y="245" font-weight="600">redirect: path_redirect /exact</text>
-<text x="250" y="262" font-family="IBM Plex Mono, monospace" font-size="12">location: http://&lt;request Host&gt;/exact</text>
-<text x="250" y="279" fill="var(--muted)">no cluster named</text>
-<line x1="190" y1="244" x2="234" y2="244" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
-<line x1="236" y1="268" x2="192" y2="268" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
-<rect x="20" y="306" width="170" height="62" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
-<text x="34" y="327" font-family="IBM Plex Mono, monospace" font-size="12">GET /healthz</text>
-<text x="34" y="344" fill="var(--remote)" font-weight="600">← 200 ok</text>
-<rect x="236" y="306" width="380" height="62" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
-<text x="250" y="327" font-weight="600">direct_response: 200, body ok</text>
-<text x="250" y="344">answered from the config alone</text>
-<text x="250" y="361" fill="var(--muted)">no cluster named</text>
-<line x1="190" y1="326" x2="234" y2="326" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
-<line x1="236" y1="350" x2="192" y2="350" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
-<rect x="662" y="224" width="298" height="144" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
-<text x="676" y="245" font-weight="600">not contacted</text>
-<text x="676" y="262">20 requests to /old and /healthz:</text>
-<text x="676" y="279" fill="var(--muted)">upstream_rq_total unchanged at 19 and 2</text>
-
-    <text x="20" y="398" fill="var(--muted)">Counters are the proxy's own cluster.*.upstream_rq_total; the timings are curl's time_total from inside the cluster.</text>
-    <text x="20" y="420" font-weight="600">With echo and slow scaled to zero: /healthz 200, /old 301, /exact 503 no healthy upstream.</text>
+<text x="20" y="73" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">CLIENT</text>
+<text x="20" y="197" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--remote)">ENVOY</text>
+<text x="20" y="337" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--host)">UPSTREAM</text>
+<line x1="20" y1="123" x2="960" y2="123" stroke="var(--rule)" stroke-width="1.3" stroke-dasharray="6 5"/>
+<line x1="20" y1="263" x2="960" y2="263" stroke="var(--rule)" stroke-width="1.3" stroke-dasharray="6 5"/>
+<rect x="120" y="40" width="200" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="134" y="61" font-family="IBM Plex Mono, monospace" font-size="12">GET /exact</text>
+<text x="134" y="78" fill="var(--remote)" font-weight="600">← 200 from echo</text>
+<rect x="120" y="150" width="200" height="84" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="134" y="171" font-weight="600">route: cluster</text>
+<text x="134" y="188" font-family="IBM Plex Mono, monospace" font-size="12">echo_service</text>
+<text x="134" y="205" fill="var(--muted)">match: path /exact</text>
+<text x="134" y="222" fill="var(--muted)">reply + upstream-service-time</text>
+<rect x="120" y="290" width="200" height="84" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="134" y="311" font-weight="600">echo pod (1 of 2)</text>
+<text x="134" y="328">answers 200</text>
+<text x="134" y="345" fill="var(--muted)">10 × /exact:</text>
+<text x="134" y="362" fill="var(--muted)">upstream_rq_total 19 → 29</text>
+<line x1="190" y1="96" x2="190" y2="148" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<line x1="250" y1="150" x2="250" y2="98" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<line x1="190" y1="234" x2="190" y2="288" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<line x1="250" y1="290" x2="250" y2="236" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<rect x="330" y="40" width="200" height="56" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="344" y="61" font-family="IBM Plex Mono, monospace" font-size="12">GET /slow</text>
+<text x="344" y="78" fill="var(--gap)" font-weight="600">← 504 at 0.25 s</text>
+<rect x="330" y="150" width="200" height="84" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="344" y="171" font-weight="600">route: cluster</text>
+<text x="344" y="188" font-family="IBM Plex Mono, monospace" font-size="12">slow_service</text>
+<text x="344" y="205" font-family="IBM Plex Mono, monospace" font-size="12">timeout: 0.25s</text>
+<text x="344" y="222">then answers 504 itself</text>
+<rect x="330" y="290" width="200" height="84" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="344" y="311" font-weight="600">slow pod</text>
+<text x="344" y="328">sleeps 1 s</text>
+<text x="344" y="345" fill="var(--muted)">its answer is</text>
+<text x="344" y="362" fill="var(--muted)">not waited for</text>
+<line x1="400" y1="96" x2="400" y2="148" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<line x1="460" y1="150" x2="460" y2="98" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#ah2g)"/>
+<line x1="400" y1="234" x2="400" y2="288" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<rect x="540" y="40" width="200" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="554" y="61" font-family="IBM Plex Mono, monospace" font-size="12">GET /old</text>
+<text x="554" y="78" fill="var(--remote)" font-weight="600">← 301</text>
+<rect x="540" y="150" width="200" height="84" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="554" y="171" font-weight="600">redirect</text>
+<text x="554" y="188" font-family="IBM Plex Mono, monospace" font-size="12">path_redirect /exact</text>
+<text x="554" y="205" fill="var(--muted)">Location built from the</text>
+<text x="554" y="222" fill="var(--muted)">request&#x27;s Host</text>
+<line x1="610" y1="96" x2="610" y2="148" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<line x1="670" y1="150" x2="670" y2="98" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<rect x="750" y="40" width="200" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="764" y="61" font-family="IBM Plex Mono, monospace" font-size="12">GET /healthz</text>
+<text x="764" y="78" fill="var(--remote)" font-weight="600">← 200 ok</text>
+<rect x="750" y="150" width="200" height="84" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="764" y="171" font-weight="600">direct_response</text>
+<text x="764" y="188" font-family="IBM Plex Mono, monospace" font-size="12">200, body ok</text>
+<text x="764" y="205" fill="var(--muted)">answered from the</text>
+<text x="764" y="222" fill="var(--muted)">config alone</text>
+<line x1="820" y1="96" x2="820" y2="148" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<line x1="880" y1="150" x2="880" y2="98" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<rect x="540" y="290" width="410" height="84" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="554" y="311" font-weight="600">not contacted</text>
+<text x="554" y="328">20 requests to /old and /healthz:</text>
+<text x="554" y="345" fill="var(--muted)">upstream_rq_total unchanged at 19 and 2</text>
+<text x="20" y="408" fill="var(--muted)">Counters are the proxy&#x27;s own cluster.*.upstream_rq_total; the timings are curl&#x27;s time_total from inside the cluster.</text>
+<text x="20" y="430" font-weight="600">With echo and slow scaled to zero: /healthz 200, /old 301, /exact 503 no healthy upstream.</text>
   </g>
 </svg>
       </div>

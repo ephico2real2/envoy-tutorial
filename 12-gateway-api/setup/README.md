@@ -36,26 +36,6 @@ extensions.
 </picture>
 <!-- markdownlint-enable MD033 -->
 
-```text
-       what YOU write                      who implements it
-  ┌──────────────────────────┐
-  │ Gateway                  │ ─────────┐
-  │ HTTPRoute  /  GRPCRoute  │          │   the STANDARD api
-  │ gateway.networking.k8s.io│          │   gateway.networking.k8s.io
-  └──────────────────────────┘          │   portable across vendors
-                                        ▼
-                             ┌─────────────────────────┐
-                             │  a Gateway controller   │
-                             │  (Envoy Gateway here)   │
-                             └─────────────────────────┘
-                                        ▲
-  ┌──────────────────────────┐          │   VENDOR extensions
-  │ EnvoyProxy               │ ─────────┘   gateway.envoyproxy.io
-  │ SecurityPolicy   etc.    │              Envoy Gateway only
-  │ gateway.envoyproxy.io    │
-  └──────────────────────────┘
-```
-
 ## Why the platforms differ
 
 **On vanilla Kubernetes nobody owns the standard CRDs.** They are not part of
@@ -154,5 +134,5 @@ different control plane.
 ## Diagram sources
 
 The figures are rendered from [`docs/diagrams/12-gateway-api/source.html`](../../docs/diagrams/12-gateway-api/source.html)
-(inline SVG, light and dark). The picture, its text twin and the page change
-together; re-render with the `/visual` skill's `render.py`.
+(inline SVG, light and dark). Change the page and re-render the PNGs together,
+with the `/visual` skill's `render.py`.

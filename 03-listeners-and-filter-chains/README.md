@@ -20,24 +20,6 @@ That is why SNI selects a chain and the `Host` header cannot.
 </picture>
 <!-- markdownlint-enable MD033 -->
 
-```text
-  ┌─ TCP connection arrives ──────────────────────────────────────┐
-  │                                                               │
-  │  1. listener_filters run        tls_inspector peeks at the    │
-  │                                 ClientHello and reads SNI     │
-  │                                                               │
-  │  2. filter_chain_match          ← SNI available here          │
-  │     picks ONE chain                Host header is NOT         │
-  │                                                               │
-  │  3. transport_socket             the chain's own certificate  │
-  │     terminates TLS                                            │
-  │                                                               │
-  │  4. http_connection_manager      now there is HTTP            │
-  │                                                               │
-  │  5. virtual_hosts match domains ← Host header available here  │
-  └───────────────────────────────────────────────────────────────┘
-```
-
 | | `filter_chain_match` | `virtual_hosts.domains` |
 |---|---|---|
 | runs | before TLS termination | after HTTP parsing |
@@ -168,5 +150,5 @@ Envoy rejects the config rather than guessing.
 ## Diagram sources
 
 The figures are rendered from [`docs/diagrams/03-listeners-and-filter-chains/source.html`](../docs/diagrams/03-listeners-and-filter-chains/source.html)
-(inline SVG, light and dark). The picture, its text twin and the page change
-together; re-render with the `/visual` skill's `render.py`.
+(inline SVG, light and dark). Change the page and re-render the PNGs together,
+with the `/visual` skill's `render.py`.
