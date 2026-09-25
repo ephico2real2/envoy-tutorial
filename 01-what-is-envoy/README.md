@@ -29,26 +29,19 @@ these four, nested:
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/01-what-is-envoy/four-nouns.dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/01-what-is-envoy/four-nouns.light.png">
-  <img alt="Every Envoy config nests the same four nouns: a listener holds a filter chain, whose http_connection_manager holds the routes; the router filter sends a matched request to a cluster, defined beside the listener and referenced by name." src="../docs/diagrams/01-what-is-envoy/four-nouns.light.png">
+  <img alt="Every Envoy config is four nouns, nested: a listener is a port Envoy accepts connections on; a filter chain is what to do with a connection that arrives; filters see bytes, and http_connection_manager turns them into requests; routes decide which cluster a request belongs to; a cluster is a named group of upstream endpoints." src="../docs/diagrams/01-what-is-envoy/four-nouns.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
 
-*The nesting of `manifests/10-envoy-config.yaml`. The cluster sits beside the
-listener, not inside it; the route refers to it by name.*
-
 ```text
-  LISTENER  http_listener · 0.0.0.0:8080       a port Envoy accepts connections on
-    └── FILTER CHAIN  (the only one)           no filter_chain_match: every connection gets it
-          └── NETWORK FILTER  http_connection_manager    bytes → HTTP requests
-                ├── route_config local_route
-                │     └── virtual_host everything, domains ["*"]
-                │           └── ROUTE  match prefix "/"  →  cluster echo_service
-                └── http_filters
-                      └── router         the last filter: picks the route, forwards
-                                                  │ by name
-                                                  ▼
-  CLUSTER  echo_service   (static_resources.clusters — a sibling of the listener)
-           STRICT_DNS echo:8080 · ROUND_ROBIN  →  echo pod, echo pod
+  LISTENER            a port Envoy accepts connections on
+    └── FILTER CHAIN  what to do with a connection that arrives
+          └── FILTERS  network filters see bytes;
+                       http_connection_manager turns them into requests
+                └── ROUTES    which cluster a request belongs to
+                        │
+                        ▼
+  CLUSTER             a named group of upstream endpoints
 ```
 
 Read it as a sentence: *accept on this port, speak HTTP, match this path, send
@@ -58,28 +51,26 @@ it to that cluster.*
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/01-what-is-envoy/request-path.dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/01-what-is-envoy/request-path.light.png">
-  <img alt="One request through Envoy: the route picks a cluster, round-robin picks a pod, and Envoy adds five headers to the request it forwards. The response returns through Envoy; the app only echoes what it received." src="../docs/diagrams/01-what-is-envoy/request-path.light.png">
+  <img alt="curl sends GET /hello to Envoy's listener on port 8080; the filter chain's http connection manager matches route slash to cluster echo_service, STRICT_DNS and ROUND_ROBIN, which sends it to echo-1 or echo-2; the reply passes back through Envoy to curl: 200, plus headers the app never set." src="../docs/diagrams/01-what-is-envoy/request-path.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
 
-*The response comes back **through** Envoy, and the five headers are added to
-the **request** Envoy forwards — the app only echoes what it received.*
-
 ```text
-   curl                      ENVOY  (envoy-01)                      echo pod (1 of 2)
-    │ ① GET /direct              │                                      │
-    │   host, user-agent, accept │                                      │
-    ├───────────────────────────▶│ ② route "/" → cluster echo_service   │
-    │                            │   ROUND_ROBIN picks one of 2 pod IPs │
-    │                            │ ③ same request + x-forwarded-for,    │
-    │                            │   x-forwarded-proto, x-request-id,   │
-    │                            │   x-envoy-external-address,          │
-    │                            │   x-envoy-expected-rq-timeout-ms     │
-    │                            ├─────────────────────────────────────▶│
-    │                            │◀─────────────────────────────────────┤
-    │                            │ ④ 200, JSON listing every header     │
-    │◀───────────────────────────┤                                      │
-    │ ⑤ 200: shows 5 headers curl never sent                            │
+   curl                    ENVOY                         echo
+    │                ┌──────────────────┐
+    │  GET /hello    │ listener :8080   │
+    ├───────────────▶│  filter_chain    │
+    │                │   hcm            │
+    │                │    route "/" ────┼──▶ cluster echo_service
+    │                │                  │      STRICT_DNS
+    │                │                  │      ROUND_ROBIN
+    │                │                  │        │      │
+    │                │                  │        ▼      ▼
+    │                │                  │     echo-1  echo-2
+    │◀───────────────┤  reply returns   │◀───────┴──────┘
+    │                │  through Envoy   │
+    │                └──────────────────┘
+       200, plus headers the app never set
 ```
 
 ## Run it

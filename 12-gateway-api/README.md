@@ -23,27 +23,32 @@ the line the org already has.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/12-gateway-api/ownership.dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/12-gateway-api/ownership.light.png">
-  <img alt="The cluster operator owns the GatewayClass, EnvoyProxy, SCC grant and Gateway; the application team owns the HTTPRoute, accepted in the Gateway's namespace and refused from another because allowedRoutes is from: Same. Envoy Gateway generates the proxy and its LoadBalancer Service." src="../docs/diagrams/12-gateway-api/ownership.light.png">
+  <img alt="The cluster operator owns the GatewayClass, which names the controller, and the Gateway: ports, TLS, and who may attach. The application team's HTTPRoute holds paths and backends and attaches to the Gateway, subject to allowedRoutes. The controller generates an Envoy Deployment and LoadBalancer Service, which you do not edit, and which sends traffic to your Service." src="../docs/diagrams/12-gateway-api/ownership.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
 
-*The objects this module creates, who owns each, and what the controller
-generates from them. Route acceptance, proxy placement and the SCC were read
-from the running cluster.*
-
 ```text
-  CLUSTER OPERATOR                    APPLICATION TEAM                  GENERATED — do not edit
-  GatewayClass eg                                                       envoy-gateway (controller)
-    └─ parametersRef ─▶ EnvoyProxy                                        │ generates, then
-       openshift-scc: LB Service on                                       │ configures over xDS
-       mongot-pool, securityContext                                       ▼
-  SCC grant nonroot-v2                                                  Envoy proxy + Service
-    to the proxy's ServiceAccount                                       LoadBalancer
-  Gateway eg · gwapi-demo       ◀──── HTTPRoute echo · gwapi-demo       192.168.127.101:80
-    listener http :80                  Accepted=True                      │ traffic
-    allowedRoutes from: Same    ◀─╳── HTTPRoute probe · gwapi-other       ▼
-    192.168.127.101                    Accepted=False                   echo pods · gwapi-demo
-                                       NotAllowedByListeners            10.217.0.146, .147 :8080
+  cluster operator                      application team
+  ┌────────────────────┐                ┌────────────────────┐
+  │ GatewayClass       │                │ HTTPRoute          │
+  │  which controller  │                │  paths, backends   │
+  ├────────────────────┤                │  in THEIR namespace│
+  │ Gateway            │◀── attaches ───┤                    │
+  │  ports, TLS, who   │   (allowedRoutes) └──────────────────┘
+  │  may attach        │
+  └─────────┬──────────┘
+            │ controller generates
+            ▼
+  ┌────────────────────┐        ┌────────────────────┐
+  │ Envoy Deployment   │───────▶│ your Service       │
+  │ + LoadBalancer Svc │        └────────────────────┘
+  │ (you do not edit)  │
+  └────────────────────┘
+
+  "in THEIR namespace" holds only where the Gateway's allowedRoutes admits it.
+  This module's Gateway says from: Same, so its HTTPRoute sits beside it in
+  gwapi-demo; a route from another namespace was measured Accepted=False,
+  NotAllowedByListeners.
 ```
 
 ## Setup

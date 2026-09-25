@@ -16,23 +16,26 @@ That is why SNI selects a chain and the `Host` header cannot.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/03-listeners-and-filter-chains/chain-vs-vhost.dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/03-listeners-and-filter-chains/chain-vs-vhost.light.png">
-  <img alt="A connection passes five stages in order. The filter chain is chosen at stage two, before TLS is terminated and before HTTP exists, so it sees SNI but not Host; the virtual host is chosen at stage five, after HTTP is parsed." src="../docs/diagrams/03-listeners-and-filter-chains/chain-vs-vhost.light.png">
+  <img alt="A TCP connection passes five stages in order: listener filters run, where tls_inspector reads SNI; filter_chain_match picks one chain, where SNI is available and the Host header is not; transport_socket terminates TLS with the chain's own certificate; http_connection_manager, where there is now HTTP; and virtual_hosts match domains, where the Host header is available." src="../docs/diagrams/03-listeners-and-filter-chains/chain-vs-vhost.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
 
-*Both listeners in this module, stage by stage. Everything above the dashed
-line happens before HTTP exists.*
-
 ```text
-  stage                        :8080 plaintext                 :8443 TLS
-  ① listener_filters           none                            tls_inspector reads SNI
-  ② filter_chain_match         one chain, no match block       server_names → sni-shop | sni-admin
-     sees SNI, not Host                                        unknown SNI → no chain → handshake fails
-  ③ transport_socket           none                            the chain's own cert (shop.crt | admin.crt)
-  ─── HTTP exists only below this line — the Host header can be read ───────────────────────
-  ④ http_connection_manager    route_config by_host            one per chain: shop_tls | admin_tls
-  ⑤ virtual_hosts.domains      shop | admin | * → 404          one vhost per chain, domains ["*"]
-     sees Host, path, headers
+  ┌─ TCP connection arrives ──────────────────────────────────────┐
+  │                                                               │
+  │  1. listener_filters run        tls_inspector peeks at the    │
+  │                                 ClientHello and reads SNI     │
+  │                                                               │
+  │  2. filter_chain_match          ← SNI available here          │
+  │     picks ONE chain                Host header is NOT         │
+  │                                                               │
+  │  3. transport_socket             the chain's own certificate  │
+  │     terminates TLS                                            │
+  │                                                               │
+  │  4. http_connection_manager      now there is HTTP            │
+  │                                                               │
+  │  5. virtual_hosts match domains ← Host header available here  │
+  └───────────────────────────────────────────────────────────────┘
 ```
 
 | | `filter_chain_match` | `virtual_hosts.domains` |

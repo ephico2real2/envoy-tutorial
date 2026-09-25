@@ -32,29 +32,28 @@ extensions.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../docs/diagrams/12-gateway-api/api-groups.dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../docs/diagrams/12-gateway-api/api-groups.light.png">
-  <img alt="The standard gateway.networking.k8s.io group and Envoy Gateway's gateway.envoyproxy.io group are read by the same controller. Only who installs the standard CRDs differs: you on Kubernetes, the Ingress Operator on OpenShift 4.19+." src="../../docs/diagrams/12-gateway-api/api-groups.light.png">
+  <img alt="What you write falls into two API groups that the same Gateway controller, Envoy Gateway here, implements: Gateway, HTTPRoute and GRPCRoute in the standard gateway.networking.k8s.io API, portable across vendors; and EnvoyProxy, SecurityPolicy and the rest in the vendor extension group gateway.envoyproxy.io, Envoy Gateway only." src="../../docs/diagrams/12-gateway-api/api-groups.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
 
-*Two API groups, one controller. The chart flags are the v1.9.1 defaults, read
-with `helm show values`.*
-
 ```text
-  WHAT YOU WRITE                                     read by
-  STANDARD API  gateway.networking.k8s.io        ──┐
-    GatewayClass · Gateway · HTTPRoute · GRPCRoute │
-    ReferenceGrant · BackendTLSPolicy              ├──▶ a Gateway controller
-  VENDOR EXTENSIONS  gateway.envoyproxy.io       ──┘    (Envoy Gateway here)
-    EnvoyProxy · Backend · ClientTrafficPolicy
-    SecurityPolicy · BackendTrafficPolicy · EnvoyPatchPolicy
-
-  WHO INSTALLS THE CRDs   Kubernetes                     OpenShift 4.19+
-  standard API            you — gateway-helm,            THE PLATFORM — Ingress Operator;
-                          crds.enabled=true (default)    an admission policy refuses changes;
-                                                         gateway-helm crds.enabled=false
-  vendor extensions       you — the same install         you — gateway-crds-helm with
-                                                         envoyGateway.enabled=true,
-                                                         gatewayAPI.enabled=false
+       what YOU write                      who implements it
+  ┌──────────────────────────┐
+  │ Gateway                  │ ─────────┐
+  │ HTTPRoute  /  GRPCRoute  │          │   the STANDARD api
+  │ gateway.networking.k8s.io│          │   gateway.networking.k8s.io
+  └──────────────────────────┘          │   portable across vendors
+                                        ▼
+                             ┌─────────────────────────┐
+                             │  a Gateway controller   │
+                             │  (Envoy Gateway here)   │
+                             └─────────────────────────┘
+                                        ▲
+  ┌──────────────────────────┐          │   VENDOR extensions
+  │ EnvoyProxy               │ ─────────┘   gateway.envoyproxy.io
+  │ SecurityPolicy   etc.    │              Envoy Gateway only
+  │ gateway.envoyproxy.io    │
+  └──────────────────────────┘
 ```
 
 ## Why the platforms differ

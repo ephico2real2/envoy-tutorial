@@ -61,74 +61,46 @@ a { color: var(--remote); }
   <header>
     <div class="eyebrow">envoy-tutorial · module 03 · listeners and filter chains</div>
     <h1>Two ways to route by name, and when each can see the name</h1>
-    <p class="lede">Drawn from <code>03-listeners-and-filter-chains/manifests/10-envoy-config.yaml</code>; the outcomes were measured in namespace <code>envoy-03</code>.</p>
+    <p class="lede">The diagram from <code>03-listeners-and-filter-chains/README.md</code>, rendered — the path a connection takes through this module's TLS listener on port 8443.</p>
   </header>
 
   <section>
-    <h2>Chain before HTTP, virtual host after</h2>
+    <h2>Five stages, in order</h2>
     <figure>
       <div class="fig-scroll">
-<svg viewBox="0 0 980 536" role="img" aria-label="A connection passes five stages in order. The filter chain is chosen at stage two, before TLS is terminated and before HTTP exists, so it can see SNI but not the Host header. The virtual host is chosen at stage five, after HTTP is parsed, so it can see Host.">
+<svg viewBox="0 0 960 486" role="img" aria-label="A TCP connection passes five stages in order: listener filters run, where tls_inspector reads SNI; filter_chain_match picks one chain, where SNI is available and the Host header is not; transport_socket terminates TLS with the chain&#x27;s own certificate; http_connection_manager, where there is now HTTP; and virtual_hosts match domains, where the Host header is available.">
   <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="a3g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
   <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
-<rect x="270" y="14" width="320" height="30" rx="6" fill="var(--none-wash)" stroke="var(--none)"/>
-<text x="430.0" y="34" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">:8080 · plaintext</text>
-<rect x="610" y="14" width="350" height="30" rx="6" fill="var(--remote-wash)" stroke="var(--remote)"/>
-<text x="785.0" y="34" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--remote)">:8443 · TLS</text>
-<text x="24" y="34" fill="var(--muted)">STAGE, in order</text>
-<text x="24" y="81" font-weight="600">① listener_filters</text>
-<text x="24" y="98">run on the raw connection</text>
-<text x="24" y="115" fill="var(--muted)">before any chain exists</text>
-<rect x="270" y="60" width="320" height="66" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
-<text x="284" y="81" fill="var(--muted)">none declared</text>
-<rect x="610" y="60" width="350" height="66" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
-<text x="624" y="81" font-family="IBM Plex Mono, monospace" font-size="12">tls_inspector</text>
-<text x="624" y="98">peeks at the ClientHello and reads SNI</text>
-<text x="24" y="157" font-weight="600">② filter_chain_match</text>
-<text x="24" y="174">picks ONE chain</text>
-<text x="24" y="191" fill="var(--muted)">sees SNI, ports, IPs — not Host</text>
-<rect x="270" y="136" width="320" height="66" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
-<text x="284" y="157" font-weight="600">one chain, no filter_chain_match</text>
-<text x="284" y="174">every connection gets it</text>
-<rect x="610" y="136" width="350" height="66" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
-<text x="624" y="157" font-weight="600">server_names → sni-shop or sni-admin</text>
-<text x="624" y="174" fill="var(--gap)" font-weight="600">unknown SNI → no chain → handshake fails</text>
-<text x="624" y="191" fill="var(--muted)">curl exit 35 · no_filter_chain_match: 2 after 2 tries</text>
-<text x="24" y="233" font-weight="600">③ transport_socket</text>
-<text x="24" y="250">terminates TLS for that chain</text>
-<text x="24" y="267" fill="var(--muted)">with that chain&#x27;s certificate</text>
-<rect x="270" y="212" width="320" height="66" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
-<text x="284" y="233" fill="var(--muted)">none — plaintext</text>
-<rect x="610" y="212" width="350" height="66" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
-<text x="624" y="233" font-weight="600">the chain&#x27;s own certificate</text>
-<text x="624" y="250" font-family="IBM Plex Mono, monospace" font-size="12">shop.crt → CN=shop.apps-crc.testing</text>
-<text x="624" y="267" font-family="IBM Plex Mono, monospace" font-size="12">admin.crt → CN=admin.apps-crc.testing</text>
-<text x="24" y="339" font-weight="600">④ http_connection_manager</text>
-<text x="24" y="356">parses HTTP</text>
-<text x="24" y="373" fill="var(--muted)">one per chain</text>
-<rect x="270" y="318" width="320" height="66" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
-<text x="284" y="339" font-family="IBM Plex Mono, monospace" font-size="12">route_config by_host</text>
-<rect x="610" y="318" width="350" height="66" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
-<text x="624" y="339" font-weight="600">one hcm per chain</text>
-<text x="624" y="356" font-family="IBM Plex Mono, monospace" font-size="12">route_config shop_tls · admin_tls</text>
-<text x="24" y="415" font-weight="600">⑤ virtual_hosts.domains</text>
-<text x="24" y="432">matched against Host</text>
-<text x="24" y="449" fill="var(--muted)">sees Host, path, headers</text>
-<rect x="270" y="394" width="320" height="66" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
-<text x="284" y="415" font-weight="600">shop · admin · * (catch-all)</text>
-<text x="284" y="432">unknown Host → direct_response 404</text>
-<text x="284" y="449" fill="var(--muted)">&quot;no virtual host for that Host header&quot;</text>
-<rect x="610" y="394" width="350" height="66" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
-<text x="624" y="415" font-weight="600">one vhost per chain, domains [&quot;*&quot;]</text>
-<text x="624" y="432">the name was already chosen by SNI at ②</text>
-<text x="24" y="298" fill="var(--host)" font-weight="600">▼ HTTP exists only below this line — the Host header can now be read</text>
-<line x1="20" y1="306" x2="960" y2="306" stroke="var(--host)" stroke-width="1.3" stroke-dasharray="6 5"/>
-<text x="24" y="494" font-weight="600">A filter chain is chosen before any HTTP is parsed; a virtual host after. SNI can pick a chain, and Host cannot.</text>
-<text x="24" y="514" fill="var(--muted)">Measured in envoy-03: SNI selects sni-shop / sni-admin; an unknown SNI fails the handshake; an unknown Host gets the 404.</text>
+<rect x="20" y="16" width="920" height="420" rx="10" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="40" y="42" font-weight="600">TCP connection arrives</text>
+<rect x="60" y="60" width="380" height="54" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="74" y="92" font-family="IBM Plex Mono, monospace" font-size="12">1. listener_filters run</text>
+<text x="480" y="82">tls_inspector peeks at the</text>
+<text x="480" y="99">ClientHello and reads SNI</text>
+<line x1="250" y1="114" x2="250" y2="132" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+<rect x="60" y="134" width="380" height="54" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="74" y="156" font-family="IBM Plex Mono, monospace" font-size="12">2. filter_chain_match</text>
+<text x="74" y="173">picks ONE chain</text>
+<text x="480" y="156" fill="var(--remote)" font-weight="600">← SNI available here</text>
+<text x="480" y="173" fill="var(--gap)" font-weight="600">Host header is NOT</text>
+<line x1="250" y1="188" x2="250" y2="206" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+<rect x="60" y="208" width="380" height="54" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="74" y="230" font-family="IBM Plex Mono, monospace" font-size="12">3. transport_socket</text>
+<text x="74" y="247">terminates TLS</text>
+<text x="480" y="239">the chain&#x27;s own certificate</text>
+<line x1="250" y1="262" x2="250" y2="280" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+<rect x="60" y="282" width="380" height="54" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="74" y="314" font-family="IBM Plex Mono, monospace" font-size="12">4. http_connection_manager</text>
+<text x="480" y="313" fill="var(--host)" font-weight="600">now there is HTTP</text>
+<line x1="250" y1="336" x2="250" y2="354" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+<rect x="60" y="356" width="380" height="54" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="74" y="388" font-family="IBM Plex Mono, monospace" font-size="12">5. virtual_hosts match domains</text>
+<text x="480" y="387" fill="var(--host)" font-weight="600">← Host header available here</text>
+<text x="20" y="468" font-weight="600">A filter chain is chosen before a single byte of HTTP has been parsed. A virtual host is chosen after.</text>
   </g>
 </svg>
       </div>
-      <figcaption>A connection passes five stages in order. The filter chain is chosen at stage two, before TLS is terminated and before HTTP exists, so it sees SNI but not Host; the virtual host is chosen at stage five, after HTTP is parsed.</figcaption>
+      <figcaption>A filter chain is chosen at stage 2, where SNI is available and the Host header is not; a virtual host at stage 5, once there is HTTP.</figcaption>
     </figure>
   </section>
 </div>

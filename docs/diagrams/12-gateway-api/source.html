@@ -60,75 +60,47 @@ a { color: var(--remote); }
 <div class="page">
   <header>
     <div class="eyebrow">envoy-tutorial · module 12 · the Gateway API</div>
-    <h1>Who owns which object, and who installs which CRDs</h1>
-    <p class="lede">Drawn from <code>12-gateway-api/manifests/</code> and the setup guides; the route acceptance, proxy placement and SCC were read from the live cluster (OpenShift 4.22.7, Envoy Gateway v1.9.1).</p>
+    <h1>Who owns which object, and which API each belongs to</h1>
+    <p class="lede">The diagrams from <code>12-gateway-api/README.md</code> and <code>12-gateway-api/setup/README.md</code>, rendered.</p>
   </header>
 
   <section>
     <h2>Who owns what</h2>
     <figure>
       <div class="fig-scroll">
-<svg viewBox="0 0 980 540" role="img" aria-label="The cluster operator owns the GatewayClass, the EnvoyProxy, the nonroot-v2 SCC grant and the Gateway; the application team owns the HTTPRoute, which is accepted in the Gateway&#x27;s namespace and refused from another namespace because allowedRoutes is from: Same; Envoy Gateway generates the proxy Deployment and LoadBalancer Service, which sends traffic to the echo pods.">
+<svg viewBox="0 0 920 404" role="img" aria-label="The cluster operator owns the GatewayClass, which names the controller, and the Gateway: ports, TLS, and who may attach. The application team&#x27;s HTTPRoute holds paths and backends and attaches to the Gateway, subject to allowedRoutes. The controller generates an Envoy Deployment and LoadBalancer Service, which you do not edit, and which sends traffic to your Service.">
   <defs><marker id="c1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="c1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
   <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
-<rect x="20" y="14" width="300" height="30" rx="6" fill="var(--host-wash)" stroke="var(--host)"/>
-<text x="170.0" y="34" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--host)">CLUSTER OPERATOR</text>
-<rect x="350" y="14" width="280" height="30" rx="6" fill="var(--remote-wash)" stroke="var(--remote)"/>
-<text x="490.0" y="34" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--remote)">APPLICATION TEAM</text>
-<rect x="660" y="14" width="300" height="30" rx="6" fill="var(--none-wash)" stroke="var(--none)"/>
-<text x="810.0" y="34" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">GENERATED · do not edit</text>
-<line x1="335" y1="14" x2="335" y2="480" stroke="var(--rule)" stroke-width="1.3" stroke-dasharray="6 5"/>
-<line x1="645" y1="14" x2="645" y2="480" stroke="var(--rule)" stroke-width="1.3" stroke-dasharray="6 5"/>
-<rect x="20" y="62" width="300" height="66" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
-<text x="34" y="83" font-weight="600">GatewayClass eg</text>
-<text x="34" y="100">controller: Envoy Gateway</text>
-<text x="34" y="117" fill="var(--muted)">parametersRef → EnvoyProxy openshift-scc</text>
-<line x1="170" y1="128" x2="170" y2="144" stroke="currentColor" stroke-width="1.3" marker-end="url(#c1)"/>
-<rect x="20" y="146" width="300" height="66" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
-<text x="34" y="167" font-weight="600">EnvoyProxy openshift-scc</text>
-<text x="34" y="184">proxy Service: LoadBalancer, mongot-pool</text>
-<text x="34" y="201" fill="var(--muted)">pod + envoy container securityContext</text>
-<rect x="20" y="230" width="300" height="66" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
-<text x="34" y="251" font-weight="600">SCC grant: nonroot-v2</text>
-<text x="34" y="268">to the proxy&#x27;s ServiceAccount</text>
-<text x="34" y="285" fill="var(--muted)">live pod admitted as scc=nonroot-v2</text>
-<rect x="20" y="314" width="300" height="66" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
-<text x="34" y="335" font-weight="600">Gateway eg · gwapi-demo</text>
-<text x="34" y="352">listener http :80 · allowedRoutes from: Same</text>
-<text x="34" y="369" fill="var(--muted)">address 192.168.127.101 (MetalLB)</text>
-<rect x="350" y="314" width="280" height="66" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
-<text x="364" y="335" font-weight="600">HTTPRoute echo · gwapi-demo</text>
-<text x="364" y="352">parentRef eg / http · / → echo:8080</text>
-<text x="364" y="369" fill="var(--remote)" font-weight="600">Accepted=True</text>
-<line x1="350" y1="347" x2="322" y2="347" stroke="currentColor" stroke-width="1.3" marker-end="url(#c1)"/>
-<rect x="350" y="404" width="280" height="66" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
-<text x="364" y="425" font-weight="600">HTTPRoute probe · gwapi-other</text>
-<text x="364" y="442">same parentRef, another namespace</text>
-<text x="364" y="459" fill="var(--gap)" font-weight="600">Accepted=False · NotAllowedByListeners</text>
-<path d="M350,437 H300 V382" fill="none" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#c1g)"/>
-<rect x="660" y="62" width="300" height="66" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
-<text x="674" y="83" font-weight="600">envoy-gateway · the controller</text>
-<text x="674" y="100">watches the class, Gateway and routes</text>
-<text x="674" y="117" fill="var(--muted)">envoy-gateway-system</text>
-<line x1="810" y1="128" x2="810" y2="174" stroke="currentColor" stroke-width="1.3" marker-end="url(#c1)"/>
-<text x="822" y="146" fill="var(--muted)">generates it, then</text>
-<text x="822" y="163" fill="var(--muted)">configures it over xDS</text>
-<rect x="660" y="176" width="300" height="66" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
-<text x="674" y="197" font-weight="600">Envoy proxy · envoy-gateway-system</text>
-<text x="674" y="214" font-family="IBM Plex Mono, monospace" font-size="11">envoy-gwapi-demo-eg-8fbae7fe</text>
-<text x="674" y="231">Service LoadBalancer 192.168.127.101:80</text>
-<line x1="810" y1="242" x2="810" y2="312" stroke="currentColor" stroke-width="1.3" marker-end="url(#c1)"/>
-<text x="820" y="282" fill="var(--muted)">traffic</text>
-<rect x="660" y="314" width="300" height="66" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
-<text x="674" y="335" font-weight="600">echo pods · gwapi-demo</text>
-<text x="674" y="352">10.217.0.146 and .147, port 8080</text>
-<text x="674" y="369" fill="var(--muted)">the proxy&#x27;s upstream: pod IPs</text>
-<text x="20" y="506" font-weight="600">You declare intent as objects; the controller turns them into a running proxy. Nobody edits an envoy.yaml.</text>
-<text x="20" y="526" fill="var(--muted)">Measured: HTTPRoute echo Accepted=True; the same route from gwapi-other is refused by allowedRoutes from: Same.</text>
+<text x="20" y="32" fill="var(--host)" font-weight="600">cluster operator</text>
+<text x="560" y="32" fill="var(--remote)" font-weight="600">application team</text>
+<rect x="20" y="44" width="340" height="140" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<line x1="20" y1="114" x2="360" y2="114" stroke="var(--host)" stroke-width="1.3"/>
+<text x="36" y="68" font-weight="600">GatewayClass</text>
+<text x="36" y="85">which controller</text>
+<text x="36" y="138" font-weight="600">Gateway</text>
+<text x="36" y="155">ports, TLS, who may attach</text>
+<rect x="560" y="100" width="340" height="84" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="574" y="121" font-weight="600">HTTPRoute</text>
+<text x="574" y="138">paths, backends</text>
+<text x="574" y="155">in THEIR namespace *</text>
+<line x1="560" y1="150" x2="362" y2="150" stroke="currentColor" stroke-width="1.3" marker-end="url(#c1)"/>
+<text x="460" y="142" text-anchor="middle" fill="var(--muted)">attaches</text>
+<text x="460" y="168" text-anchor="middle" fill="var(--muted)">(allowedRoutes)</text>
+<line x1="190" y1="184" x2="190" y2="254" stroke="currentColor" stroke-width="1.3" marker-end="url(#c1)"/>
+<text x="202" y="224" fill="var(--muted)">controller generates</text>
+<rect x="20" y="256" width="340" height="80" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="34" y="277" font-weight="600">Envoy Deployment</text>
+<text x="34" y="294">+ LoadBalancer Svc</text>
+<text x="34" y="311" fill="var(--muted)">(you do not edit)</text>
+<line x1="360" y1="296" x2="558" y2="296" stroke="currentColor" stroke-width="1.3" marker-end="url(#c1)"/>
+<rect x="560" y="272" width="340" height="48" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="574" y="301" font-weight="600">your Service</text>
+<text x="20" y="372" fill="var(--muted)">* only where the Gateway&#x27;s allowedRoutes admits it. This module&#x27;s Gateway says from: Same, so its HTTPRoute sits in</text>
+<text x="20" y="390" fill="var(--muted)">gwapi-demo beside it; a route from another namespace was measured Accepted=False, NotAllowedByListeners.</text>
   </g>
 </svg>
       </div>
-      <figcaption>The cluster operator owns the GatewayClass, EnvoyProxy, SCC grant and Gateway; the application team owns the HTTPRoute, accepted in the Gateway&#x27;s namespace and refused from another because allowedRoutes is from: Same. Envoy Gateway generates the proxy and its LoadBalancer Service.</figcaption>
+      <figcaption>The cluster operator owns the GatewayClass and the Gateway; the application team&#x27;s HTTPRoute attaches to it, subject to allowedRoutes; the controller generates the Envoy Deployment and LoadBalancer Service.</figcaption>
     </figure>
   </section>
 
@@ -136,61 +108,34 @@ a { color: var(--remote); }
     <h2>Two API groups, one controller</h2>
     <figure>
       <div class="fig-scroll">
-<svg viewBox="0 0 980 420" role="img" aria-label="Two API groups feed one controller: the standard gateway.networking.k8s.io group and Envoy Gateway&#x27;s own gateway.envoyproxy.io group. On Kubernetes you install both sets of CRDs; on OpenShift 4.19+ the Ingress Operator owns the standard set, so Envoy Gateway is installed without them: its own CRDs from gateway-crds-helm, then gateway-helm with crds.enabled=false.">
+<svg viewBox="0 0 800 410" role="img" aria-label="What you write falls into two API groups that the same Gateway controller, Envoy Gateway here, implements: Gateway, HTTPRoute and GRPCRoute in the standard gateway.networking.k8s.io API, portable across vendors; and EnvoyProxy, SecurityPolicy and the rest in the vendor extension group gateway.envoyproxy.io, Envoy Gateway only.">
   <defs><marker id="c2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="c2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
   <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
-<rect x="20" y="14" width="280" height="30" rx="6" fill="var(--none-wash)" stroke="var(--none)"/>
-<text x="160.0" y="34" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">WHAT YOU WRITE</text>
-<rect x="510" y="14" width="450" height="30" rx="6" fill="var(--none-wash)" stroke="var(--none)"/>
-<text x="735.0" y="34" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">WHO INSTALLS THE CRDs</text>
-<rect x="20" y="70" width="280" height="128" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
-<text x="34" y="91" font-weight="600" fill="var(--remote)">STANDARD API</text>
-<text x="34" y="108" font-family="IBM Plex Mono, monospace" font-size="12">gateway.networking.k8s.io</text>
-<text x="34" y="125">GatewayClass · Gateway</text>
-<text x="34" y="142">HTTPRoute · GRPCRoute</text>
-<text x="34" y="159">ReferenceGrant · BackendTLSPolicy</text>
-<text x="34" y="176" fill="var(--muted)">SIG-Network · same meaning in every vendor</text>
-<rect x="20" y="222" width="280" height="128" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
-<text x="34" y="243" fill="var(--host)" font-weight="600">VENDOR EXTENSIONS</text>
-<text x="34" y="260" font-family="IBM Plex Mono, monospace" font-size="12">gateway.envoyproxy.io</text>
-<text x="34" y="277">EnvoyProxy · Backend</text>
-<text x="34" y="294">ClientTrafficPolicy · SecurityPolicy</text>
-<text x="34" y="311">BackendTrafficPolicy · EnvoyPatchPolicy</text>
-<text x="34" y="328" fill="var(--muted)">Envoy Gateway only</text>
-<rect x="335" y="170" width="140" height="80" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
-<text x="349" y="191" font-weight="600">a Gateway</text>
-<text x="349" y="208" font-weight="600">controller</text>
-<text x="349" y="225" fill="var(--muted)">Envoy Gateway here</text>
-<path d="M300,134 H320 V200 H333" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#c2)"/>
-<path d="M300,286 H320 V220 H333" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#c2)"/>
-<text x="520" y="62" font-weight="600">Kubernetes</text>
-<text x="750" y="62" font-weight="600">OpenShift 4.19+</text>
-<rect x="510" y="70" width="220" height="128" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
-<text x="524" y="91" font-weight="600">you</text>
-<text x="524" y="108">gateway-helm installs both</text>
-<text x="524" y="125">CRD sets by default</text>
-<text x="524" y="142" font-family="IBM Plex Mono, monospace" font-size="11">crds.enabled=true</text>
-<rect x="740" y="70" width="220" height="128" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
-<text x="754" y="91" fill="var(--host)" font-weight="600">the platform</text>
-<text x="754" y="108">the Ingress Operator owns them;</text>
-<text x="754" y="125">an admission policy refuses</text>
-<text x="754" y="142">changes, even from cluster-admin</text>
-<text x="754" y="159" font-family="IBM Plex Mono, monospace" font-size="11">crds.enabled=false</text>
-<rect x="510" y="222" width="220" height="128" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
-<text x="524" y="243" font-weight="600">you</text>
-<text x="524" y="260">the same gateway-helm install</text>
-<text x="524" y="277" font-family="IBM Plex Mono, monospace" font-size="11">crds.enabled=true</text>
-<rect x="740" y="222" width="220" height="128" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
-<text x="754" y="243" font-weight="600">you</text>
-<text x="754" y="260">gateway-crds-helm, first</text>
-<text x="754" y="277" font-family="IBM Plex Mono, monospace" font-size="11">crds.envoyGateway.enabled=true</text>
-<text x="754" y="294" font-family="IBM Plex Mono, monospace" font-size="11">crds.gatewayAPI.enabled=false</text>
-<text x="20" y="386" font-weight="600">The owner differs in one cell only: on OpenShift 4.19+ the platform owns the standard CRDs, so Envoy Gateway must not install them.</text>
-<text x="20" y="406" fill="var(--muted)">Everything you write afterwards — GatewayClass, Gateway, HTTPRoute — is identical on both platforms.</text>
+<text x="20" y="30" font-weight="600">what YOU write</text>
+<text x="540" y="30" font-weight="600">who implements it</text>
+<rect x="20" y="44" width="300" height="80" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="34" y="65" font-weight="600">Gateway</text>
+<text x="34" y="82">HTTPRoute  /  GRPCRoute</text>
+<text x="34" y="99" font-family="IBM Plex Mono, monospace" font-size="12">gateway.networking.k8s.io</text>
+<path d="M320,84 H500 V186" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#c2)"/>
+<text x="516" y="104" font-weight="600" fill="var(--remote)">the STANDARD api</text>
+<text x="516" y="121" font-family="IBM Plex Mono, monospace" font-size="12">gateway.networking.k8s.io</text>
+<text x="516" y="138" fill="var(--muted)">portable across vendors</text>
+<rect x="380" y="188" width="240" height="60" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="394" y="209" font-weight="600">a Gateway controller</text>
+<text x="394" y="226" fill="var(--muted)">(Envoy Gateway here)</text>
+<rect x="20" y="312" width="300" height="80" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="34" y="333" font-weight="600">EnvoyProxy</text>
+<text x="34" y="350">SecurityPolicy   etc.</text>
+<text x="34" y="367" font-family="IBM Plex Mono, monospace" font-size="12">gateway.envoyproxy.io</text>
+<path d="M320,352 H500 V250" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#c2)"/>
+<text x="516" y="300" fill="var(--host)" font-weight="600">VENDOR extensions</text>
+<text x="516" y="317" font-family="IBM Plex Mono, monospace" font-size="12">gateway.envoyproxy.io</text>
+<text x="516" y="334" fill="var(--muted)">Envoy Gateway only</text>
   </g>
 </svg>
       </div>
-      <figcaption>The standard gateway.networking.k8s.io group and Envoy Gateway&#x27;s gateway.envoyproxy.io group are read by the same controller. Only who installs the standard CRDs differs: you on Kubernetes (gateway-helm, crds.enabled=true by default), the Ingress Operator on OpenShift 4.19+.</figcaption>
+      <figcaption>The standard gateway.networking.k8s.io API is portable across vendors; the gateway.envoyproxy.io extensions are Envoy Gateway only. One controller implements both.</figcaption>
     </figure>
   </section>
 </div>
