@@ -1,0 +1,93 @@
+# The smallest Envoy config that does something useful.
+#
+# Four nouns, and everything else in Envoy is a variation on them:
+#   LISTENER  a port Envoy accepts connections on
+#   FILTER    what it does with what arrives (here: speak HTTP, then route)
+#   ROUTE     which cluster a request should go to
+#   CLUSTER   a named group of upstream endpoints
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-config
+data:
+  envoy.yaml: |
+    # The admin interface. Not on the request path - it serves /stats,
+    # /config_dump, /ready and friends. Bound to 0.0.0.0 only because a
+    # readiness probe has to reach it from outside the pod; in production it
+    # belongs on 127.0.0.1 with a sidecar or a separate Service.
+    admin:
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+    # "static" means written here, in full. The alternative is dynamic
+    # configuration fetched from a control plane (xDS) - which is what the
+    # Gateway API controller in module 12 does on your behalf.
+    static_resources:
+
+      listeners:
+      - name: http_listener
+        address:
+          socket_address: { address: 0.0.0.0, port_value: 8080 }
+        filter_chains:
+        # A filter chain is what to do with a connection. One chain here,
+        # matching everything. Module 03 adds a second and chooses between them.
+        - filters:
+          # A NETWORK filter sees bytes. http_connection_manager is the one that
+          # turns bytes into HTTP requests; without it Envoy is an L4 proxy.
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: ingress_http      # prefixes this listener's stats
+              # Whether Envoy trusts the connection's source address and
+              # appends it to x-forwarded-for. It defaults to FALSE, and the
+              # consequence surprises people: without this, no XFF header
+              # appears at all and the backend cannot see the client.
+              #
+              # Measured both ways on this exact config:
+              #   false (default)  ->  x-request-id, x-envoy-expected-rq-timeout-ms
+              #   true             ->  ... plus x-forwarded-for and
+              #                        x-envoy-external-address
+              #
+              # true is right for an EDGE proxy, which is what this is. For a
+              # proxy behind another proxy it should stay false, or the address
+              # it appends is the hop in front of it rather than the client.
+              use_remote_address: true
+              access_log:
+              - name: envoy.access_loggers.stdout
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                  log_format:
+                    text_format_source:
+                      inline_string: "%REQ(:METHOD)% %REQ(X-ENVOY-ORIGINAL-PATH?:PATH)% -> %UPSTREAM_HOST% %RESPONSE_CODE% %DURATION%ms\n"
+              route_config:
+                name: local_route
+                virtual_hosts:
+                - name: everything
+                  domains: ["*"]           # any Host header
+                  routes:
+                  - match: { prefix: "/" }
+                    route: { cluster: echo_service }
+              http_filters:
+              # HTTP filters run in order on every request. `router` actually
+              # dispatches upstream, so it is ALWAYS last - anything after it
+              # would never run.
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      clusters:
+      - name: echo_service
+        # STRICT_DNS re-resolves the name on a timer and keeps one endpoint per
+        # address returned. Because svc/echo is headless, that is one endpoint
+        # per pod - which is what lets ROUND_ROBIN mean anything. Module 05
+        # measures what happens when it is not.
+        type: STRICT_DNS
+        lb_policy: ROUND_ROBIN
+        connect_timeout: 2s
+        load_assignment:
+          cluster_name: echo_service
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address: { address: echo, port_value: 8080 }

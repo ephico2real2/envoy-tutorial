@@ -30,8 +30,28 @@ summary() {
   return "$FAILED"
 }
 
-ns_ensure() { $KUBE get ns "$NS" >/dev/null 2>&1 || $KUBE create ns "$NS" >/dev/null; }
-wait_ready() { $KUBE rollout status "deploy/$1" -n "$NS" --timeout="${2:-180s}" >/dev/null; }
+# A namespace deleted with --wait=false is still Terminating for a while, and
+# creating objects in it fails with "object has been deleted". Wait it out
+# before recreating, or deploy races clean.
+ns_ensure() {
+  for _ in $(seq 1 60); do
+    phase=$($KUBE get ns "$NS" -o jsonpath='{.status.phase}' 2>/dev/null)
+    [ "$phase" = "Terminating" ] || break
+    sleep 2
+  done
+  $KUBE get ns "$NS" >/dev/null 2>&1 || $KUBE create ns "$NS" >/dev/null
+}
+
+# Fatal on failure. An earlier version swallowed the error and the caller went
+# on to print "up" over a namespace that had nothing in it - a green tick on a
+# broken deploy is worse than no check at all.
+wait_ready() {
+  if ! $KUBE rollout status "deploy/$1" -n "$NS" --timeout="${2:-180s}" >/dev/null 2>&1; then
+    bad "deploy/$1 never became ready in $NS"
+    $KUBE get pods -n "$NS" -l "app=$1" 2>/dev/null | sed 's/^/      /'
+    exit 1
+  fi
+}
 
 # Run a curl from inside the cluster. Nothing in these modules requires an
 # Ingress or a Route, so they work the same on kind as on OpenShift.
