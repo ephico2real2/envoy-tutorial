@@ -15,7 +15,8 @@ Every module is self-contained: its own namespace, its own manifests, its own
 | [`01-what-is-envoy`](01-what-is-envoy/README.md) | proxy vs reverse proxy; listener, filter, route, cluster | **done** |
 | [`02-the-config-file`](02-the-config-file/README.md) | the bootstrap config, field by field | **done** |
 | [`03-listeners-and-filter-chains`](03-listeners-and-filter-chains/README.md) | `filter_chain_match`, SNI, `tls_inspector` | **done** |
-| `04`–`11` | routing, load balancing, filters, gRPC, TLS, observability, resilience | to come |
+| [`04-routing`](04-routing/README.md) | match types, first match wins, rewrites, timeouts, redirects, `direct_response` | **done** |
+| `05`–`11` | load balancing, filters, gRPC, TLS, observability, resilience | to come |
 
 Module 12 is written first because it was the immediate need. The numbering is
 the reading order, not the build order.
@@ -37,8 +38,10 @@ or names the claim that failed.
 - **Options are explained, not just used.** Each module has a table of the
   fields it introduces: what the field does, its default, and when you would
   change it.
-- **Diagrams come in pairs** — a rendered figure and an ASCII twin, so the
-  content survives a terminal, a diff, and a screen reader.
+- **Diagrams come in pairs** — a rendered figure and a text twin, so the
+  content survives a terminal, a diff, and a screen reader. Each figure is
+  drawn from the module's manifests and measured output, and its source is in
+  [`docs/diagrams/`](docs/diagrams/).
 - **References are linked** so you can go deeper than the module goes.
 
 ## Tooling
