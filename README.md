@@ -8,12 +8,26 @@ Every module is self-contained: its own namespace, its own manifests, its own
 
 ## Modules
 
-| | Topic |
-|---|---|
-| `00-prerequisites` | what your cluster needs, and how to check |
-| `12-gateway-api` | Envoy Gateway, the Gateway API, `GRPCRoute`, TLS from cert-manager |
+| | Topic | State |
+|---|---|---|
+| [`12-gateway-api`](12-gateway-api/README.md) | Envoy Gateway, `Gateway`, `HTTPRoute`, and the two OpenShift traps that block them | **done** |
+| `00-prerequisites` | what your cluster needs, and how to check | to come |
+| `01-what-is-envoy` | proxy vs reverse proxy; listener, filter, route, cluster | to come |
+| `02-the-config-file` | the bootstrap config, field by field | to come |
+| `03-listeners-and-filter-chains` | `filter_chain_match`, SNI, `tls_inspector` | to come |
+| `04`–`11` | routing, load balancing, filters, gRPC, TLS, observability, resilience | to come |
 
-*(modules 01–11 are in progress — see the repository history)*
+Module 12 is written first because it was the immediate need. The numbering is
+the reading order, not the build order.
+
+Every module runs on its own: its own namespace, its own manifests, and
+
+```bash
+./run.sh deploy | verify | clean
+```
+
+`verify` is a set of assertions, not a wall of output — a module either passes
+or names the claim that failed.
 
 ## How this tutorial is written
 

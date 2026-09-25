@@ -192,9 +192,10 @@ oc get pod -n envoy-gateway-system -l control-plane=envoy-gateway \
 # runAsUser=1001110000
 ```
 
-## Step 4 — the same Gateway resources as anywhere else
+## Step 4 — a Gateway, and the two things that block it
 
-From here nothing is OpenShift-specific. That is the point of a standard API.
+The controller running is not the same as a Gateway working. Both of the
+following bit on a real cluster, and neither is mentioned in the upstream docs.
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -203,16 +204,130 @@ metadata:
   name: eg
 spec:
   controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:                      # how the proxy's pod spec is customised
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: openshift-scc
+    namespace: envoy-gateway-system
 ```
 
-`controllerName` must be exactly that string. OpenShift's own Gateway controller
-answers to `openshift.io/gateway-controller/v1` and **ignores** anything else, so
-the two implementations coexist without fighting.
+`controllerName` must be exactly that string. OpenShift's own controller answers
+to `openshift.io/gateway-controller/v1` and ignores anything else, so the two
+coexist. Verified: `accepted=True reason=Accepted`.
 
-> The proxy pods a `Gateway` creates hit the same SCC rule. If they are refused,
-> patch them with the `EnvoyProxy` CRD (`gateway.envoyproxy.io/v1alpha1`)
-> referenced from `spec.infrastructure.parametersRef` on the Gateway — the same
-> "do not pin a UID" idea, applied to the data plane.
+### Blocker 1 — the proxy pod, again, and the Helm fix does not reach it
+
+Envoy Gateway **generates** the proxy Deployment, so there is no YAML to edit.
+The `EnvoyProxy` resource is the supported way in, and the pod-level fix works:
+
+```yaml
+envoyDeployment:
+  pod:
+    securityContext:
+      runAsNonRoot: true
+      seccompProfile: { type: RuntimeDefault }
+```
+
+```console
+$ oc get deploy envoy-gwapi-demo-eg-... -o jsonpath='{.spec.template.spec.securityContext}'
+pod.runAsUser=      pod.fsGroup=      pod.runAsNonRoot=true      # cleared
+```
+
+**But the containers keep theirs**, and the pod is still refused:
+
+```text
+restricted-v2: .containers[0].runAsUser: Invalid value: 65532  (envoy)
+restricted-v2: .containers[1].runAsUser: Invalid value: 65532  (shutdown-manager)
+```
+
+`shutdown-manager`'s security context is hardcoded upstream
+([envoyproxy/gateway#4881](https://github.com/envoyproxy/gateway/issues/4881)),
+so no amount of `EnvoyProxy` tuning clears it.
+
+**The fix is an SCC grant, and `nonroot-v2` is the right one.** It permits a
+specific non-root UID while still forbidding root — unlike `anyuid`:
+
+```console
+$ oc get scc nonroot-v2 -o jsonpath='{.runAsUser.type} {.allowPrivilegeEscalation}'
+MustRunAsNonRoot false          # a non-root uid is fine; root is not
+$ oc get scc anyuid     -o jsonpath='{.runAsUser.type} {.allowPrivilegeEscalation}'
+RunAsAny true                   # permits root. Do not reach for this.
+```
+
+```bash
+SA=$(oc get deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg \
+      -o jsonpath='{.items[0].spec.template.spec.serviceAccountName}')
+oc adm policy add-scc-to-user nonroot-v2 -z "$SA" -n envoy-gateway-system
+oc rollout restart deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg
+```
+
+```text
+envoy-gwapi-demo-eg-8fbae7fe-6cfd6b4bbc-kxl7m   2/2   Running
+```
+
+The grant is per-Gateway, because each Gateway gets its own ServiceAccount.
+
+### Blocker 2 — "no available IPs" does not mean the pool is full
+
+With the proxy running, the Gateway was still not programmed:
+
+```text
+Accepted=True    The Gateway has been scheduled by Envoy Gateway
+Programmed=False AddressNotAssigned: No addresses have been assigned
+```
+```text
+Warning AllocationFailed service/envoy-...  Failed to allocate IP: no available IPs
+```
+
+The pool had 20 free addresses. The real cause:
+
+```console
+$ oc get ipaddresspool -A -o custom-columns=NAME:.metadata.name,AUTO:.spec.autoAssign
+NAME          AUTO
+mongot-pool   false
+```
+
+**`autoAssign: false` means the pool never volunteers.** A Service must name it.
+Read the message as "no pool volunteered", not "no addresses left".
+
+```yaml
+envoyService:
+  type: LoadBalancer
+  annotations:
+    metallb.universe.tf/address-pool: mongot-pool
+```
+
+```text
+LoadBalancer IP: 192.168.127.101
+programmed=True  address=192.168.127.101
+```
+
+### Proof it carries traffic
+
+```console
+$ curl -s http://192.168.127.101/hello
+{
+  "served_by": "echo-f8fc6d5c9-qnx4z",
+  "method": "GET",
+  "path": "/hello",
+  "headers": {
+    "host": "192.168.127.101",
+    "x-forwarded-for": "10.217.0.150",
+    "x-forwarded-proto": "http",
+    "x-envoy-external-address": "10.217.0.150",
+    "x-request-id": "a9e3262e-13c8-419c-8fc0-5f1fd129ead2"
+  }
+}
+```
+
+The `x-envoy-*` headers and `x-request-id` are Envoy's fingerprint — the backend
+never set them. And it balances:
+
+```console
+$ for i in $(seq 1 10); do curl -s http://192.168.127.101/ | grep served_by; done | sort | uniq -c
+   4   "served_by": "echo-f8fc6d5c9-jx6lh"
+   6   "served_by": "echo-f8fc6d5c9-qnx4z"
+```
 
 ## Uninstall
 
@@ -234,7 +349,8 @@ oc get crd -o name | grep gateway.envoyproxy.io | xargs -r oc delete
 | `runAsUser: Invalid value: 65532` | chart default UID outside the namespace range | same |
 | Controller crash-loops mentioning `BackendTLSPolicy` | platform CRD bundle lacks it | confirm step 0; upgrade Envoy Gateway |
 | `GatewayClass` never `Accepted` | wrong `controllerName` | exactly `gateway.envoyproxy.io/gatewayclass-controller` |
-| Gateway address empty | no LoadBalancer | MetalLB, or use a Route to the generated Service |
+| Gateway address empty, "no available IPs" | the IPAddressPool has `autoAssign: false` | annotate the Service `metallb.universe.tf/address-pool: <pool>` |
+| Proxy pod refused, `runAsUser: 65532` | container security contexts are not cleared by `EnvoyProxy`; shutdown-manager's is hardcoded | `oc adm policy add-scc-to-user nonroot-v2 -z <proxy-sa> -n envoy-gateway-system` |
 
 ## What was verified, and when
 
@@ -245,6 +361,7 @@ oc get crd -o name | grep gateway.envoyproxy.io | xargs -r oc delete
 | Envoy Gateway | v1.9.1 via Helm v4.3.0 |
 | Namespace UID range | `1001110000/10000` |
 | Assigned UID | `1001110000` |
+| Gateway address | `192.168.127.101` (MetalLB) |
 | Date | 2026-09-24 |
 
 ## References

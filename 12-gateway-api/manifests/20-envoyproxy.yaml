@@ -1,0 +1,41 @@
+# The data-plane equivalent of the Helm values used to install the controller.
+#
+# Envoy Gateway generates the proxy Deployment itself, so there is no YAML to
+# edit - this resource is the supported way to influence it. On OpenShift the
+# generated pod would otherwise carry the upstream default UID 65532, which
+# restricted-v2 refuses because it is outside the namespace's assigned range.
+#
+# As with the controller, the fix is to REMOVE the pinned ids rather than to
+# grant anyuid: runAsNonRoot stays true and OpenShift allocates a compliant uid.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: openshift-scc
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyDeployment:
+        pod:
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+        container:
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+      envoyService:
+        type: LoadBalancer
+        # This cluster's IPAddressPool has autoAssign: false, so MetalLB will
+        # not hand out an address unless a Service asks for that pool by name.
+        # Without this the Service sits <pending> and the Gateway reports
+        #   Programmed=False  AddressNotAssigned
+        # while the event log says "no available IPs" - which sounds like an
+        # exhausted pool but means "no pool volunteered".
+        #   oc get ipaddresspool -A -o custom-columns=NAME:.metadata.name,AUTO:.spec.autoAssign
+        annotations:
+          metallb.universe.tf/address-pool: mongot-pool

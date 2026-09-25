@@ -1,0 +1,41 @@
+# Shared helpers. Every module's run.sh sources this, so a reader learns one
+# set of commands rather than thirteen.
+#
+#   ./run.sh deploy | verify | clean
+#
+# NS defaults to the module's own namespace so modules never collide and any
+# one of them can be run on its own.
+set -uo pipefail
+: "${KUBECONFIG:=$HOME/.crc/machines/crc/kubeconfig}"
+export KUBECONFIG
+KUBE=$(command -v oc >/dev/null 2>&1 && echo oc || echo kubectl)
+
+say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
+ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
+bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; }
+
+# assert <description> <expected> <actual>
+# Verification is a set of assertions rather than a wall of output, so a module
+# either passes or tells you exactly which claim failed.
+FAILED=0
+assert() {
+  if [ "$2" = "$3" ]; then ok "$1"
+  else bad "$1 — expected [$2], got [$3]"; FAILED=$((FAILED+1)); fi
+}
+assert_contains() {
+  case "$3" in (*"$2"*) ok "$1" ;; (*) bad "$1 — [$3] does not contain [$2]"; FAILED=$((FAILED+1)) ;; esac
+}
+summary() {
+  if [ "$FAILED" -eq 0 ]; then say "all checks passed"; else say "$FAILED check(s) failed"; fi
+  return "$FAILED"
+}
+
+ns_ensure() { $KUBE get ns "$NS" >/dev/null 2>&1 || $KUBE create ns "$NS" >/dev/null; }
+wait_ready() { $KUBE rollout status "deploy/$1" -n "$NS" --timeout="${2:-180s}" >/dev/null; }
+
+# Run a curl from inside the cluster. Nothing in these modules requires an
+# Ingress or a Route, so they work the same on kind as on OpenShift.
+incluster_curl() {
+  $KUBE run "curl-$RANDOM" -n "$NS" --rm -i --restart=Never --quiet \
+    --image=curlimages/curl:8.11.1 -- -sS --max-time 10 "$@" 2>/dev/null
+}

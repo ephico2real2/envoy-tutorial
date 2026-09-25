@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gwapi-demo
+---
+# A Gateway is a request for a listener. Envoy Gateway answers it by creating a
+# Deployment and a Service of its own in envoy-gateway-system - you do not
+# write those, and should not edit them.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: gwapi-demo
+spec:
+  gatewayClassName: eg
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    allowedRoutes:
+      # Routes may only attach from this namespace. The default is Same, but
+      # stating it makes the trust boundary explicit rather than implied.
+      namespaces:
+        from: Same

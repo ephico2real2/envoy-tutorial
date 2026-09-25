@@ -1,0 +1,17 @@
+# The GatewayClass names the controller that should serve it. A controller
+# ignores any GatewayClass that does not name it, which is how two
+# implementations coexist on one cluster - OpenShift's own controller answers
+# to openshift.io/gateway-controller/v1 and will not touch this one.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  # parametersRef points at an EnvoyProxy, which is how the proxy's own pod
+  # spec is customised. On OpenShift that is not optional - see 20-envoyproxy.
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: openshift-scc
+    namespace: envoy-gateway-system
