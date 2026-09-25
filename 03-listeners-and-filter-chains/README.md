@@ -12,22 +12,27 @@ That is why SNI selects a chain and the `Host` header cannot.
 
 ## Two ways to say "route by name"
 
+<!-- markdownlint-disable MD033 -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/03-listeners-and-filter-chains/chain-vs-vhost.dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/03-listeners-and-filter-chains/chain-vs-vhost.light.png">
+  <img alt="A connection passes five stages in order. The filter chain is chosen at stage two, before TLS is terminated and before HTTP exists, so it sees SNI but not Host; the virtual host is chosen at stage five, after HTTP is parsed." src="../docs/diagrams/03-listeners-and-filter-chains/chain-vs-vhost.light.png">
+</picture>
+<!-- markdownlint-enable MD033 -->
+
+*Both listeners in this module, stage by stage. Everything above the dashed
+line happens before HTTP exists.*
+
 ```text
-  ┌─ TCP connection arrives ──────────────────────────────────────┐
-  │                                                               │
-  │  1. listener_filters run        tls_inspector peeks at the    │
-  │                                 ClientHello and reads SNI     │
-  │                                                               │
-  │  2. filter_chain_match          ← SNI available here          │
-  │     picks ONE chain                Host header is NOT         │
-  │                                                               │
-  │  3. transport_socket             the chain's own certificate  │
-  │     terminates TLS                                            │
-  │                                                               │
-  │  4. http_connection_manager      now there is HTTP            │
-  │                                                               │
-  │  5. virtual_hosts match domains ← Host header available here  │
-  └───────────────────────────────────────────────────────────────┘
+  stage                        :8080 plaintext                 :8443 TLS
+  ① listener_filters           none                            tls_inspector reads SNI
+  ② filter_chain_match         one chain, no match block       server_names → sni-shop | sni-admin
+     sees SNI, not Host                                        unknown SNI → no chain → handshake fails
+  ③ transport_socket           none                            the chain's own cert (shop.crt | admin.crt)
+  ─── HTTP exists only below this line — the Host header can be read ───────────────────────
+  ④ http_connection_manager    route_config by_host            one per chain: shop_tls | admin_tls
+  ⑤ virtual_hosts.domains      shop | admin | * → 404          one vhost per chain, domains ["*"]
+     sees Host, path, headers
 ```
 
 | | `filter_chain_match` | `virtual_hosts.domains` |
@@ -36,7 +41,7 @@ That is why SNI selects a chain and the `Host` header cannot.
 | can see | SNI, source/destination IP, port, ALPN | `Host`, path, headers, method |
 | cannot see | anything HTTP | anything pre-TLS |
 | picks | a whole chain, including its certificate | a route |
-| on no match | connection closed | the `["*"]` vhost, or 404 |
+| on no match | connection closed — for TLS the handshake fails (curl exit 35, `no_filter_chain_match` counted) | the `["*"]` vhost, or 404 |
 
 Reaching for `filter_chain_match` to select on a hostname is the classic
 mistake. It works for **TLS** traffic, because SNI carries the name — and fails
@@ -156,3 +161,9 @@ Envoy rejects the config rather than guessing.
 - [TLS Inspector](https://www.envoyproxy.io/docs/envoy/latest/configuration/listeners/listener_filters/tls_inspector)
 - [`FilterChainMatch` and its precedence](https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/listener/v3/listener_components.proto#config-listener-v3-filterchainmatch)
 - [OpenShift — passthrough Routes](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/ingress_and_load_balancing/configuring-routes)
+
+## Diagram sources
+
+The figures are rendered from [`docs/diagrams/03-listeners-and-filter-chains/source.html`](../docs/diagrams/03-listeners-and-filter-chains/source.html)
+(inline SVG, light and dark). The picture, its text twin and the page change
+together; re-render with the `/visual` skill's `render.py`.

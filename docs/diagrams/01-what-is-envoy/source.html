@@ -1,0 +1,170 @@
+<title>Envoy Four Nouns</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 01 · what Envoy is</div>
+    <h1>The four nouns, and one request through them</h1>
+    <p class="lede">Drawn from <code>01-what-is-envoy/manifests/10-envoy-config.yaml</code>; the request figure's headers and the 5 / 7 split were measured in namespace <code>envoy-01</code>.</p>
+  </header>
+
+  <section>
+    <h2>The four nouns</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 458" role="img" aria-label="Every Envoy config nests the same four nouns: a listener holds a filter chain, whose http_connection_manager holds the routes; the router filter sends a matched request to a cluster, which is defined beside the listener and referenced by name.">
+  <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="a1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="20" y="16" width="640" height="360" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="34" y="37" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">LISTENER · http_listener</text>
+<text x="34" y="54">0.0.0.0:8080 — a port Envoy accepts connections on</text>
+<rect x="40" y="70" width="600" height="290" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="54" y="91" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">FILTER CHAIN · the only one</text>
+<text x="54" y="108">no filter_chain_match, so every connection on :8080 gets it</text>
+<rect x="60" y="124" width="560" height="220" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="74" y="145" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">NETWORK FILTER · http_connection_manager</text>
+<text x="74" y="162">turns the bytes on the connection into HTTP requests</text>
+<rect x="80" y="178" width="290" height="150" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="94" y="199" font-family="IBM Plex Mono, monospace" font-size="12">route_config local_route</text>
+<text x="94" y="216" font-family="IBM Plex Mono, monospace" font-size="12">virtual_host everything</text>
+<text x="94" y="233" font-family="IBM Plex Mono, monospace" font-size="12">domains: [&quot;*&quot;]</text>
+<rect x="96" y="246" width="258" height="72" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="110" y="267" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">ROUTE</text>
+<text x="110" y="284" font-family="IBM Plex Mono, monospace" font-size="12">match: prefix &quot;/&quot;</text>
+<text x="110" y="301" font-family="IBM Plex Mono, monospace" font-size="12">route: cluster echo_service</text>
+<rect x="390" y="178" width="214" height="150" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="404" y="199" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">HTTP FILTER · router</text>
+<text x="404" y="216" font-family="IBM Plex Mono, monospace" font-size="12">envoy.filters.http.router</text>
+<text x="404" y="233" fill="var(--muted)">the last HTTP filter: picks</text>
+<text x="404" y="250" fill="var(--muted)">the route and forwards</text>
+<line x1="354" y1="282" x2="388" y2="282" stroke="currentColor" stroke-width="1.3" marker-end="url(#a1)"/>
+<rect x="730" y="178" width="230" height="104" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="744" y="199" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">CLUSTER · echo_service</text>
+<text x="744" y="216" font-family="IBM Plex Mono, monospace" font-size="12">type: STRICT_DNS</text>
+<text x="744" y="233" font-family="IBM Plex Mono, monospace" font-size="12">endpoint echo:8080</text>
+<text x="744" y="250" font-family="IBM Plex Mono, monospace" font-size="12">lb_policy: ROUND_ROBIN</text>
+<text x="730" y="146" fill="var(--muted)">static_resources.clusters —</text>
+<text x="730" y="163" fill="var(--muted)">a sibling of the listener, not inside it</text>
+<line x1="604" y1="230" x2="728" y2="230" stroke="currentColor" stroke-width="1.3" marker-end="url(#a1)"/>
+<text x="666" y="222" fill="var(--muted)">by name</text>
+<rect x="730" y="312" width="110" height="40" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="744" y="337">echo pod</text>
+<rect x="850" y="312" width="110" height="40" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="864" y="337">echo pod</text>
+<line x1="800" y1="282" x2="785" y2="310" stroke="currentColor" stroke-width="1.3" marker-end="url(#a1)"/>
+<line x1="890" y1="282" x2="905" y2="310" stroke="currentColor" stroke-width="1.3" marker-end="url(#a1)"/>
+<text x="730" y="372" fill="var(--muted)">Service clusterIP: None, so DNS</text>
+<text x="730" y="389" fill="var(--muted)">returns both pod IPs</text>
+<text x="20" y="424" font-weight="600">Read it as a sentence: accept on :8080, speak HTTP, match &quot;/&quot;, send it to echo_service.</text>
+<text x="20" y="444" fill="var(--muted)">Every name is from 01-what-is-envoy/manifests/10-envoy-config.yaml.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>Every Envoy config nests the same four nouns: a listener holds a filter chain, whose http_connection_manager holds the routes; the router filter sends a matched request to a cluster, defined beside the listener and referenced by name.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>One request</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 500" role="img" aria-label="One request through Envoy: curl sends three headers; Envoy matches route / to cluster echo_service, picks one of two pods round-robin, and forwards the request with five added headers; the echo pod reports what it received, and the response returns through Envoy to curl.">
+  <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="a2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="20" y="14" width="210" height="30" rx="6" fill="var(--none-wash)" stroke="var(--none)"/>
+<text x="125.0" y="34" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">CLIENT · curl pod</text>
+<rect x="270" y="14" width="370" height="30" rx="6" fill="var(--remote-wash)" stroke="var(--remote)"/>
+<text x="455.0" y="34" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--remote)">ENVOY · envoy-01</text>
+<rect x="680" y="14" width="280" height="30" rx="6" fill="var(--host-wash)" stroke="var(--host)"/>
+<text x="820.0" y="34" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--host)">UPSTREAM · echo, 2 pods</text>
+<line x1="125" y1="44" x2="125" y2="420" stroke="var(--rule)" stroke-width="1.3"/>
+<line x1="455" y1="44" x2="455" y2="420" stroke="var(--rule)" stroke-width="1.3"/>
+<line x1="820" y1="44" x2="820" y2="420" stroke="var(--rule)" stroke-width="1.3"/>
+<text x="140" y="70" font-family="IBM Plex Mono, monospace" font-size="12">① GET /direct</text>
+<text x="140" y="87" fill="var(--muted)">3 headers: host, user-agent, accept</text>
+<line x1="125" y1="124" x2="298" y2="124" stroke="currentColor" stroke-width="1.3" marker-end="url(#a2)"/>
+<rect x="300" y="100" width="310" height="90" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="314" y="121" font-weight="600">② route &quot;/&quot; → cluster echo_service</text>
+<text x="314" y="138">ROUND_ROBIN picks one of 2 pod IPs</text>
+<text x="314" y="155">adds 5 headers to the request it sends</text>
+<text x="314" y="172" fill="var(--muted)">use_remote_address: true adds two of them</text>
+<text x="470" y="238" font-weight="600">③ the same request, plus:</text>
+<line x1="455" y1="250" x2="770" y2="250" stroke="currentColor" stroke-width="1.3" marker-end="url(#a2)"/>
+<text x="470" y="272" font-family="IBM Plex Mono, monospace" font-size="12">x-forwarded-for · x-forwarded-proto</text>
+<text x="470" y="289" font-family="IBM Plex Mono, monospace" font-size="12">x-envoy-external-address · x-request-id</text>
+<text x="470" y="306" font-family="IBM Plex Mono, monospace" font-size="12">x-envoy-expected-rq-timeout-ms: 15000</text>
+<rect x="772" y="232" width="128" height="124" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="786" y="253" font-weight="600">echo pod</text>
+<text x="786" y="270" fill="var(--muted)">1 of 2</text>
+<text x="786" y="287">reports the</text>
+<text x="786" y="304">request it got</text>
+<text x="470" y="334">④ 200 · JSON listing every header it received</text>
+<line x1="772" y1="346" x2="455" y2="346" stroke="currentColor" stroke-width="1.3" marker-end="url(#a2)"/>
+<text x="140" y="374" fill="var(--remote)" font-weight="600">⑤ 200 · shows 5 headers curl never sent</text>
+<line x1="455" y1="386" x2="125" y2="386" stroke="currentColor" stroke-width="1.3" marker-end="url(#a2)"/>
+<text x="20" y="448" font-weight="600">The response comes back through Envoy. The five headers were added to the request, and the app echoes them.</text>
+<text x="20" y="468" fill="var(--muted)">Measured: 12 requests split 5 / 7 across the two pods. With use_remote_address: false (the default),</text>
+<text x="20" y="488" fill="var(--muted)">x-forwarded-for and x-envoy-external-address are not added.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>One request through Envoy: the route picks a cluster, round-robin picks a pod, and Envoy adds five headers to the request it forwards. The response returns through Envoy; the app only echoes what it received.</figcaption>
+    </figure>
+  </section>
+</div>

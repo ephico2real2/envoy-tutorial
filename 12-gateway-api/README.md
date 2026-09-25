@@ -19,23 +19,31 @@ That last row is the point. A single `envoy.yaml` is a contention point — ever
 team that wants a route edits the same file. The Gateway API splits it along
 the line the org already has.
 
+<!-- markdownlint-disable MD033 -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/12-gateway-api/ownership.dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/12-gateway-api/ownership.light.png">
+  <img alt="The cluster operator owns the GatewayClass, EnvoyProxy, SCC grant and Gateway; the application team owns the HTTPRoute, accepted in the Gateway's namespace and refused from another because allowedRoutes is from: Same. Envoy Gateway generates the proxy and its LoadBalancer Service." src="../docs/diagrams/12-gateway-api/ownership.light.png">
+</picture>
+<!-- markdownlint-enable MD033 -->
+
+*The objects this module creates, who owns each, and what the controller
+generates from them. Route acceptance, proxy placement and the SCC were read
+from the running cluster.*
+
 ```text
-  cluster operator                      application team
-  ┌────────────────────┐                ┌────────────────────┐
-  │ GatewayClass       │                │ HTTPRoute          │
-  │  which controller  │                │  paths, backends   │
-  ├────────────────────┤                │  in THEIR namespace│
-  │ Gateway            │◀── attaches ───┤                    │
-  │  ports, TLS, who   │   (allowedRoutes) └──────────────────┘
-  │  may attach        │
-  └─────────┬──────────┘
-            │ controller generates
-            ▼
-  ┌────────────────────┐        ┌────────────────────┐
-  │ Envoy Deployment   │───────▶│ your Service       │
-  │ + LoadBalancer Svc │        └────────────────────┘
-  │ (you do not edit)  │
-  └────────────────────┘
+  CLUSTER OPERATOR                    APPLICATION TEAM                  GENERATED — do not edit
+  GatewayClass eg                                                       envoy-gateway (controller)
+    └─ parametersRef ─▶ EnvoyProxy                                        │ generates, then
+       openshift-scc: LB Service on                                       │ configures over xDS
+       mongot-pool, securityContext                                       ▼
+  SCC grant nonroot-v2                                                  Envoy proxy + Service
+    to the proxy's ServiceAccount                                       LoadBalancer
+  Gateway eg · gwapi-demo       ◀──── HTTPRoute echo · gwapi-demo       192.168.127.101:80
+    listener http :80                  Accepted=True                      │ traffic
+    allowedRoutes from: Same    ◀─╳── HTTPRoute probe · gwapi-other       ▼
+    192.168.127.101                    Accepted=False                   echo pods · gwapi-demo
+                                       NotAllowedByListeners            10.217.0.146, .147 :8080
 ```
 
 ## Setup
@@ -122,3 +130,9 @@ Both are in [`setup/openshift.md`](setup/openshift.md) with the real output.
 - [Envoy Gateway](https://gateway.envoyproxy.io/)
 - [`EnvoyProxy` API](https://gateway.envoyproxy.io/docs/api/extension_types/#envoyproxy)
 - [MetalLB — IPAddressPool](https://metallb.universe.tf/configuration/)
+
+## Diagram sources
+
+The figures are rendered from [`docs/diagrams/12-gateway-api/source.html`](../docs/diagrams/12-gateway-api/source.html)
+(inline SVG, light and dark). The picture, its text twin and the page change
+together; re-render with the `/visual` skill's `render.py`.

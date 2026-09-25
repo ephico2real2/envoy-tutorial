@@ -25,34 +25,61 @@ Envoy is used as a reverse proxy here, and in almost every Kubernetes context.
 Open `manifests/10-envoy-config.yaml` alongside this. Every Envoy config is
 these four, nested:
 
+<!-- markdownlint-disable MD033 -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/01-what-is-envoy/four-nouns.dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/01-what-is-envoy/four-nouns.light.png">
+  <img alt="Every Envoy config nests the same four nouns: a listener holds a filter chain, whose http_connection_manager holds the routes; the router filter sends a matched request to a cluster, defined beside the listener and referenced by name." src="../docs/diagrams/01-what-is-envoy/four-nouns.light.png">
+</picture>
+<!-- markdownlint-enable MD033 -->
+
+*The nesting of `manifests/10-envoy-config.yaml`. The cluster sits beside the
+listener, not inside it; the route refers to it by name.*
+
 ```text
-  LISTENER            a port Envoy accepts connections on
-    └── FILTER CHAIN  what to do with a connection that arrives
-          └── FILTERS  network filters see bytes;
-                       http_connection_manager turns them into requests
-                └── ROUTES    which cluster a request belongs to
-                        │
-                        ▼
-  CLUSTER             a named group of upstream endpoints
+  LISTENER  http_listener · 0.0.0.0:8080       a port Envoy accepts connections on
+    └── FILTER CHAIN  (the only one)           no filter_chain_match: every connection gets it
+          └── NETWORK FILTER  http_connection_manager    bytes → HTTP requests
+                ├── route_config local_route
+                │     └── virtual_host everything, domains ["*"]
+                │           └── ROUTE  match prefix "/"  →  cluster echo_service
+                └── http_filters
+                      └── router         the last filter: picks the route, forwards
+                                                  │ by name
+                                                  ▼
+  CLUSTER  echo_service   (static_resources.clusters — a sibling of the listener)
+           STRICT_DNS echo:8080 · ROUND_ROBIN  →  echo pod, echo pod
 ```
 
 Read it as a sentence: *accept on this port, speak HTTP, match this path, send
 it to that cluster.*
 
+<!-- markdownlint-disable MD033 -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/01-what-is-envoy/request-path.dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/01-what-is-envoy/request-path.light.png">
+  <img alt="One request through Envoy: the route picks a cluster, round-robin picks a pod, and Envoy adds five headers to the request it forwards. The response returns through Envoy; the app only echoes what it received." src="../docs/diagrams/01-what-is-envoy/request-path.light.png">
+</picture>
+<!-- markdownlint-enable MD033 -->
+
+*The response comes back **through** Envoy, and the five headers are added to
+the **request** Envoy forwards — the app only echoes what it received.*
+
 ```text
-   curl                    ENVOY                         echo
-    │                ┌──────────────────┐
-    │  GET /hello    │ listener :8080   │
-    ├───────────────▶│  filter_chain    │
-    │                │   hcm            │
-    │                │    route "/" ────┼──▶ cluster echo_service
-    │                │                  │      STRICT_DNS
-    │                └──────────────────┘      ROUND_ROBIN
-    │                                            │      │
-    │                                            ▼      ▼
-    │                                         echo-1  echo-2
-    │◀───────────────────────────────────────────┘
-       200, plus headers the app never set
+   curl                      ENVOY  (envoy-01)                      echo pod (1 of 2)
+    │ ① GET /direct              │                                      │
+    │   host, user-agent, accept │                                      │
+    ├───────────────────────────▶│ ② route "/" → cluster echo_service   │
+    │                            │   ROUND_ROBIN picks one of 2 pod IPs │
+    │                            │ ③ same request + x-forwarded-for,    │
+    │                            │   x-forwarded-proto, x-request-id,   │
+    │                            │   x-envoy-external-address,          │
+    │                            │   x-envoy-expected-rq-timeout-ms     │
+    │                            ├─────────────────────────────────────▶│
+    │                            │◀─────────────────────────────────────┤
+    │                            │ ④ 200, JSON listing every header     │
+    │◀───────────────────────────┤                                      │
+    │ ⑤ 200: shows 5 headers curl never sent                            │
 ```
 
 ## Run it
@@ -179,3 +206,9 @@ gets its own module. The config here is the smallest thing that is still real.
 - [HTTP connection manager](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/http_conn_man)
 - [`use_remote_address` and XFF](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers#x-forwarded-for)
 - [The admin interface](https://www.envoyproxy.io/docs/envoy/latest/operations/admin)
+
+## Diagram sources
+
+The figures are rendered from [`docs/diagrams/01-what-is-envoy/source.html`](../docs/diagrams/01-what-is-envoy/source.html)
+(inline SVG, light and dark). The picture, its text twin and the page change
+together; re-render with the `/visual` skill's `render.py`.

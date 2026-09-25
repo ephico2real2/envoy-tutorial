@@ -28,24 +28,33 @@ whether Envoy Gateway, Istio, NGINX or Cilium implements it. The
 API has no vocabulary for — retry budgets, the proxy's own pod spec, WASM
 extensions.
 
+<!-- markdownlint-disable MD033 -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../docs/diagrams/12-gateway-api/api-groups.dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="../../docs/diagrams/12-gateway-api/api-groups.light.png">
+  <img alt="The standard gateway.networking.k8s.io group and Envoy Gateway's gateway.envoyproxy.io group are read by the same controller. Only who installs the standard CRDs differs: you on Kubernetes, the Ingress Operator on OpenShift 4.19+." src="../../docs/diagrams/12-gateway-api/api-groups.light.png">
+</picture>
+<!-- markdownlint-enable MD033 -->
+
+*Two API groups, one controller. The chart flags are the v1.9.1 defaults, read
+with `helm show values`.*
+
 ```text
-       what YOU write                      who implements it
-  ┌──────────────────────────┐
-  │ Gateway                  │ ─────────┐
-  │ HTTPRoute  /  GRPCRoute  │          │   the STANDARD api
-  │ gateway.networking.k8s.io│          │   gateway.networking.k8s.io
-  └──────────────────────────┘          │   portable across vendors
-                                        ▼
-                             ┌─────────────────────────┐
-                             │  a Gateway controller   │
-                             │  (Envoy Gateway here)   │
-                             └─────────────────────────┘
-                                        ▲
-  ┌──────────────────────────┐          │   VENDOR extensions
-  │ EnvoyProxy               │ ─────────┘   gateway.envoyproxy.io
-  │ SecurityPolicy   etc.    │              Envoy Gateway only
-  │ gateway.envoyproxy.io    │
-  └──────────────────────────┘
+  WHAT YOU WRITE                                     read by
+  STANDARD API  gateway.networking.k8s.io        ──┐
+    GatewayClass · Gateway · HTTPRoute · GRPCRoute │
+    ReferenceGrant · BackendTLSPolicy              ├──▶ a Gateway controller
+  VENDOR EXTENSIONS  gateway.envoyproxy.io       ──┘    (Envoy Gateway here)
+    EnvoyProxy · Backend · ClientTrafficPolicy
+    SecurityPolicy · BackendTrafficPolicy · EnvoyPatchPolicy
+
+  WHO INSTALLS THE CRDs   Kubernetes                     OpenShift 4.19+
+  standard API            you — gateway-helm,            THE PLATFORM — Ingress Operator;
+                          crds.enabled=true (default)    an admission policy refuses changes;
+                                                         gateway-helm crds.enabled=false
+  vendor extensions       you — the same install         you — gateway-crds-helm with
+                                                         envoyGateway.enabled=true,
+                                                         gatewayAPI.enabled=false
 ```
 
 ## Why the platforms differ
@@ -65,7 +74,9 @@ already there.
 |---|---|---|
 | Who installs `gateway.networking.k8s.io` CRDs | **you** (the Helm chart) | **the platform** (Ingress Operator) |
 | Who installs `gateway.envoyproxy.io` CRDs | you | you |
-| `crds.gatewayAPI.enabled` | `true` (default) | **`false`** |
+| `gateway-helm` `crds.enabled` | `true` (default) — installs both CRD sets | **`false`** |
+| `gateway-crds-helm` `crds.gatewayAPI.enabled` | not used by the one-command install | `false` (also its default) |
+| `gateway-crds-helm` `crds.envoyGateway.enabled` | not used by the one-command install | **`true`** (default `false`) |
 | Extra work for pod security | none | an `EnvoyProxy` resource for the SCC |
 
 ## What you must NOT do on OpenShift 4.19+
@@ -140,3 +151,9 @@ different control plane.
 - [Gateway API — API specification](https://gateway-api.sigs.k8s.io/reference/spec/)
 - [OpenShift 4.22 — Configuring Gateway API](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/ingress_and_load_balancing/configuring-gateway-api)
 - [OpenShift — Managing security context constraints](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/authentication_and_authorization/managing-pod-security-policies)
+
+## Diagram sources
+
+The figures are rendered from [`docs/diagrams/12-gateway-api/source.html`](../../docs/diagrams/12-gateway-api/source.html)
+(inline SVG, light and dark). The picture, its text twin and the page change
+together; re-render with the `/visual` skill's `render.py`.
