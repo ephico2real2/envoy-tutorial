@@ -1,0 +1,33 @@
+# Passthrough Routes, so the real CRC hostnames reach Envoy's TLS listener.
+#
+# passthrough matters here: the router forwards the TCP stream untouched and
+# takes no part in the TLS negotiation, so the ClientHello - and with it the
+# SNI - arrives at Envoy exactly as the client sent it. That is what lets
+# filter_chain_match on server_names work end to end.
+#
+# An edge or reencrypt Route would terminate TLS at the router, and Envoy would
+# see a new connection whose SNI the router chose.
+#
+# OpenShift only. On kind or k3s use `kubectl port-forward` or an Ingress; the
+# rest of the module is identical.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: shop
+  annotations:
+    description: passthrough so SNI reaches Envoy intact
+spec:
+  host: shop.apps-crc.testing
+  to: { kind: Service, name: envoy }
+  port: { targetPort: https }
+  tls: { termination: passthrough }
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: admin
+spec:
+  host: admin.apps-crc.testing
+  to: { kind: Service, name: envoy }
+  port: { targetPort: https }
+  tls: { termination: passthrough }

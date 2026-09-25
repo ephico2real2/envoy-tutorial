@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy
+  labels: { app: envoy }
+spec:
+  selector: { app: envoy }
+  ports:
+  - { name: http,  port: 8080, targetPort: 8080 }
+  - { name: https, port: 8443, targetPort: 8443 }
+  - { name: admin, port: 9901, targetPort: 9901 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy
+  labels: { app: envoy }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: envoy } }
+  template:
+    metadata:
+      labels: { app: envoy }
+    spec:
+      # Two self-signed certs with different SANs, generated at start into an
+      # emptyDir the proxy container also mounts. Module 08 replaces this with
+      # cert-manager; here it keeps the module to a single kubectl apply and
+      # needs no cluster issuer.
+      initContainers:
+      - name: certgen
+        image: alpine/openssl:3.3.2
+        command: ["sh", "-c"]
+        args:
+          - |
+            cd /certs
+            # The CRC wildcard domain, so the names resolve for real and the
+            # passthrough Routes in 30-routes.yaml reach this listener with
+            # their SNI intact. Change DOMAIN for another cluster.
+            DOMAIN=apps-crc.testing
+            for n in shop admin; do
+              openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+                -keyout $n.key -out $n.crt \
+                -subj "/CN=$n.$DOMAIN" \
+                -addext "subjectAltName=DNS:$n.$DOMAIN" 2>/dev/null
+            done
+            # Envoy runs as a different uid than this init container, and it
+            # only ever reads these, so make them world-readable.
+            chmod 0644 /certs/*
+            ls -1 /certs
+        volumeMounts:
+        - { name: certs, mountPath: /certs }
+      containers:
+      - name: envoy
+        image: envoyproxy/envoy:v1.39-latest
+        args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+        ports:
+        - { name: http,  containerPort: 8080 }
+        - { name: https, containerPort: 8443 }
+        - { name: admin, containerPort: 9901 }
+        readinessProbe:
+          httpGet: { path: /ready, port: 9901 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        volumeMounts:
+        - { name: config, mountPath: /etc/envoy/envoy.yaml, subPath: envoy.yaml }
+        - { name: certs,  mountPath: /etc/certs, readOnly: true }
+        resources:
+          requests: { cpu: "50m",  memory: "64Mi" }
+          limits:   { cpu: "500m", memory: "256Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+      volumes:
+      - name: config
+        configMap: { name: envoy-config }
+      - name: certs
+        emptyDir: {}

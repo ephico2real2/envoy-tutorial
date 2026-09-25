@@ -1,0 +1,151 @@
+# Module 03 — one listener, three filter chains, chosen by what arrives.
+#
+# A listener is a port. A FILTER CHAIN is one possible way to handle a
+# connection on that port, and filter_chain_match decides which one applies.
+# Envoy picks the MOST SPECIFIC match, not the first one written.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-config
+data:
+  envoy.yaml: |
+    admin:
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+    static_resources:
+      listeners:
+
+      # ---- listener 1: plain HTTP, chained on the Host header --------------
+      - name: http_listener
+        address:
+          socket_address: { address: 0.0.0.0, port_value: 8080 }
+        filter_chains:
+        - filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: http
+              use_remote_address: true
+              route_config:
+                name: by_host
+                # Host-based selection happens HERE, in virtual_hosts - not in
+                # filter_chain_match. A filter chain is chosen before a single
+                # byte of HTTP has been parsed, so it cannot see the Host
+                # header. This is the distinction the module exists to teach.
+                virtual_hosts:
+                - name: shop
+                  domains: ["shop.apps-crc.testing"]
+                  routes:
+                  - match: { prefix: "/" }
+                    route: { cluster: echo_service }
+                    response_headers_to_add:
+                    - header: { key: x-matched-vhost, value: shop }
+                - name: admin
+                  domains: ["admin.apps-crc.testing"]
+                  routes:
+                  - match: { prefix: "/" }
+                    route: { cluster: echo_service }
+                    response_headers_to_add:
+                    - header: { key: x-matched-vhost, value: admin }
+                - name: catch_all
+                  domains: ["*"]
+                  routes:
+                  - match: { prefix: "/" }
+                    direct_response:
+                      status: 404
+                      body: { inline_string: "no virtual host for that Host header\n" }
+              http_filters:
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      # ---- listener 2: TLS, chained on SNI ---------------------------------
+      - name: tls_listener
+        address:
+          socket_address: { address: 0.0.0.0, port_value: 8443 }
+        # Required for server_names matching below. Something has to read the
+        # ClientHello before Envoy can know the SNI, and this is what does it.
+        #
+        # Measured: delete these two lines, recreate the pod, and SNI selection
+        # stops working for BOTH names. Note that /config_dump still mentions
+        # tls_inspector when it is absent, so test the behaviour rather than
+        # grepping the dump.
+        listener_filters:
+        - name: envoy.filters.listener.tls_inspector
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.listener.tls_inspector.v3.TlsInspector
+        filter_chains:
+
+        - filter_chain_match:
+            server_names: ["shop.apps-crc.testing"]
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_certificates:
+                - certificate_chain: { filename: /etc/certs/shop.crt }
+                  private_key:       { filename: /etc/certs/shop.key }
+          filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: tls_shop
+              route_config:
+                name: shop_tls
+                virtual_hosts:
+                - name: shop
+                  domains: ["*"]
+                  routes:
+                  - match: { prefix: "/" }
+                    route: { cluster: echo_service }
+                    response_headers_to_add:
+                    - header: { key: x-matched-chain, value: sni-shop }
+              http_filters:
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+        - filter_chain_match:
+            server_names: ["admin.apps-crc.testing"]
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_certificates:
+                - certificate_chain: { filename: /etc/certs/admin.crt }
+                  private_key:       { filename: /etc/certs/admin.key }
+          filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: tls_admin
+              route_config:
+                name: admin_tls
+                virtual_hosts:
+                - name: admin
+                  domains: ["*"]
+                  routes:
+                  - match: { prefix: "/" }
+                    route: { cluster: echo_service }
+                    response_headers_to_add:
+                    - header: { key: x-matched-chain, value: sni-admin }
+              http_filters:
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      clusters:
+      - name: echo_service
+        type: STRICT_DNS
+        lb_policy: ROUND_ROBIN
+        connect_timeout: 2s
+        load_assignment:
+          cluster_name: echo_service
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address: { address: echo, port_value: 8080 }

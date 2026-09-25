@@ -14,7 +14,7 @@ Every module is self-contained: its own namespace, its own manifests, its own
 | [`00-prerequisites`](00-prerequisites/README.md) | what your cluster needs, and how to check | **done** |
 | [`01-what-is-envoy`](01-what-is-envoy/README.md) | proxy vs reverse proxy; listener, filter, route, cluster | **done** |
 | [`02-the-config-file`](02-the-config-file/README.md) | the bootstrap config, field by field | **done** |
-| `03-listeners-and-filter-chains` | `filter_chain_match`, SNI, `tls_inspector` | to come |
+| [`03-listeners-and-filter-chains`](03-listeners-and-filter-chains/README.md) | `filter_chain_match`, SNI, `tls_inspector` | **done** |
 | `04`–`11` | routing, load balancing, filters, gRPC, TLS, observability, resilience | to come |
 
 Module 12 is written first because it was the immediate need. The numbering is
