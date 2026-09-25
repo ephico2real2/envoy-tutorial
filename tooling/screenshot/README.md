@@ -3,8 +3,8 @@
 The recipe used for every console capture in this tutorial and in
 [`envoy-grpc-modernization`](https://github.com/ephico2real2/envoy-grpc-modernization).
 
-Also installed locally as a Claude Code skill (`/screenshot`, `/screen`,
-`/shot`, `/camera`); this copy is the portable version.
+Written for browser automation that exposes a `screenshot` and a `zoom` action,
+but the reasoning applies to any capture tool.
 
 Every rule here exists because breaking it produced an unreadable file that had
 to be retaken. The numbers are measured, not estimated.
