@@ -53,6 +53,22 @@ wait_ready() {
   fi
 }
 
+# Envoy's STRICT_DNS resolves on a timer, so a proxy that started before its
+# backend was ready answers "no healthy upstream" for the first few seconds.
+# Deployment readiness does not cover that - Envoy is ready, its upstream is
+# not - so wait for the cluster to actually have a member before asserting.
+wait_upstream() {
+  cluster=$1; svc=${2:-envoy}; tries=${3:-30}
+  for _ in $(seq 1 "$tries"); do
+    if incluster_curl "http://$svc.$NS.svc:9901/clusters" 2>/dev/null \
+         | grep -q "^${cluster}::[0-9].*::cx_total"; then
+      ok "upstream $cluster has endpoints"; return 0
+    fi
+    sleep 2
+  done
+  bad "upstream $cluster never got an endpoint"; exit 1
+}
+
 # Run a curl from inside the cluster. Nothing in these modules requires an
 # Ingress or a Route, so they work the same on kind as on OpenShift.
 incluster_curl() {

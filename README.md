@@ -13,7 +13,7 @@ Every module is self-contained: its own namespace, its own manifests, its own
 | [`12-gateway-api`](12-gateway-api/README.md) | Envoy Gateway, `Gateway`, `HTTPRoute`, and the two OpenShift traps that block them | **done** |
 | [`00-prerequisites`](00-prerequisites/README.md) | what your cluster needs, and how to check | **done** |
 | [`01-what-is-envoy`](01-what-is-envoy/README.md) | proxy vs reverse proxy; listener, filter, route, cluster | **done** |
-| `02-the-config-file` | the bootstrap config, field by field | to come |
+| [`02-the-config-file`](02-the-config-file/README.md) | the bootstrap config, field by field | **done** |
 | `03-listeners-and-filter-chains` | `filter_chain_match`, SNI, `tls_inspector` | to come |
 | `04`–`11` | routing, load balancing, filters, gRPC, TLS, observability, resilience | to come |
 
