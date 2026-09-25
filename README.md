@@ -27,6 +27,13 @@ Every module is self-contained: its own namespace, its own manifests, its own
   content survives a terminal, a diff, and a screen reader.
 - **References are linked** so you can go deeper than the module goes.
 
+## Tooling
+
+[`tooling/screenshot`](tooling/screenshot/README.md) — how every console capture
+here was taken so the text is legible: `zoom` to a region rather than a
+full-viewport `screenshot`, cropped to the content box, theme matched to the UI,
+and a `verify.py` that fails a capture with a wide flat margin.
+
 ## A worked example
 
 [`envoy-grpc-modernization`](https://github.com/ephico2real2/envoy-grpc-modernization)
