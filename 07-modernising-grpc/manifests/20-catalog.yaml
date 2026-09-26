@@ -1,0 +1,95 @@
+# The catalog service: gRPC only, on port 50051.
+#
+# Nothing is built into an image. The .proto and the Python source arrive as
+# ConfigMaps (the walkthrough creates them from ../proto and ../app), and an
+# init container generates the Python stubs from the .proto every time the pod
+# starts - so the code can never drift from the contract it was generated from.
+#
+# Needs egress to PyPI: the init container installs grpcio and friends.
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog
+  labels: { app: catalog }
+spec:
+  # Headless, as in module 05: Envoy should hold every pod, not one virtual IP.
+  # For gRPC it matters more - one HTTP/2 connection carries every call.
+  clusterIP: None
+  selector: { app: catalog }
+  ports:
+  - { name: grpc, port: 50051, targetPort: 50051 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  labels: { app: catalog }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: catalog } }
+  template:
+    metadata:
+      labels: { app: catalog }
+    spec:
+      initContainers:
+      - name: codegen
+        image: python:3.12-slim
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -e
+            # OpenShift runs this as a random UID with no writable HOME, so a
+            # plain `pip install` fails; install into an emptyDir instead.
+            pip install --no-cache-dir --quiet --target=/pylibs \
+                grpcio grpcio-tools grpcio-reflection googleapis-common-protos
+            # catalog.proto imports google/api/annotations.proto, which the
+            # googleapis-common-protos package ships - hence -I /pylibs.
+            PYTHONPATH=/pylibs python -m grpc_tools.protoc -I /proto -I /pylibs \
+                --python_out=/gen --grpc_python_out=/gen /proto/catalog.proto
+            ls -1 /gen
+        env:
+        - { name: HOME, value: /tmp }
+        volumeMounts:
+        - { name: proto,  mountPath: /proto }
+        - { name: pylibs, mountPath: /pylibs }
+        - { name: gen,    mountPath: /gen }
+        resources:
+          requests: { cpu: "50m",  memory: "128Mi" }
+          limits:   { cpu: "1",    memory: "512Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+      containers:
+      - name: catalog
+        image: python:3.12-slim
+        command: ["python", "/app/server.py"]
+        env:
+        - { name: PYTHONPATH, value: "/pylibs:/gen" }
+        - { name: PYTHONUNBUFFERED, value: "1" }
+        - name: POD_NAME
+          valueFrom: { fieldRef: { fieldPath: metadata.name } }
+        ports:
+        - { name: grpc, containerPort: 50051 }
+        readinessProbe:
+          tcpSocket: { port: 50051 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        volumeMounts:
+        - { name: app,    mountPath: /app }
+        - { name: pylibs, mountPath: /pylibs }
+        - { name: gen,    mountPath: /gen }
+        resources:
+          requests: { cpu: "20m",  memory: "64Mi" }
+          limits:   { cpu: "300m", memory: "256Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+      volumes:
+      - name: proto
+        configMap: { name: catalog-proto }
+      - name: app
+        configMap: { name: catalog-app }
+      - name: pylibs
+        emptyDir: {}
+      - name: gen
+        emptyDir: {}

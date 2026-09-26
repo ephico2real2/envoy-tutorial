@@ -25,7 +25,8 @@ Every command runs as written from your laptop.
 | [`04-routing`](04-routing/README.md) | match types, first match wins, rewrites, timeouts, redirects, `direct_response` | **done** |
 | [`05-clusters-and-load-balancing`](05-clusters-and-load-balancing/README.md) | STATIC / STRICT_DNS / LOGICAL_DNS / EDS, the headless lesson, load-balancing policies measured, health checks | **done** |
 | [`06-http-filters`](06-http-filters/README.md) | the filter chain: `cors`, `jwt_authn`, `local_ratelimit`, `lua` — and why their order matters, measured | **done** |
-| `07`–`11` | gRPC, TLS, observability, resilience | to come |
+| [`07-modernising-grpc`](07-modernising-grpc/README.md) | REST + JSON in front of a gRPC-only service: `grpc_json_transcoder`, the `.proto` contract, one port for REST and gRPC | **done** |
+| `08`–`11` | TLS, gRPC end to end, observability, resilience | to come |
 | [`12-gateway-api`](12-gateway-api/README.md) | Envoy Gateway, `Gateway`, `HTTPRoute`, and the two OpenShift traps that block them | **done** |
 
 Module 12 was written first because it was the immediate need. The numbering is

@@ -1,0 +1,21 @@
+# A second in-cluster client, for native gRPC: grpcurl is to gRPC what curl is
+# to HTTP. Alpine variant, so there is a shell and `sleep` to keep it running.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: grpc-client
+  labels: { app: grpc-client }
+spec:
+  containers:
+  - name: grpcurl
+    image: fullstorydev/grpcurl:v1.9.3-alpine
+    command: ["sleep", "infinity"]
+    resources:
+      requests: { cpu: "10m", memory: "16Mi" }
+      limits:   { cpu: "200m", memory: "64Mi" }
+    securityContext:
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+      capabilities: { drop: ["ALL"] }
+      seccompProfile: { type: RuntimeDefault }
+  terminationGracePeriodSeconds: 0
