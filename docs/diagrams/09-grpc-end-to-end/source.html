@@ -1,0 +1,147 @@
+<title>Envoy gRPC mTLS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 09 · gRPC end to end</div>
+    <h1>gRPC over TLS, mutual TLS upstream, and certificate rotation</h1>
+    <p class="lede">Drawn from <code>09-grpc-end-to-end/manifests/</code>; every result was measured on CRC in namespace <code>envoy-09</code>.</p>
+  </header>
+
+  <section>
+    <h2>gRPC over TLS, end to end</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 474" role="img" aria-label="grpcurl, trusting only the enterprise CA, calls grpc.apps-crc.testing over TLS with ALPN h2. A passthrough Route forwards the TLS to Envoy, which presents its envoy-edge certificate. Envoy then opens a second, mutual TLS connection to the catalog service: it presents its client certificate carrying a SPIFFE identity and checks that the service&#x27;s certificate names catalog.envoy-09.svc. The service logs the caller&#x27;s identity. Without a client certificate the service drops the connection; with the wrong expected name, the caller gets Unavailable and ssl.fail_verify_san counts it.">
+  <defs><marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="m1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="250" y="12" width="480" height="56" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="264" y="33" font-weight="600">grpcurl — trusts only the enterprise CA</text>
+<text x="264" y="50" font-family="IBM Plex Mono, monospace" font-size="12">grpc.apps-crc.testing:443</text>
+<line x1="490" y1="68" x2="490" y2="100" stroke="currentColor" stroke-width="1.3" marker-end="url(#m1)"/>
+<text x="502" y="90" fill="var(--muted)">TLS 1 · ALPN h2</text>
+<rect x="250" y="102" width="480" height="56" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="264" y="123" font-weight="600">OpenShift Route · passthrough</text>
+<text x="264" y="140">forwards the TLS bytes untouched</text>
+<line x1="490" y1="158" x2="490" y2="190" stroke="currentColor" stroke-width="1.3" marker-end="url(#m1)"/>
+<rect x="150" y="192" width="680" height="120" rx="8" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="170" y="216" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">ENVOY</text>
+<text x="170" y="240">downstream: presents envoy-edge — through SDS, watched</text>
+<text x="170" y="262">upstream: presents envoy-client — spiffe://envoy-tutorial/ns/envoy-09/envoy</text>
+<text x="170" y="284" fill="var(--muted)">checks the service&#x27;s certificate: signed by the CA, SAN catalog.envoy-09.svc</text>
+<line x1="490" y1="312" x2="490" y2="350" stroke="currentColor" stroke-width="1.3" marker-end="url(#m1)"/>
+<text x="502" y="336" fill="var(--muted)">TLS 2 · mutual: both sides present a certificate</text>
+<rect x="250" y="352" width="480" height="70" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="264" y="373" font-weight="600">catalog service :50051</text>
+<text x="264" y="390">presents catalog-tls; demands a client certificate</text>
+<text x="264" y="407" fill="var(--muted)">logs caller=spiffe://…/envoy</text>
+<rect x="20" y="352" width="200" height="70" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="34" y="373" fill="var(--gap)" font-weight="600">no client certificate</text>
+<text x="34" y="390">connection dropped</text>
+<text x="34" y="407" fill="var(--muted)">grpcurl: Failed to dial</text>
+<line x1="220" y1="387" x2="248" y2="387" stroke="var(--gap)" stroke-width="1.3"/>
+<rect x="760" y="352" width="200" height="70" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="774" y="373" fill="var(--gap)" font-weight="600">wrong SAN expected</text>
+<text x="774" y="390">caller: Unavailable</text>
+<text x="774" y="407" fill="var(--muted)">ssl.fail_verify_san</text>
+<line x1="730" y1="387" x2="758" y2="387" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="20" y="456" font-weight="600">Two TLS connections, two different certificates on Envoy. Every failure was measured on CRC.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>Envoy terminates the client&#x27;s TLS with one certificate and opens mutual TLS to the service with another.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>When cert-manager renews</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 422" role="img" aria-label="When the envoy-edge Secret is deleted, cert-manager issues a new certificate within seconds, and about a minute later the kubelet updates the files mounted in the Envoy pod. The listener on 8443, loading the certificate through SDS with a watched directory, presents the new certificate after about a minute with no restart. The listener on 8444, with the certificate as plain filenames, keeps presenting the old one until Envoy restarts.">
+  <defs><marker id="m2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="m2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="250" y="12" width="480" height="44" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="264" y="39" font-weight="600">oc delete secret envoy-edge — or renewalTime arrives</text>
+<line x1="490" y1="56" x2="490" y2="86" stroke="currentColor" stroke-width="1.3" marker-end="url(#m2)"/>
+<rect x="250" y="88" width="480" height="56" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="264" y="109" font-weight="600">cert-manager issues a new certificate</text>
+<text x="264" y="126">into the Secret within seconds — a new serial</text>
+<line x1="490" y1="144" x2="490" y2="174" stroke="currentColor" stroke-width="1.3" marker-end="url(#m2)"/>
+<rect x="250" y="176" width="480" height="56" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="264" y="197" font-weight="600">the kubelet updates the mounted files</text>
+<text x="264" y="214">about a minute later: symlink swapped in /etc/tls-edge</text>
+<line x1="420" y1="232" x2="245" y2="270" stroke="currentColor" stroke-width="1.3" marker-end="url(#m2)"/>
+<line x1="560" y1="232" x2="735" y2="270" stroke="currentColor" stroke-width="1.3" marker-end="url(#m2)"/>
+<rect x="20" y="272" width="450" height="86" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="34" y="293" font-weight="600">:8443 — SDS, watched_directory</text>
+<text x="34" y="310">Envoy sees the swap, re-reads the files</text>
+<text x="34" y="327" fill="var(--remote)" font-weight="600">new certificate after about a minute, no restart</text>
+<rect x="510" y="272" width="450" height="86" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="524" y="293" font-weight="600">:8444 — tls_certificates filename</text>
+<text x="524" y="310">read once, when Envoy started</text>
+<text x="524" y="327" fill="var(--gap)" font-weight="600">still the old certificate — until a restart</text>
+<text x="20" y="392" font-weight="600">A certificate read once expires on schedule even though a renewed one sits on disk.</text>
+<text x="20" y="412" fill="var(--muted)">Measured on CRC: a new serial in the Secret within 5 s, on :8443 after about a minute, still the old one on :8444.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>Only a certificate loaded through SDS with a watch is picked up without a restart.</figcaption>
+    </figure>
+  </section>
+</div>

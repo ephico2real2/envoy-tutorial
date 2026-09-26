@@ -1,0 +1,137 @@
+# Module 09 — gRPC over TLS, end to end.
+#
+#   client --TLS--> Envoy :8443 --mutual TLS--> catalog :50051
+#
+# Downstream, Envoy presents envoy-edge. Upstream, it presents envoy-client and
+# checks that the service's certificate names catalog.envoy-09.svc.
+#
+# Two downstream listeners serve the SAME certificate, loaded two ways - the
+# difference only shows when cert-manager replaces it (step 9):
+#   :8443  through SDS from a file, watching the mounted Secret's directory
+#   :8444  as plain files in the listener - read once, when Envoy starts
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-config
+data:
+  envoy.yaml: |
+    # Required by the SDS file below - any dynamic resource needs a node
+    # identity (module 05 hit this with EDS).
+    node:
+      id: envoy-09
+      cluster: envoy-tutorial
+
+    admin:
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+    static_resources:
+      listeners:
+      - name: edge_sds
+        address:
+          socket_address: { address: 0.0.0.0, port_value: 8443 }
+        filter_chains:
+        - transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                # gRPC runs on HTTP/2, and over TLS the two sides agree on
+                # HTTP/2 through ALPN. Offer "h2": measured, the Python gRPC
+                # client refuses to connect without it ("missing selected ALPN
+                # property"); grpcurl 1.9.3 happened not to care.
+                alpn_protocols: ["h2", "http/1.1"]
+                tls_certificate_sds_secret_configs:
+                - name: edge
+                  sds_config:
+                    resource_api_version: V3
+                    path_config_source: { path: /etc/sds/edge.yaml }
+          filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: edge_sds
+              route_config:
+                name: catalog
+                virtual_hosts:
+                - name: catalog
+                  domains: ["*"]
+                  routes:
+                  - match: { prefix: "/" }
+                    route: { cluster: catalog }
+              http_filters:
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      - name: edge_static
+        address:
+          socket_address: { address: 0.0.0.0, port_value: 8444 }
+        filter_chains:
+        - transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                alpn_protocols: ["h2", "http/1.1"]
+                tls_certificates:
+                - certificate_chain: { filename: /etc/tls-edge/tls.crt }
+                  private_key:       { filename: /etc/tls-edge/tls.key }
+          filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: edge_static
+              route_config:
+                name: catalog
+                virtual_hosts:
+                - name: catalog
+                  domains: ["*"]
+                  routes:
+                  - match: { prefix: "/" }
+                    route: { cluster: catalog }
+              http_filters:
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      clusters:
+      - name: catalog
+        type: STRICT_DNS
+        lb_policy: ROUND_ROBIN
+        connect_timeout: 2s
+        typed_extension_protocol_options:
+          envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+            "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+            explicit_http_config:
+              http2_protocol_options: {}
+        # Upstream TLS: Envoy is the CLIENT here.
+        transport_socket:
+          name: envoy.transport_sockets.tls
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+            # The name Envoy asks for in the handshake, and expects in the
+            # service's certificate.
+            sni: catalog.envoy-09.svc
+            common_tls_context:
+              alpn_protocols: ["h2"]
+              # Envoy's own client certificate - the service demands one.
+              # Through SDS with a watch, like :8443, so a renewed client
+              # certificate is picked up too; read once, the old one would be
+              # presented until it expired - and then every call would fail.
+              tls_certificate_sds_secret_configs:
+              - name: client
+                sds_config:
+                  resource_api_version: V3
+                  path_config_source: { path: /etc/sds/client.yaml }
+              # Trust only the enterprise CA, and only a certificate for this name.
+              validation_context:
+                trusted_ca: { filename: /etc/tls-client/ca.crt }
+                match_typed_subject_alt_names:
+                - san_type: DNS
+                  matcher: { exact: catalog.envoy-09.svc }
+        load_assignment:
+          cluster_name: catalog
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: catalog, port_value: 50051 } } }

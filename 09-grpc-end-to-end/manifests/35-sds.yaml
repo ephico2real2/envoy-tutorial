@@ -1,0 +1,27 @@
+# The SDS files: Secret resources that tell Envoy where each certificate is.
+#
+# watched_directory is the point: the envoy-edge Secret is mounted at
+# /etc/tls-edge, and when cert-manager replaces the certificate, the kubelet
+# swaps a symlink in that directory. Envoy sees the move and re-reads the
+# files - no restart. The static listener on :8444 has no such watch.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-sds
+data:
+  edge.yaml: |
+    resources:
+    - "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret
+      name: edge
+      tls_certificate:
+        certificate_chain: { filename: /etc/tls-edge/tls.crt }
+        private_key:       { filename: /etc/tls-edge/tls.key }
+        watched_directory: { path: /etc/tls-edge }
+  client.yaml: |
+    resources:
+    - "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret
+      name: client
+      tls_certificate:
+        certificate_chain: { filename: /etc/tls-client/tls.crt }
+        private_key:       { filename: /etc/tls-client/tls.key }
+        watched_directory: { path: /etc/tls-client }
