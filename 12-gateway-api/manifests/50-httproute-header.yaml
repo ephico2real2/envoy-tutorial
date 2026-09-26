@@ -1,6 +1,6 @@
 # The same HTTPRoute as 40-httproute.yaml, with one change: a filter that adds a
 # request header on the way to the backend. Applying it is how an app team
-# changes its routing - no Envoy config file, no restart. Step 7 times it.
+# changes its routing - no Envoy config file, no restart. Step 9 applies it.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:

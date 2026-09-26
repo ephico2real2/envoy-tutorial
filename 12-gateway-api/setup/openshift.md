@@ -218,7 +218,7 @@ coexist. Verified: `accepted=True reason=Accepted`.
 ### Blocker 1 — the proxy pod, again, and the Helm fix does not reach it
 
 Envoy Gateway **generates** the proxy Deployment, so there is no YAML to edit.
-The `EnvoyProxy` resource is the supported way in, and the pod-level fix works:
+The `EnvoyProxy` resource is the supported way in, and at pod level it applies:
 
 ```yaml
 envoyDeployment:
@@ -229,20 +229,24 @@ envoyDeployment:
 ```
 
 ```console
-$ oc get deploy envoy-gwapi-demo-eg-... -o jsonpath='{.spec.template.spec.securityContext}'
-pod.runAsUser=      pod.fsGroup=      pod.runAsNonRoot=true      # cleared
+$ oc get deploy envoy-gwapi-demo-eg-8fbae7fe -n envoy-gateway-system -o jsonpath='{.spec.template.spec.securityContext}'
+{"runAsNonRoot":true,"seccompProfile":{"type":"RuntimeDefault"}}
 ```
 
-**But the containers keep theirs**, and the pod is still refused:
+**But the UID is on the containers**, and the pod is still refused:
 
 ```text
 restricted-v2: .containers[0].runAsUser: Invalid value: 65532  (envoy)
 restricted-v2: .containers[1].runAsUser: Invalid value: 65532  (shutdown-manager)
 ```
 
-`shutdown-manager`'s security context is hardcoded upstream
-([envoyproxy/gateway#4881](https://github.com/envoyproxy/gateway/issues/4881)),
-so no amount of `EnvoyProxy` tuning clears it.
+Envoy Gateway v1.9.1 sets `runAsUser: 65532` on both containers and merges an
+`EnvoyProxy`'s container `securityContext` over that default instead of
+replacing it ([v1.9.1 release notes](https://gateway.envoyproxy.io/news/releases/notes/v1.9.1/)),
+so a spec that leaves `runAsUser` out cannot remove it. (`shutdown-manager`
+once ignored the container spec altogether —
+[envoyproxy/gateway#4881](https://github.com/envoyproxy/gateway/issues/4881),
+fixed in v1.2.5.)
 
 **The fix is an SCC grant, and `nonroot-v2` is the right one.** It permits a
 specific non-root UID while still forbidding root — unlike `anyuid`:
@@ -255,17 +259,20 @@ RunAsAny true                   # permits root. Do not reach for this.
 ```
 
 ```bash
-SA=$(oc get deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg \
+GW=gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=gwapi-demo
+SA=$(oc get deploy -n envoy-gateway-system -l "$GW" \
       -o jsonpath='{.items[0].spec.template.spec.serviceAccountName}')
 oc adm policy add-scc-to-user nonroot-v2 -z "$SA" -n envoy-gateway-system
-oc rollout restart deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg
+oc rollout restart deploy -n envoy-gateway-system -l "$GW"
 ```
 
 ```text
 envoy-gwapi-demo-eg-8fbae7fe-6cfd6b4bbc-kxl7m   2/2   Running
 ```
 
-The grant is per-Gateway, because each Gateway gets its own ServiceAccount.
+The grant is per-Gateway, because each Gateway gets its own ServiceAccount. Select
+by the Gateway's namespace as well as its name: later modules' Gateways are
+called `eg` too, and their Envoys run in the same namespace.
 
 ### Blocker 2 — "no available IPs" does not mean the pool is full
 
@@ -304,30 +311,10 @@ programmed=True  address=192.168.127.101
 
 ### Proof it carries traffic
 
-```console
-$ curl -s http://192.168.127.101/hello
-{
-  "served_by": "echo-f8fc6d5c9-qnx4z",
-  "method": "GET",
-  "path": "/hello",
-  "headers": {
-    "host": "192.168.127.101",
-    "x-forwarded-for": "10.217.0.150",
-    "x-forwarded-proto": "http",
-    "x-envoy-external-address": "10.217.0.150",
-    "x-request-id": "a9e3262e-13c8-419c-8fc0-5f1fd129ead2"
-  }
-}
-```
-
-The `x-envoy-*` headers and `x-request-id` are Envoy's fingerprint — the backend
-never set them. And it balances:
-
-```console
-$ for i in $(seq 1 10); do curl -s http://192.168.127.101/ | grep served_by; done | sort | uniq -c
-   4   "served_by": "echo-f8fc6d5c9-jx6lh"
-   6   "served_by": "echo-f8fc6d5c9-qnx4z"
-```
+On CRC the MetalLB address answers only from inside the cluster: the laptop has
+no route to the VM's `192.168.127.0/24`, and a `curl` from it times out. The
+module's [step 6](../README.md) sends a request from the `client` pod, and from
+the laptop through an OpenShift Route; step 8 shows how it balances.
 
 ## Uninstall
 
@@ -350,7 +337,7 @@ oc get crd -o name | grep gateway.envoyproxy.io | xargs -r oc delete
 | Controller crash-loops mentioning `BackendTLSPolicy` | platform CRD bundle lacks it | confirm step 0; upgrade Envoy Gateway |
 | `GatewayClass` never `Accepted` | wrong `controllerName` | exactly `gateway.envoyproxy.io/gatewayclass-controller` |
 | Gateway address empty, "no available IPs" | the IPAddressPool has `autoAssign: false` | annotate the Service `metallb.universe.tf/address-pool: <pool>` |
-| Proxy pod refused, `runAsUser: 65532` | container security contexts are not cleared by `EnvoyProxy`; shutdown-manager's is hardcoded | `oc adm policy add-scc-to-user nonroot-v2 -z <proxy-sa> -n envoy-gateway-system` |
+| Proxy pod refused, `runAsUser: 65532` | both proxy containers default to UID 65532, and v1.9.1 merges the `EnvoyProxy` container `securityContext` over that default | `oc adm policy add-scc-to-user nonroot-v2 -z <proxy-sa> -n envoy-gateway-system`, then `oc rollout restart` |
 
 ## What was verified, and when
 

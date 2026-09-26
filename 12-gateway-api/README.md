@@ -13,7 +13,7 @@ v1.39.1 — the same Envoy as modules 01–11.
 |---|---|---|
 | You write | `envoy.yaml` — listeners, routes, clusters | `Gateway`, `HTTPRoute` |
 | Envoy config comes from | a ConfigMap you maintain | a controller, generated |
-| Changing a route | edit YAML, restart Envoy | apply an `HTTPRoute` — step 9 times it |
+| Changing a route | edit YAML, restart Envoy | apply an `HTTPRoute` — step 9 shows it |
 | Who owns what | one team owns the whole file | cluster team owns the `Gateway`; app teams own their `HTTPRoute`s |
 
 That last row is the point. A single `envoy.yaml` is a contention point — every
@@ -59,9 +59,9 @@ the line the org already has.
 The controller, and two groups of CRDs:
 
 ```console
-$ oc get pods -n envoy-gateway-system
+$ oc get pods -n envoy-gateway-system -l control-plane=envoy-gateway
 NAME                             READY   STATUS    RESTARTS   AGE
-envoy-gateway-7df8d8b4d9-tp6pr   1/1     Running   0          30h
+envoy-gateway-7df8d8b4d9-tp6pr   1/1     Running   0          32h
 $ oc get crd -o name | grep -c 'gateway.networking.k8s.io'
 6
 $ oc get crd -o name | grep -c 'gateway.envoyproxy.io'
@@ -118,12 +118,12 @@ A `Gateway` asks for a listener — here, HTTP on port 80:
 $ oc apply -f manifests/30-gateway.yaml
 namespace/gwapi-demo created
 gateway.gateway.networking.k8s.io/eg created
-$ sleep 15; oc get deploy,svc -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg
+$ sleep 15; oc get deploy,svc -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=gwapi-demo
 NAME                                           READY   UP-TO-DATE   AVAILABLE   AGE
 deployment.apps/envoy-gwapi-demo-eg-8fbae7fe   0/1     0            0           15s
 
-NAME                                   TYPE           CLUSTER-IP    EXTERNAL-IP       PORT(S)        AGE
-service/envoy-gwapi-demo-eg-8fbae7fe   LoadBalancer   10.217.5.12   192.168.127.101   80:31866/TCP   15s
+NAME                                   TYPE           CLUSTER-IP     EXTERNAL-IP       PORT(S)        AGE
+service/envoy-gwapi-demo-eg-8fbae7fe   LoadBalancer   10.217.4.244   192.168.127.101   80:32540/TCP   15s
 $ oc get gateway eg -n gwapi-demo
 NAME   CLASS   ADDRESS           PROGRAMMED   AGE
 eg     eg      192.168.127.101   False        15s
@@ -141,30 +141,32 @@ restricted-v2: .containers[1].runAsUser: Invalid value: 65532
 ```
 
 The generated pod asks to run as UID `65532`, and OpenShift's default
-`restricted-v2` SCC refuses any UID outside the namespace's range. The
-`EnvoyProxy` clears the *pod's* security context, but not the *containers'* —
-and the `shutdown-manager` container's is hard-coded upstream
-([envoyproxy/gateway#4881](https://github.com/envoyproxy/gateway/issues/4881)).
+`restricted-v2` SCC refuses any UID outside the namespace's range. Envoy Gateway
+puts that UID on both containers, `envoy` and `shutdown-manager`, and since
+v1.9.1 it merges an `EnvoyProxy`'s container `securityContext` over its own
+default instead of replacing it
+([v1.9.1 release notes](https://gateway.envoyproxy.io/news/releases/notes/v1.9.1/)) —
+so the `EnvoyProxy` here, which sets no `runAsUser`, leaves `65532` in place.
 The fix is to let the proxy's ServiceAccount use **`nonroot-v2`**: any UID except
 root. (Not `anyuid`, which allows root.) Each Gateway's Envoy has its own
 ServiceAccount, so the grant is per Gateway:
 
 ```console
-$ oc adm policy add-scc-to-user nonroot-v2 -n envoy-gateway-system -z "$(oc get deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].spec.template.spec.serviceAccountName}')"
+$ oc adm policy add-scc-to-user nonroot-v2 -n envoy-gateway-system -z "$(oc get deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=gwapi-demo -o jsonpath='{.items[0].spec.template.spec.serviceAccountName}')"
 clusterrole.rbac.authorization.k8s.io/system:openshift:scc:nonroot-v2 added: "envoy-gwapi-demo-eg-8fbae7fe"
-$ oc rollout restart deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg
+$ oc rollout restart deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=gwapi-demo
 deployment.apps/envoy-gwapi-demo-eg-8fbae7fe restarted
-$ oc rollout status deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg --timeout=240s
+$ oc rollout status deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=gwapi-demo --timeout=240s
 Waiting for deployment "envoy-gwapi-demo-eg-8fbae7fe" rollout to finish: 0 of 1 updated replicas are available...
 Waiting for deployment "envoy-gwapi-demo-eg-8fbae7fe" rollout to finish: 0 of 1 updated replicas are available...
 Waiting for deployment "envoy-gwapi-demo-eg-8fbae7fe" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "envoy-gwapi-demo-eg-8fbae7fe" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "envoy-gwapi-demo-eg-8fbae7fe" rollout to finish: 1 old replicas are pending termination...
 deployment "envoy-gwapi-demo-eg-8fbae7fe" successfully rolled out
-$ oc get pods -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg -o 'custom-columns=NAME:.metadata.name,SCC:.metadata.annotations.openshift\.io/scc,UID:.spec.containers[0].securityContext.runAsUser,IMAGE:.spec.containers[0].image,DELETING:.metadata.deletionTimestamp'
+$ oc get pods -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=gwapi-demo -o 'custom-columns=NAME:.metadata.name,SCC:.metadata.annotations.openshift\.io/scc,UID:.spec.containers[0].securityContext.runAsUser,IMAGE:.spec.containers[0].image,DELETING:.metadata.deletionTimestamp'
 NAME                                            SCC          UID     IMAGE                                                                                                                   DELETING
-envoy-gwapi-demo-eg-8fbae7fe-5fdcbd88cd-6phr5   nonroot-v2   65532   docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4   2026-09-26T05:35:49Z
-envoy-gwapi-demo-eg-8fbae7fe-6f544c5679-fpsk8   nonroot-v2   65532   docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4   <none>
+envoy-gwapi-demo-eg-8fbae7fe-576b56ffdc-5c66w   nonroot-v2   65532   docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4   <none>
+envoy-gwapi-demo-eg-8fbae7fe-5fdcbd88cd-j9ldc   nonroot-v2   65532   docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4   2026-09-26T07:02:57Z
 $ oc wait gateway/eg -n gwapi-demo --for=condition=Programmed --timeout=120s
 gateway.gateway.networking.k8s.io/eg condition met
 ```
@@ -172,14 +174,20 @@ gateway.gateway.networking.k8s.io/eg condition met
 **What just happened:** the proxy was admitted under `nonroot-v2`, as UID 65532,
 and runs Envoy 1.39.1. With a running proxy, the Gateway is **programmed**.
 
-You may see two pods for a few seconds. Once the grant was in, the ReplicaSet
-retried on its own and started one; the restart then replaced it, and the one
-with a `DELETING` time is shutting down. Why restart at all, then? Because the
-ReplicaSet's retries back off: Kubernetes doubles the delay after every failed
-attempt, from 5 ms up to 1000 s. Measured while writing this, with the grant
-made about half a minute after the Gateway, the retry came 22 seconds later; a
-grant made after ten minutes of failures can wait minutes more. The restart
-creates a pod now.
+You may see two pods, as here. The restart created the new one at once. The old
+ReplicaSet was still retrying its refused pod on a back-off schedule, and its
+next retry — here about five seconds later — now succeeded: that is the second
+pod. When the new pod turned Ready, the Deployment scaled the old ReplicaSet to
+zero, and its pod drains for at least 10 seconds before it goes (Envoy
+Gateway's `minDrainDuration`). `DELETING` is when it will be killed at the
+latest: the deletion plus the pod's 360-second grace period.
+
+Why restart at all, then? Because the ReplicaSet's retries back off: Kubernetes
+doubles the delay after every failed attempt, from 5 ms up to 1000 s. Measured
+without the restart, a grant made 30 seconds after the Gateway waited 11
+seconds for the next retry, and one made after 60 seconds waited 22; one made
+after 120 seconds waited 126, because an extra failed attempt had doubled the
+delay again. The restart creates a pod now.
 
 The second trap was avoided in step 2: with the pool not named, MetalLB reports
 *"no available IPs"* on a pool with free addresses. Read that message as *"no
@@ -221,17 +229,17 @@ Through the Gateway's address, from inside the cluster:
 ```console
 $ oc exec -n gwapi-demo client -- curl -s "http://$(oc get gateway eg -n gwapi-demo -o jsonpath='{.status.addresses[0].value}')/hello"
 {
-  "served_by": "echo-f8fc6d5c9-8qqtg",
+  "served_by": "echo-f8fc6d5c9-bbdpv",
   "method": "GET",
   "path": "/hello",
   "headers": {
     "host": "192.168.127.101",
     "user-agent": "curl/8.11.1",
     "accept": "*/*",
-    "x-forwarded-for": "10.217.0.172",
+    "x-forwarded-for": "10.217.0.103",
     "x-forwarded-proto": "http",
-    "x-envoy-external-address": "10.217.0.172",
-    "x-request-id": "9650d414-8428-4bc9-a1a1-6715d0c648ef"
+    "x-envoy-external-address": "10.217.0.103",
+    "x-request-id": "ad2cf5ac-55e5-4513-ba92-cd3a6bd8b748"
   }
 }
 ```
@@ -253,12 +261,12 @@ curl exit code 28
 Expose the generated Service with a Route:
 
 ```console
-$ oc expose -n envoy-gateway-system "$(oc get svc -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg -o name)" --name=gwapi-demo --hostname=gwapi-demo.apps-crc.testing
+$ oc expose -n envoy-gateway-system "$(oc get svc -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=gwapi-demo -o name)" --name=gwapi-demo --hostname=gwapi-demo.apps-crc.testing
 route.route.openshift.io/gwapi-demo exposed
 $ sleep 5; curl -s http://gwapi-demo.apps-crc.testing/hello | grep -E '"(served_by|x-forwarded-for|x-request-id)"'
-  "served_by": "echo-f8fc6d5c9-8qqtg",
+  "served_by": "echo-f8fc6d5c9-bbdpv",
     "x-forwarded-for": "192.168.127.1,10.217.0.2",
-    "x-request-id": "0f437877-2b06-4a97-b699-3b229d1795e5"
+    "x-request-id": "5f11ede6-5199-4802-b32d-4c79d79c5be2"
 ```
 
 **What just happened:** laptop → router → the Gateway's Envoy → echo. The
@@ -295,13 +303,13 @@ And the endpoints it holds, next to the echo pods:
 
 ```console
 $ ./admin.sh clusters | grep -E '^(httproute|xds_cluster)[^ ]*::health_flags::'
-httproute/gwapi-demo/echo/rule/0::10.217.0.173:8080::health_flags::healthy
-httproute/gwapi-demo/echo/rule/0::10.217.0.174:8080::health_flags::healthy
 xds_cluster::10.217.4.147:18000::health_flags::healthy
+httproute/gwapi-demo/echo/rule/0::10.217.0.104:8080::health_flags::healthy
+httproute/gwapi-demo/echo/rule/0::10.217.0.105:8080::health_flags::healthy
 $ oc get pods -n gwapi-demo -l app=echo -o custom-columns=NAME:.metadata.name,IP:.status.podIP
 NAME                   IP
-echo-f8fc6d5c9-46vbb   10.217.0.173
-echo-f8fc6d5c9-8qqtg   10.217.0.174
+echo-f8fc6d5c9-bbdpv   10.217.0.104
+echo-f8fc6d5c9-x5tbk   10.217.0.105
 ```
 
 **What just happened:** every Gateway API object became something from modules
@@ -335,8 +343,8 @@ Sixty requests over the two echo pods:
 
 ```console
 $ oc exec -n gwapi-demo client -- sh -c "for i in \$(seq 1 60); do curl -s http://$(oc get gateway eg -n gwapi-demo -o jsonpath='{.status.addresses[0].value}')/ | grep -o 'echo-[a-z0-9]*-[a-z0-9]*'; done" | sort | uniq -c
-  38 echo-f8fc6d5c9-46vbb
-  22 echo-f8fc6d5c9-8qqtg
+  31 echo-f8fc6d5c9-bbdpv
+  29 echo-f8fc6d5c9-x5tbk
 ```
 
 **What just happened:** not an exact 30 / 30. `least_request` picks two endpoints
@@ -352,22 +360,25 @@ same `HTTPRoute` plus one filter, which adds a header on the way to the backend.
 Note the Envoy pod, apply the change, and ask straight away:
 
 ```console
-$ oc get pods -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg -o custom-columns=NAME:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount
+$ oc get pods -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=gwapi-demo -o 'custom-columns=NAME:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount'
 NAME                                            RESTARTS
-envoy-gwapi-demo-eg-8fbae7fe-6f544c5679-fpsk8   0
+envoy-gwapi-demo-eg-8fbae7fe-576b56ffdc-5c66w   0
 $ oc apply -f manifests/50-httproute-header.yaml
 httproute.gateway.networking.k8s.io/echo configured
 $ oc exec -n gwapi-demo client -- curl -s "http://$(oc get gateway eg -n gwapi-demo -o jsonpath='{.status.addresses[0].value}')/" | grep x-tutorial
     "x-tutorial": "from-the-httproute"
-$ oc get pods -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg -o custom-columns=NAME:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount
+$ oc get pods -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=gwapi-demo -o 'custom-columns=NAME:.metadata.name,RESTARTS:.status.containerStatuses[0].restartCount'
 NAME                                            RESTARTS
-envoy-gwapi-demo-eg-8fbae7fe-6f544c5679-fpsk8   0
+envoy-gwapi-demo-eg-8fbae7fe-576b56ffdc-5c66w   0
 ```
 
 **What just happened:** the first request after the `apply` already carried the
 header, and the Envoy pod is the same one, with no restarts. The controller
 turned the new `HTTPRoute` into Envoy config and pushed it over **xDS** — the
 same API module 05's EDS cluster read from a file — while Envoy kept serving.
+Measured over 20 applies, the change reached Envoy at most 0.08 s after
+`oc apply` returned; on a slower cluster the first `curl` can still beat it, so
+if the header is missing, ask again.
 
 ### Step 10 — check yourself
 
@@ -401,10 +412,11 @@ all checks passed
 **The controller running is not a Gateway working.** Both of these left the
 Gateway `Programmed=False` on a cluster where the controller was healthy:
 
-1. The generated **proxy pod** is refused by `restricted-v2` (step 4). The
-   `EnvoyProxy` resource clears the *pod-level* security context but not the
-   *containers'* — and `shutdown-manager`'s is hard-coded upstream. Fixed with an
-   SCC grant of `nonroot-v2`, which allows a non-root UID without allowing root.
+1. The generated **proxy pod** is refused by `restricted-v2` (step 4). Both of
+   its containers run as UID `65532`, and an `EnvoyProxy` that leaves
+   `runAsUser` out does not remove it: Envoy Gateway v1.9.1 merges the
+   container `securityContext` over its default. Fixed with an SCC grant of
+   `nonroot-v2`, which allows a non-root UID without allowing root.
 2. MetalLB reported **"no available IPs"** on a pool with 20 free (step 2). The
    pool had `autoAssign: false`, so it never volunteers; a Service must name it.
 
@@ -413,7 +425,7 @@ Gateway `Programmed=False` on a cluster where the controller was healthy:
 | File | Owner | What |
 |---|---|---|
 | [`manifests/10-gatewayclass.yaml`](manifests/10-gatewayclass.yaml) | cluster operator | which controller serves the class, and the `EnvoyProxy` it uses |
-| [`manifests/20-envoyproxy.yaml`](manifests/20-envoyproxy.yaml) | cluster operator | the proxy's pod spec and Service — the OpenShift SCC and MetalLB settings |
+| [`manifests/20-envoyproxy.yaml`](manifests/20-envoyproxy.yaml) | cluster operator | the proxy's pod spec and Service — its security settings (the SCC grant of step 4 is separate) and the MetalLB pool |
 | [`manifests/30-gateway.yaml`](manifests/30-gateway.yaml) | cluster operator | the listener: HTTP on port 80, routes from this namespace only |
 | [`manifests/40-httproute.yaml`](manifests/40-httproute.yaml) | app team | every path to the `echo` Service |
 | [`manifests/50-httproute-header.yaml`](manifests/50-httproute-header.yaml) | app team | the same, plus a request header (step 9) |
@@ -429,7 +441,7 @@ Gateway `Programmed=False` on a cluster where the controller was healthy:
 | `curl` to the Gateway's address hangs from the laptop | on CRC, MetalLB addresses are on the VM's network | test from the `client` pod, or through the Route (step 6) |
 | `HTTPRoute` `Accepted=False` | the Gateway's `allowedRoutes` does not admit the route's namespace | put the route in `gwapi-demo`, or widen `allowedRoutes` |
 | `HTTPRoute` `ResolvedRefs=False` | the `backendRef` Service or port does not exist | check `oc get svc -n gwapi-demo` |
-| `./admin.sh` says no Envoy Deployment | the Gateway is not deployed, or has another name | `oc get deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg` |
+| `./admin.sh` says no Envoy Deployment | the Gateway is not deployed, or has another name | `oc get deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=gwapi-demo` |
 
 ## Clean up
 
@@ -440,15 +452,20 @@ everything in it:
 ```console
 $ oc delete route gwapi-demo -n envoy-gateway-system
 route.route.openshift.io "gwapi-demo" deleted from envoy-gateway-system namespace
-$ oc adm policy remove-scc-from-user nonroot-v2 -n envoy-gateway-system -z "$(oc get deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].spec.template.spec.serviceAccountName}')"
+$ oc adm policy remove-scc-from-user nonroot-v2 -n envoy-gateway-system -z "$(oc get deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=gwapi-demo -o jsonpath='{.items[0].spec.template.spec.serviceAccountName}')"
 clusterrole.rbac.authorization.k8s.io/system:openshift:scc:nonroot-v2 removed: "envoy-gwapi-demo-eg-8fbae7fe"
 $ oc delete -f manifests/30-gateway.yaml --wait=false
 namespace "gwapi-demo" deleted
 gateway.gateway.networking.k8s.io "eg" deleted from gwapi-demo namespace
-$ oc delete -f manifests/10-gatewayclass.yaml -f manifests/20-envoyproxy.yaml
-gatewayclass.gateway.networking.k8s.io "eg" deleted
-envoyproxy.gateway.envoyproxy.io "openshift-scc" deleted from envoy-gateway-system namespace
+$ if [ -z "$(oc get gateway -A -o jsonpath='{.items[?(@.spec.gatewayClassName=="eg")].metadata.name}')" ]; then oc delete -f manifests/10-gatewayclass.yaml -f manifests/20-envoyproxy.yaml; else echo "GatewayClass eg is still used by another Gateway - left in place"; fi
+GatewayClass eg is still used by another Gateway - left in place
 ```
+
+The last command deletes the `GatewayClass` and its `EnvoyProxy` only when no
+Gateway uses the class any more: later modules create Gateways of class `eg`
+too. Deleting it under them would take their `EnvoyProxy` at once, and the
+class itself would wait — with your `oc delete` — for their Gateways to go,
+because Envoy Gateway holds a finalizer on a class that has Gateways.
 
 Envoy Gateway itself stays installed — [`setup/`](setup/README.md) has the
 uninstall.
@@ -464,7 +481,7 @@ uninstall.
 - [Envoy Gateway](https://gateway.envoyproxy.io/)
 - [Envoy Gateway — load balancing](https://gateway.envoyproxy.io/docs/tasks/traffic/load-balancing/)
 - [`EnvoyProxy` API](https://gateway.envoyproxy.io/docs/api/extension_types/#envoyproxy)
-- [Gateway API — `HTTPRoute` filters](https://gateway-api.sigs.k8s.io/reference/spec/#httproutefilter)
+- [Gateway API — `HTTPRoute` filters](https://gateway-api.sigs.k8s.io/reference/api-spec/1.4/spec/#httproutefilter)
 - [MetalLB — IPAddressPool](https://metallb.universe.tf/configuration/)
 
 ## Diagram sources

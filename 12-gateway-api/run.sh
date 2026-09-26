@@ -15,6 +15,12 @@ proxy_sa() { $KUBE get deploy -n "$GW_NS" -l "$GW_LABEL" -o jsonpath='{.items[0]
 
 deploy() {
   say "deploying"
+  # clean deletes the namespace with --wait=false, and nothing can be created in
+  # a namespace that is still Terminating: wait until it is gone.
+  for _ in $(seq 1 60); do
+    [ "$($KUBE get ns "$NS" -o jsonpath='{.status.phase}' 2>/dev/null)" = Terminating ] || break
+    sleep 2
+  done
   $KUBE apply -f manifests/20-envoyproxy.yaml -f manifests/10-gatewayclass.yaml >/dev/null
   $KUBE wait gatewayclass/eg --for=condition=Accepted --timeout=60s >/dev/null
   $KUBE apply -f manifests/30-gateway.yaml >/dev/null
@@ -81,17 +87,28 @@ verify() {
 
 clean() {
   # The grant names the proxy's ServiceAccount, which goes with the Gateway -
-  # read it first, so the grant does not outlive the account.
+  # remove it first, while the Deployment still names the account, and before
+  # anything below that could wait.
   SA=$(proxy_sa)
+  if [ -n "$SA" ] && has_sccs; then
+    $KUBE adm policy remove-scc-from-user nonroot-v2 -z "$SA" -n "$GW_NS" >/dev/null 2>&1
+  fi
   $KUBE delete route gwapi-demo -n "$GW_NS" --ignore-not-found >/dev/null 2>&1
   $KUBE delete -f manifests/40-httproute.yaml --ignore-not-found >/dev/null 2>&1
   # 30-gateway.yaml holds the namespace too: deleting it removes echo and client.
   $KUBE delete -f manifests/30-gateway.yaml --ignore-not-found --wait=false >/dev/null 2>&1
-  $KUBE delete -f manifests/10-gatewayclass.yaml -f manifests/20-envoyproxy.yaml --ignore-not-found >/dev/null 2>&1
-  if [ -n "$SA" ] && has_sccs; then
-    $KUBE adm policy remove-scc-from-user nonroot-v2 -z "$SA" -n "$GW_NS" >/dev/null 2>&1
+  # GatewayClass eg and its EnvoyProxy are shared: later modules create
+  # Gateways of this class too. Deleting them under another Gateway takes its
+  # EnvoyProxy at once, and Envoy Gateway's finalizer on a class that still has
+  # Gateways would hold this delete - and this script - until they are gone.
+  if ! others=$($KUBE get gateway -A -o jsonpath='{.items[?(@.spec.gatewayClassName=="eg")].metadata.name}' 2>/dev/null); then
+    bad "could not list Gateways - GatewayClass eg and its EnvoyProxy left in place"
+  elif [ -n "$others" ]; then
+    ok "removed; GatewayClass eg is still used by another Gateway, so it stays"
+  else
+    $KUBE delete -f manifests/10-gatewayclass.yaml -f manifests/20-envoyproxy.yaml --ignore-not-found >/dev/null 2>&1
+    ok "removed (the Envoy Gateway install itself is left alone - see setup/)"
   fi
-  ok "removed (the Envoy Gateway install itself is left alone - see setup/)"
 }
 
 case "${1:-deploy}" in
