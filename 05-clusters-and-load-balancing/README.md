@@ -32,7 +32,7 @@ actually working?**
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/05-clusters-and-load-balancing/discovery.dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/05-clusters-and-load-balancing/discovery.light.png">
-  <img alt="Five cluster types, the same three echo pods. STATIC holds the sidecar at 127.0.0.1:8081. STRICT_DNS on the headless Service holds three endpoints, one per pod, and Envoy chooses between them. STRICT_DNS on a ClusterIP Service holds one virtual IP, so kube-proxy chooses the pod per connection. LOGICAL_DNS holds only the first address, so all requests go to one pod. EDS holds the three endpoints written to a file by write-eds.sh, picked up 35 to 77 seconds after the edit, with no restart." src="../docs/diagrams/05-clusters-and-load-balancing/discovery.light.png">
+  <img alt="Five cluster types, the same three echo pods. STATIC holds the sidecar at 127.0.0.1:8081. STRICT_DNS on the headless Service holds three endpoints, one per pod, and Envoy chooses between them. STRICT_DNS on a ClusterIP Service holds one virtual IP, so the Service chooses the pod per connection. LOGICAL_DNS holds only the first address, so all requests go to one pod. EDS holds the three endpoints written to a file by write-eds.sh, picked up 3 to 77 seconds after the edit, with no restart." src="../docs/diagrams/05-clusters-and-load-balancing/discovery.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
 
@@ -79,16 +79,16 @@ deployment "sick" successfully rolled out
 The pods, with their IPs — you will see these addresses again inside Envoy:
 
 ```console
-$ oc get pods -n envoy-05 -l 'app in (echo,sick)' -o custom-columns=NAME:.metadata.name,IP:.status.podIP,READY:.status.containerStatuses[0].ready
+$ oc get pods -n envoy-05 -l 'app in (echo,sick)' -o 'custom-columns=NAME:.metadata.name,IP:.status.podIP,READY:.status.containerStatuses[0].ready'
 NAME                    IP             READY
-echo-f8fc6d5c9-2299r    10.217.0.199   true
-echo-f8fc6d5c9-c56lr    10.217.0.197   true
-echo-f8fc6d5c9-mrxbv    10.217.0.198   true
-sick-5557c59b48-wfsct   10.217.0.200   true
+echo-f8fc6d5c9-kcbkj    10.217.0.134   true
+echo-f8fc6d5c9-kmkhw    10.217.0.133   true
+echo-f8fc6d5c9-nb857    10.217.0.132   true
+sick-5557c59b48-wjk4s   10.217.0.135   true
 $ oc get svc -n envoy-05 echo echo-vip sick -o custom-columns=NAME:.metadata.name,CLUSTER-IP:.spec.clusterIP
 NAME       CLUSTER-IP
 echo       None
-echo-vip   10.217.4.198
+echo-vip   10.217.5.230
 sick       None
 ```
 
@@ -126,14 +126,15 @@ $ grep -nE '^      - name: |^        type: |^        lb_policy: ' manifests/10-e
 168:      - name: unchecked
 169:        type: STRICT_DNS
 170:        lb_policy: ROUND_ROBIN
-181:      - name: checked
-182:        type: STRICT_DNS
-183:        lb_policy: ROUND_ROBIN
+183:      - name: checked
+184:        type: STRICT_DNS
+185:        lb_policy: ROUND_ROBIN
 ```
 
-**What just happened:** eleven clusters. Part A varies the `type`, part B the
-`lb_policy`, part C adds a health check. Every one except `static_sidecar` and
-`eds` resolves `echo`, `echo-vip` or `sick`.
+**What just happened:** ten clusters — the first line, `http_listener`, is the
+listener. Part A varies the `type`, part B the `lb_policy`, part C adds a health
+check. Every one except `static_sidecar` and `eds` resolves `echo`, `echo-vip`
+or `sick`.
 
 ### Step 3 — start two Envoys
 
@@ -152,6 +153,7 @@ $ oc rollout status -n envoy-05 deploy/envoy --timeout=180s
 Waiting for deployment "envoy" rollout to finish: 0 of 1 updated replicas are available...
 deployment "envoy" successfully rolled out
 $ oc rollout status -n envoy-05 deploy/envoy-single --timeout=180s
+Waiting for deployment "envoy-single" rollout to finish: 0 of 1 updated replicas are available...
 deployment "envoy-single" successfully rolled out
 ```
 
@@ -166,12 +168,12 @@ on `127.0.0.1:8081` inside the same pod.
 
 ```console
 $ oc exec -n envoy-05 client -- curl -s http://envoy:9901/clusters | grep -E '^(static_sidecar|headless|vip|logical|eds)::.*::health_flags' | sort
-headless::10.217.0.197:8080::health_flags::healthy
-headless::10.217.0.198:8080::health_flags::healthy
-headless::10.217.0.199:8080::health_flags::healthy
-logical::10.217.0.198:8080::health_flags::healthy
+headless::10.217.0.132:8080::health_flags::healthy
+headless::10.217.0.133:8080::health_flags::healthy
+headless::10.217.0.134:8080::health_flags::healthy
+logical::10.217.0.133:8080::health_flags::healthy
 static_sidecar::127.0.0.1:8081::health_flags::healthy
-vip::10.217.4.198:8080::health_flags::healthy
+vip::10.217.5.230:8080::health_flags::healthy
 ```
 
 **What just happened**, cluster by cluster — compare the addresses with step 1:
@@ -188,7 +190,7 @@ vip::10.217.4.198:8080::health_flags::healthy
 
 ```console
 $ oc exec -n envoy-05 client -- curl -s http://envoy:8080/static | grep served_by
-  "served_by": "envoy-788c4f45bd-wntjh",
+  "served_by": "envoy-788c4f45bd-x6n9d",
 ```
 
 **What just happened:** the answer came from the `sidecar` container **inside the
@@ -212,15 +214,15 @@ runs **inside** the client pod, so it is one `oc exec` rather than sixty:
 
 ```console
 $ oc exec -n envoy-05 client -- sh -c 'for i in $(seq 1 60); do curl -s http://envoy-single:8080/headless | grep -o "echo-[a-z0-9]*-[a-z0-9]*"; done' | sort | uniq -c
-  20 echo-f8fc6d5c9-2299r
-  20 echo-f8fc6d5c9-c56lr
-  20 echo-f8fc6d5c9-mrxbv
+  20 echo-f8fc6d5c9-kcbkj
+  20 echo-f8fc6d5c9-kmkhw
+  20 echo-f8fc6d5c9-nb857
 $ oc exec -n envoy-05 client -- sh -c 'for i in $(seq 1 60); do curl -s http://envoy-single:8080/vip | grep -o "echo-[a-z0-9]*-[a-z0-9]*"; done' | sort | uniq -c
-  16 echo-f8fc6d5c9-2299r
-  29 echo-f8fc6d5c9-c56lr
-  15 echo-f8fc6d5c9-mrxbv
+  14 echo-f8fc6d5c9-kcbkj
+  19 echo-f8fc6d5c9-kmkhw
+  27 echo-f8fc6d5c9-nb857
 $ oc exec -n envoy-05 client -- sh -c 'for i in $(seq 1 60); do curl -s http://envoy-single:8080/logical | grep -o "echo-[a-z0-9]*-[a-z0-9]*"; done' | sort | uniq -c
-  60 echo-f8fc6d5c9-mrxbv
+  60 echo-f8fc6d5c9-kmkhw
 ```
 
 **What just happened:**
@@ -228,8 +230,9 @@ $ oc exec -n envoy-05 client -- sh -c 'for i in $(seq 1 60); do curl -s http://e
 - **`headless`** — an exact **20 / 20 / 20**. Envoy holds all three pods and
   rotates between them.
 - **`vip`** — uneven. Envoy holds *one* endpoint, the virtual IP, so its
-  `lb_policy` has nothing to choose between. The pod is chosen by **kube-proxy**,
-  once per connection. Envoy's counters for that cluster show one connection
+  `lb_policy` has nothing to choose between. The pod is chosen by the **Service**
+  itself — kube-proxy on most clusters, OVN-Kubernetes on OpenShift — once per
+  connection. Envoy's counters for that cluster show one connection
   per request:
 
 ```console
@@ -239,12 +242,15 @@ cluster.vip.upstream_rq_total: 60
 ```
 
   The echo app speaks HTTP/1.0 and closes every connection, so here every request
-  is a fresh connection and a fresh kube-proxy choice. An app that keeps
+  is a fresh connection and a fresh choice by the Service. An app that keeps
   connections open — HTTP/1.1 keep-alive, HTTP/2, gRPC — sends many requests down
-  one connection, all to whichever pod kube-proxy picked for it.
+  one connection, all to whichever pod the Service picked for it.
 
 - **`logical`** — all 60 to one pod. `LOGICAL_DNS` is meant for a single large
-  service behind DNS (an external API), not for pods.
+  service behind DNS (an external API), not for pods. It uses whichever address
+  DNS lists first at each re-resolution (every 5 s). OpenShift's DNS lists them
+  in a fixed order, so here the pod never changes; a DNS server that shuffles
+  them — kind's does — moves `logical` from pod to pod.
 
 **The lesson:** for Envoy to balance across pods, it has to *hold* the pods. That
 means a headless Service (`clusterIP: None`) — which is why the shared echo
@@ -267,50 +273,52 @@ IPs and writes them into the ConfigMap. Envoy is **not** restarted.
 ```console
 $ ./write-eds.sh
 wrote 3 endpoint(s) to configmap/eds:
-  10.217.0.197:8080
-  10.217.0.198:8080
-  10.217.0.199:8080
+  10.217.0.132:8080
+  10.217.0.133:8080
+  10.217.0.134:8080
 $ oc get configmap eds -n envoy-05 -o jsonpath='{.data.eds\.yaml}'
 resources:
 - "@type": type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment
   cluster_name: eds
   endpoints:
   - lb_endpoints:
-    - endpoint: { address: { socket_address: { address: 10.217.0.197, port_value: 8080 } } }
-    - endpoint: { address: { socket_address: { address: 10.217.0.198, port_value: 8080 } } }
-    - endpoint: { address: { socket_address: { address: 10.217.0.199, port_value: 8080 } } }
+    - endpoint: { address: { socket_address: { address: 10.217.0.132, port_value: 8080 } } }
+    - endpoint: { address: { socket_address: { address: 10.217.0.133, port_value: 8080 } } }
+    - endpoint: { address: { socket_address: { address: 10.217.0.134, port_value: 8080 } } }
 ```
 
 Kubernetes takes a while to deliver a ConfigMap edit to a running pod. Wait
 until Envoy has the endpoints, and see how long it took:
 
 ```console
-$ start=$SECONDS; for i in $(seq 1 60); do oc exec -n envoy-05 client -- curl -s http://envoy:9901/clusters | grep -q '^eds::.*health_flags' && break; sleep 2; done; echo "Envoy has the endpoints after about $((SECONDS - start)) s"
-Envoy has the endpoints after about 77 s
+$ start=$SECONDS; got=no; for i in $(seq 1 60); do if oc exec -n envoy-05 client -- curl -s http://envoy:9901/clusters | grep -q '^eds::.*health_flags'; then got=yes; break; fi; sleep 2; done; echo "endpoints loaded: $got, after about $((SECONDS - start)) s"; [ "$got" = yes ]
+endpoints loaded: yes, after about 69 s
 $ oc exec -n envoy-05 client -- curl -s http://envoy:9901/clusters | grep '^eds::.*health_flags'
-eds::10.217.0.197:8080::health_flags::healthy
-eds::10.217.0.198:8080::health_flags::healthy
-eds::10.217.0.199:8080::health_flags::healthy
+eds::10.217.0.132:8080::health_flags::healthy
+eds::10.217.0.133:8080::health_flags::healthy
+eds::10.217.0.134:8080::health_flags::healthy
 $ oc exec -n envoy-05 client -- sh -c 'for i in $(seq 1 30); do curl -s http://envoy:8080/eds | grep -o "echo-[a-z0-9]*-[a-z0-9]*"; done' | sort | uniq -c
-  11 echo-f8fc6d5c9-2299r
-  10 echo-f8fc6d5c9-c56lr
-   9 echo-f8fc6d5c9-mrxbv
+  12 echo-f8fc6d5c9-kcbkj
+  10 echo-f8fc6d5c9-kmkhw
+   8 echo-f8fc6d5c9-nb857
 ```
 
 **What just happened:** `503 no healthy upstream`, then — with no restart — three
 endpoints and traffic to all three pods. The delay is Kubernetes', not Envoy's:
 the kubelet refreshes a directory-mounted ConfigMap on its own schedule, so the
-delay varies — 35, 64 and 77 s in three runs while writing this. Then it swaps a symlink inside `/etc/eds`, and
-Envoy's `watched_directory` reacts to that move:
+delay varies — from 3 s to 77 s, and differently for each pod, in the runs made
+while writing this. Then it swaps a symlink inside `/etc/eds`, and Envoy's
+`watched_directory` reacts to that move (within a fifth of a second, measured
+while writing this):
 
 ```console
 $ oc exec -n envoy-05 deploy/envoy -c envoy -- ls -la /etc/eds
 total 0
-drwxrwsrwx. 3 root 1001480000 76 Sep 26 03:58 .
-drwxr-xr-x. 1 root root       29 Sep 26 03:57 ..
-drwxr-sr-x. 2 root 1001480000 22 Sep 26 03:58 ..2026_09_26_03_58_33.4252411489
-lrwxrwxrwx. 1 root 1001480000 32 Sep 26 03:58 ..data -> ..2026_09_26_03_58_33.4252411489
-lrwxrwxrwx. 1 root 1001480000 15 Sep 26 03:57 eds.yaml -> ..data/eds.yaml
+drwxrwsrwx. 3 root 1001430000 76 Sep 26 05:15 .
+drwxr-xr-x. 1 root root       29 Sep 26 05:13 ..
+drwxr-sr-x. 2 root 1001430000 22 Sep 26 05:15 ..2026_09_26_05_15_03.3855061392
+lrwxrwxrwx. 1 root 1001430000 32 Sep 26 05:15 ..data -> ..2026_09_26_05_15_03.3855061392
+lrwxrwxrwx. 1 root 1001430000 15 Sep 26 05:13 eds.yaml -> ..data/eds.yaml
 ```
 
 That is also why this ConfigMap is mounted as a **directory**: with `subPath` —
@@ -322,30 +330,31 @@ control plane is a program that watches Kubernetes and keeps this list current.
 
 ## Part B — how Envoy chooses between endpoints
 
-### Step 8 — four policies, 60 requests each
+### Step 8 — three policies, 60 requests each
 
 The same three pods; only `lb_policy` differs. `headless` is `ROUND_ROBIN`.
 
 ```console
 $ oc exec -n envoy-05 client -- sh -c 'for i in $(seq 1 60); do curl -s http://envoy-single:8080/headless | grep -o "echo-[a-z0-9]*-[a-z0-9]*"; done' | sort | uniq -c
-  20 echo-f8fc6d5c9-2299r
-  20 echo-f8fc6d5c9-c56lr
-  20 echo-f8fc6d5c9-mrxbv
+  20 echo-f8fc6d5c9-kcbkj
+  20 echo-f8fc6d5c9-kmkhw
+  20 echo-f8fc6d5c9-nb857
 $ oc exec -n envoy-05 client -- sh -c 'for i in $(seq 1 60); do curl -s http://envoy-single:8080/least-request | grep -o "echo-[a-z0-9]*-[a-z0-9]*"; done' | sort | uniq -c
-  18 echo-f8fc6d5c9-2299r
-  21 echo-f8fc6d5c9-c56lr
-  21 echo-f8fc6d5c9-mrxbv
+  25 echo-f8fc6d5c9-kcbkj
+  21 echo-f8fc6d5c9-kmkhw
+  14 echo-f8fc6d5c9-nb857
 $ oc exec -n envoy-05 client -- sh -c 'for i in $(seq 1 60); do curl -s http://envoy-single:8080/random | grep -o "echo-[a-z0-9]*-[a-z0-9]*"; done' | sort | uniq -c
-  17 echo-f8fc6d5c9-2299r
-  20 echo-f8fc6d5c9-c56lr
-  23 echo-f8fc6d5c9-mrxbv
+  24 echo-f8fc6d5c9-kcbkj
+  14 echo-f8fc6d5c9-kmkhw
+  22 echo-f8fc6d5c9-nb857
 ```
 
 **What just happened:** round robin rotated exactly. `LEAST_REQUEST` picks two
 endpoints at random and sends to the one with fewer requests in flight — with
 one request at a time, they are always tied, so it behaves like `RANDOM`, which
 is uneven by nature. `LEAST_REQUEST` earns its keep when requests take different
-lengths of time; it is also Envoy Gateway's default (module 12).
+lengths of time; it is also
+[Envoy Gateway's default](https://gateway.envoyproxy.io/docs/tasks/traffic/load-balancing/).
 
 ### Step 9 — round robin is exact per worker thread
 
@@ -357,29 +366,42 @@ $ oc exec -n envoy-05 client -- curl -s http://envoy-single:9901/server_info | g
 $ oc exec -n envoy-05 client -- curl -s http://envoy:9901/server_info | grep '"concurrency"'
   "concurrency": 10,
 $ oc exec -n envoy-05 client -- sh -c 'for i in $(seq 1 60); do curl -s http://envoy-single:8080/headless | grep -o "echo-[a-z0-9]*-[a-z0-9]*"; done' | sort | uniq -c
-  20 echo-f8fc6d5c9-2299r
-  20 echo-f8fc6d5c9-c56lr
-  20 echo-f8fc6d5c9-mrxbv
+  20 echo-f8fc6d5c9-kcbkj
+  20 echo-f8fc6d5c9-kmkhw
+  20 echo-f8fc6d5c9-nb857
 $ oc exec -n envoy-05 client -- sh -c 'for i in $(seq 1 60); do curl -s http://envoy:8080/headless | grep -o "echo-[a-z0-9]*-[a-z0-9]*"; done' | sort | uniq -c
-  20 echo-f8fc6d5c9-2299r
-  20 echo-f8fc6d5c9-c56lr
-  20 echo-f8fc6d5c9-mrxbv
+  19 echo-f8fc6d5c9-kcbkj
+  21 echo-f8fc6d5c9-kmkhw
+  20 echo-f8fc6d5c9-nb857
+```
+
+Now the same 60 requests to the ten-worker `envoy` down **one** connection —
+curl reuses it for every URL it is given:
+
+```console
+$ oc exec -n envoy-05 client -- sh -c 'curl -s $(for i in $(seq 1 60); do printf "http://envoy:8080/headless "; done) | grep -o "echo-[a-z0-9]*-[a-z0-9]*"' | sort | uniq -c
+  20 echo-f8fc6d5c9-kcbkj
+  20 echo-f8fc6d5c9-kmkhw
+  20 echo-f8fc6d5c9-nb857
 ```
 
 <!-- markdownlint-disable MD033 -->
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/05-clusters-and-load-balancing/round-robin-workers.dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/05-clusters-and-load-balancing/round-robin-workers.light.png">
-  <img alt="Sixty requests, each on a new connection, to two Envoys with the same config. With one worker thread, round robin gave an exact 20, 20, 20 across three pods in four runs out of four. With ten worker threads, each keeping its own round-robin position, the split was uneven in four runs out of four." src="../docs/diagrams/05-clusters-and-load-balancing/round-robin-workers.light.png">
+  <img alt="Sixty requests, each on a new connection, to two Envoys with the same config. With one worker thread, round robin gave an exact 20, 20, 20 across three pods in ten runs out of ten. With ten worker threads, each keeping its own round-robin position, the split was uneven in 28 runs out of 30. Sent down one connection, which one worker handles, the ten-worker Envoy gave 20, 20, 20 in ten runs out of ten." src="../docs/diagrams/05-clusters-and-load-balancing/round-robin-workers.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
 
 **What just happened:** by default Envoy runs one worker thread per CPU it can
 see. Each new connection is accepted by one worker and stays there, and each
-worker keeps its own round-robin position. One worker gives one exact rotation;
-ten give ten rotations, interleaved by whichever worker the kernel handed each
-connection to. Measured while writing this: `envoy-single` gave 20/20/20 in four
-runs out of four, `envoy` was uneven in four out of four.
+worker keeps its own round-robin position, starting at a random place. One
+worker gives one exact rotation; ten give ten rotations, interleaved by whichever
+worker the kernel handed each connection to — usually uneven, but chance can
+still land on 20/20/20. Measured while writing this: `envoy-single` gave
+20/20/20 in 10 runs out of 10, `envoy` in 2 runs out of 30. The last command
+takes chance away: one connection means one worker, so even the ten-worker
+`envoy` rotates exactly — 10 runs out of 10.
 
 Neither is wrong. Across many requests the default is even enough — and
 `--concurrency 1` would cap the proxy at one CPU.
@@ -390,10 +412,10 @@ The `/ring-hash` route hashes the `x-user` header, so each user sticks to a pod:
 
 ```console
 $ for u in alice bob carol dave; do printf '%-6s' "$u"; oc exec -n envoy-05 client -- sh -c "for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -H 'x-user: $u' http://envoy:8080/ring-hash | grep -o 'echo-[a-z0-9]*-[a-z0-9]*'; done" | sort | uniq -c | tr -s ' ' | tr '\n' ' '; echo; done
-alice  10 echo-f8fc6d5c9-c56lr 
-bob    10 echo-f8fc6d5c9-2299r 
-carol  10 echo-f8fc6d5c9-mrxbv 
-dave   10 echo-f8fc6d5c9-2299r 
+alice  10 echo-f8fc6d5c9-kmkhw 
+bob    10 echo-f8fc6d5c9-kcbkj 
+carol  10 echo-f8fc6d5c9-kcbkj 
+dave   10 echo-f8fc6d5c9-kmkhw 
 ```
 
 **What just happened:** ten requests per user, one pod per user. Use it when a
@@ -410,20 +432,20 @@ the sick pod. Only `checked` has an Envoy health check — `GET /healthz` every 
 
 ```console
 $ oc exec -n envoy-05 client -- curl -s -w ' %{http_code}\n' http://sick:8080/healthz
-503 from sick-5557c59b48-wfsct
+503 from sick-5557c59b48-wjk4s
  503
 $ oc exec -n envoy-05 client -- curl -s http://envoy:9901/clusters | grep -E '^(unchecked|checked)::.*::health_flags' | sort
-checked::10.217.0.197:8080::health_flags::healthy
-checked::10.217.0.198:8080::health_flags::healthy
-checked::10.217.0.199:8080::health_flags::healthy
-checked::10.217.0.200:8080::health_flags::/failed_active_hc
-unchecked::10.217.0.197:8080::health_flags::healthy
-unchecked::10.217.0.198:8080::health_flags::healthy
-unchecked::10.217.0.199:8080::health_flags::healthy
-unchecked::10.217.0.200:8080::health_flags::healthy
+checked::10.217.0.132:8080::health_flags::healthy
+checked::10.217.0.133:8080::health_flags::healthy
+checked::10.217.0.134:8080::health_flags::healthy
+checked::10.217.0.135:8080::health_flags::/failed_active_hc
+unchecked::10.217.0.132:8080::health_flags::healthy
+unchecked::10.217.0.133:8080::health_flags::healthy
+unchecked::10.217.0.134:8080::health_flags::healthy
+unchecked::10.217.0.135:8080::health_flags::healthy
 $ oc exec -n envoy-05 client -- sh -c 'for i in $(seq 1 60); do curl -s -o /dev/null -w "%{http_code}\n" http://envoy:8080/unchecked; done' | sort | uniq -c
-  44 200
-  16 503
+  45 200
+  15 503
 $ oc exec -n envoy-05 client -- sh -c 'for i in $(seq 1 60); do curl -s -o /dev/null -w "%{http_code}\n" http://envoy:8080/checked; done' | sort | uniq -c
   60 200
 ```
@@ -432,7 +454,7 @@ $ oc exec -n envoy-05 client -- sh -c 'for i in $(seq 1 60); do curl -s -o /dev/
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/05-clusters-and-load-balancing/health-checks.dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/05-clusters-and-load-balancing/health-checks.light.png">
-  <img alt="Two clusters with the same four endpoints: three echo pods and one sick pod that Kubernetes considers Ready because its TCP probe passes, but which answers every request with 503. Without a health check, 17 of 60 requests failed. With Envoy asking each endpoint GET /healthz, the sick pod is marked failed_active_hc, gets no traffic, and 60 of 60 succeed." src="../docs/diagrams/05-clusters-and-load-balancing/health-checks.light.png">
+  <img alt="Two clusters with the same four endpoints: three echo pods and one sick pod that Kubernetes considers Ready because its TCP probe passes, but which answers every request with 503. Without a health check, about one request in four failed — 14 to 17 of 60 in three runs. With Envoy asking each endpoint GET /healthz, the sick pod is marked failed_active_hc, gets no traffic, and 60 of 60 succeed." src="../docs/diagrams/05-clusters-and-load-balancing/health-checks.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
 
@@ -448,7 +470,8 @@ proxy, for endpoints Kubernetes does not manage too.
 
 One default to know: a cluster that has **never** carried traffic is checked only
 every **60 s**, not every `interval` — the API calls it `no_traffic_interval`.
-Once traffic flows, Envoy switches to the 2 s interval.
+Once traffic flows, Envoy switches to the 2 s interval from the next check on,
+which can still be up to 60 s away.
 
 ### Step 12 — check yourself
 
@@ -459,11 +482,11 @@ $ ./run.sh verify
   ✓ STATIC: the sidecar on localhost
   ✓ STRICT_DNS, headless Service: one endpoint per pod
   ✓ STRICT_DNS, ClusterIP Service: one endpoint, the virtual IP
-  ✓ LOGICAL_DNS: only the first address
+  ✓ LOGICAL_DNS: one endpoint, one of the pod IPs
   ✓ the sidecar answers from inside the Envoy pod
 
 2. EDS: endpoints delivered from a file, no restart
-  ✓ Envoy loaded the 3 endpoints written by write-eds.sh
+  ✓ Envoy loaded exactly the endpoints write-eds.sh wrote
 
 3. how Envoy chooses between endpoints
   ✓ ROUND_ROBIN on one worker thread: an exact 20/20/20
@@ -473,7 +496,7 @@ $ ./run.sh verify
 4. health checks
   ✓ Envoy's health check flags the sick pod
   ✓ with the health check, 60 of 60 succeed
-  ✓ without it, the sick pod still gets traffic
+  ✓ without it, the sick pod still answers some of 60
 
 all checks passed
 ```
@@ -493,7 +516,7 @@ all checks passed
 
 | `lb_policy` | Chooses | Measured here |
 |---|---|---|
-| `ROUND_ROBIN` | each endpoint in turn, per worker thread | exact 20/20/20 on one worker; uneven across ten |
+| `ROUND_ROBIN` | each endpoint in turn, per worker thread | exact 20/20/20 on one worker; usually uneven across ten |
 | `LEAST_REQUEST` | the less busy of two random endpoints | like `RANDOM` when requests do not overlap |
 | `RANDOM` | at random | uneven |
 | `RING_HASH` | by a hash of the request (`hash_policy` on the route) | one user, one pod |
@@ -509,7 +532,7 @@ not used here.
 | `interval` | `2s` | how often, once the cluster carries traffic |
 | `no_traffic_interval` | default **60 s** (API) | how often, before the cluster has ever carried traffic |
 | `timeout` | `1s` | how long to wait for an answer |
-| `unhealthy_threshold` | `2` | failures in a row to mark an endpoint unhealthy |
+| `unhealthy_threshold` | `2` | timeouts or refused connections in a row to mark an endpoint unhealthy — a status other than 200 marks it unhealthy at once, whatever this is set to |
 | `healthy_threshold` | `1` | successes to mark it healthy again — the API notes that at startup one is always enough |
 
 ## Troubleshooting
@@ -517,10 +540,10 @@ not used here.
 | You see | Why | Fix |
 |---|---|---|
 | Envoy crash-loops: `node 'id' and 'cluster' are required` | an `EDS` cluster — any dynamic resource — needs the proxy to identify itself | keep the `node:` block at the top of the config |
-| `/eds` stays `no healthy upstream` after `write-eds.sh` | the kubelet has not delivered the ConfigMap edit yet | wait — step 7's loop allows two minutes |
+| step 7's loop ends with `endpoints loaded: no` | the kubelet has not delivered the ConfigMap edit yet | run the loop again — the kubelet's sync period is about a minute |
 | an EDS edit never arrives | the ConfigMap is mounted with `subPath` | mount it as a directory, as `20-envoy.yaml` does |
-| the split through `vip` is uneven, or all on one pod | Envoy holds one endpoint; kube-proxy chooses | use a headless Service |
-| step 6's `headless` splits evenly over **two** pods, not three | Envoy held two of the three endpoints at that moment — seen once while writing this, and not reproduced in five later runs | check the endpoint count at the start of step 6, wait a few seconds, run it again |
+| the split through `vip` is uneven, or all on one pod | Envoy holds one endpoint; the Service chooses, per connection | use a headless Service |
+| step 6's `headless` splits evenly over **two** pods, not three | Envoy held two of the three endpoints: `STRICT_DNS` re-resolves every 5 s and cluster DNS caches each answer for 5 s, so a pod that turned Ready moments earlier can be missing for up to about 10 s (measured: 30/30 for 7.5 s after a scale-up). Seen once while writing this | check the endpoint count at the start of step 6; wait 10 s and run it again |
 | a bad pod keeps getting traffic | no Envoy health check, and a readiness probe that only checks the port | add `health_checks`, or make the readiness probe test the app |
 
 ## Clean up

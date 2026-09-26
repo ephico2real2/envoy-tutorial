@@ -68,11 +68,11 @@ a { color: var(--remote); }
     <h2>How Envoy finds endpoints</h2>
     <figure>
       <div class="fig-scroll">
-<svg viewBox="0 0 980 446" role="img" aria-label="Five cluster types, the same three echo pods. STATIC holds the sidecar at 127.0.0.1:8081. STRICT_DNS on the headless Service holds three endpoints, one per pod, and Envoy chooses between them. STRICT_DNS on a ClusterIP Service holds one virtual IP, so kube-proxy chooses the pod per connection. LOGICAL_DNS holds only the first address, so all requests go to one pod. EDS holds the three endpoints written to a file by write-eds.sh, picked up 35 to 77 seconds after the edit, with no restart.">
+<svg viewBox="0 0 980 446" role="img" aria-label="Five cluster types, the same three echo pods. STATIC holds the sidecar at 127.0.0.1:8081. STRICT_DNS on the headless Service holds three endpoints, one per pod, and Envoy chooses between them. STRICT_DNS on a ClusterIP Service holds one virtual IP, so the Service chooses the pod per connection. LOGICAL_DNS holds only the first address, so all requests go to one pod. EDS holds the three endpoints written to a file by write-eds.sh, picked up 3 to 77 seconds after the edit, with no restart.">
   <defs><marker id="d1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="d1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
   <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
 <rect x="20" y="14" width="940" height="40" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
-<text x="34" y="39" font-weight="600">ENVOY — one route per cluster, the same echo pods behind each</text>
+<text x="34" y="39" font-weight="600">ENVOY — one route per cluster, an echo server behind each</text>
 <text x="120.0" y="84" fill="var(--muted)">the cluster type</text>
 <rect x="20" y="92" width="176" height="66" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
 <text x="34" y="113" font-weight="600" fill="var(--remote)">STATIC</text>
@@ -133,8 +133,8 @@ a { color: var(--remote); }
 <line x1="299.0" y1="262" x2="299.0" y2="298" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
 <rect x="402" y="314" width="176" height="66" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
 <text x="416" y="335" font-weight="600">3 pods</text>
-<text x="416" y="352">kube-proxy chooses</text>
-<text x="416" y="369" fill="var(--muted)">per connection: 12/23/25</text>
+<text x="416" y="352">the Service chooses</text>
+<text x="416" y="369" fill="var(--muted)">per connection, unevenly</text>
 <line x1="490.0" y1="262" x2="490.0" y2="298" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
 <rect x="593" y="314" width="176" height="66" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
 <text x="607" y="335" font-weight="600">1 pod</text>
@@ -143,11 +143,11 @@ a { color: var(--remote); }
 <line x1="681.0" y1="262" x2="681.0" y2="298" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
 <rect x="784" y="314" width="176" height="66" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
 <text x="798" y="335" font-weight="600">3 pods</text>
-<text x="798" y="352">35–77 s after the edit</text>
+<text x="798" y="352">3–77 s after the edit</text>
 <text x="798" y="369" fill="var(--muted)">no restart</text>
 <line x1="872.0" y1="262" x2="872.0" y2="298" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
 <text x="20" y="412" font-weight="600">Envoy can only balance across endpoints it holds: every pod via a headless Service or EDS; one VIP via a</text>
-<text x="20" y="432" fill="var(--muted)">ClusterIP Service, where kube-proxy picks the pod instead. Measured on CRC: 60 requests per route, 3 echo pods.</text>
+<text x="20" y="432" fill="var(--muted)">ClusterIP Service, where the Service picks the pod instead. Measured on CRC: 60 requests per route (30 for EDS), 3 echo pods.</text>
   </g>
 </svg>
       </div>
@@ -159,7 +159,7 @@ a { color: var(--remote); }
     <h2>Round robin is per worker thread</h2>
     <figure>
       <div class="fig-scroll">
-<svg viewBox="0 0 980 430" role="img" aria-label="Sixty requests, each on a new connection, to two Envoys with the same config. With one worker thread, round robin gave an exact 20, 20, 20 across three pods in four runs out of four. With ten worker threads, each keeping its own round-robin position, the split was uneven in four runs out of four.">
+<svg viewBox="0 0 980 430" role="img" aria-label="Sixty requests, each on a new connection, to two Envoys with the same config. With one worker thread, round robin gave an exact 20, 20, 20 across three pods in ten runs out of ten. With ten worker threads, each keeping its own round-robin position, the split was uneven in 28 runs out of 30; down one connection it was 20, 20, 20 in ten runs out of ten.">
   <defs><marker id="d2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="d2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
   <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
 <rect x="250" y="14" width="480" height="44" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
@@ -201,18 +201,18 @@ a { color: var(--remote); }
 <line x1="735" y1="256" x2="735" y2="294" stroke="currentColor" stroke-width="1.3" marker-end="url(#d2)"/>
 <rect x="20" y="296" width="450" height="70" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
 <text x="34" y="317" fill="var(--remote)" font-weight="600">20 / 20 / 20</text>
-<text x="34" y="334">in 4 runs out of 4</text>
+<text x="34" y="334">in 10 runs out of 10</text>
 <text x="34" y="351" fill="var(--muted)">an exact rotation across the 3 pods</text>
 <rect x="510" y="296" width="450" height="70" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
-<text x="524" y="317" font-weight="600">20/19/21 · 19/22/19 · 19/19/22 · 21/18/21</text>
-<text x="524" y="334">uneven in 4 runs out of 4</text>
+<text x="524" y="317" font-weight="600">usually uneven — 20/20/20 in 2 runs of 30</text>
+<text x="524" y="334">sent down one connection instead: 20/20/20 in 10 of 10</text>
 <text x="524" y="351" fill="var(--muted)">ten rotations, interleaved by the kernel</text>
 <text x="20" y="400" font-weight="600">Round robin is exact per worker thread, not across the whole proxy. Measured on CRC, 60 requests to 3 pods per run.</text>
 <text x="20" y="420" fill="var(--muted)">Envoy docs: a connection &quot;is bound to a single worker thread for its entire lifetime&quot;; state is thread-local.</text>
   </g>
 </svg>
       </div>
-      <figcaption>One worker thread gives an exact rotation; ten give ten interleaved rotations. Measured four times each.</figcaption>
+      <figcaption>One worker thread gives an exact rotation; ten give ten interleaved rotations, and chance decides the total.</figcaption>
     </figure>
   </section>
 
@@ -220,7 +220,7 @@ a { color: var(--remote); }
     <h2>Health checks</h2>
     <figure>
       <div class="fig-scroll">
-<svg viewBox="0 0 980 438" role="img" aria-label="Two clusters with the same four endpoints: three echo pods and one sick pod that Kubernetes considers Ready because its TCP probe passes, but which answers every request with 503. Without a health check, 17 of 60 requests failed. With Envoy asking each endpoint GET /healthz, the sick pod is marked failed_active_hc, gets no traffic, and 60 of 60 succeed.">
+<svg viewBox="0 0 980 438" role="img" aria-label="Two clusters with the same four endpoints: three echo pods and one sick pod that Kubernetes considers Ready because its TCP probe passes, but which answers every request with 503. Without a health check, 14 to 17 of 60 requests failed in three runs. With Envoy asking each endpoint GET /healthz, the sick pod is marked failed_active_hc, gets no traffic, and 60 of 60 succeed.">
   <defs><marker id="d3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="d3g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
   <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
 <rect x="330" y="14" width="320" height="40" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
@@ -230,10 +230,10 @@ a { color: var(--remote); }
 <rect x="20" y="96" width="450" height="84" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
 <text x="34" y="117" font-weight="600">cluster unchecked</text>
 <text x="34" y="134">no health check: all 4 endpoints get traffic</text>
-<text x="34" y="151" fill="var(--gap)" font-weight="600">43 × 200 · 17 × 503</text>
+<text x="34" y="151" fill="var(--gap)" font-weight="600">about 1 in 4 fail: 14–17 × 503 of 60</text>
 <rect x="510" y="96" width="450" height="84" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
 <text x="524" y="117" font-weight="600">cluster checked</text>
-<text x="524" y="134">GET /healthz every 2 s — 60 s until it carries traffic</text>
+<text x="524" y="134">GET /healthz every 2 s — every 60 s before any traffic</text>
 <text x="524" y="151" fill="var(--remote)" font-weight="600">60 × 200</text>
 <rect x="20" y="262" width="104" height="52" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
 <text x="34" y="283" font-weight="600">echo</text>
@@ -266,7 +266,6 @@ a { color: var(--remote); }
 <rect x="846" y="262" width="104" height="52" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
 <text x="860" y="283" font-weight="600">sick</text>
 <text x="860" y="300">503</text>
-<line x1="735" y1="180" x2="898" y2="260" stroke="var(--rule)" stroke-width="1.3" stroke-dasharray="4 4"/>
 <text x="20" y="342" fill="var(--muted)">the same 4 endpoints behind both clusters</text>
 <text x="510" y="342" fill="var(--muted)">sick: Kubernetes says Ready — its TCP probe passes</text>
 <text x="510" y="360" fill="var(--gap)" font-weight="600">Envoy: failed_active_hc, sent no traffic</text>

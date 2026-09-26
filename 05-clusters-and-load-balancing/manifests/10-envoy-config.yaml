@@ -176,8 +176,10 @@ data:
             - endpoint: { address: { socket_address: { address: echo, port_value: 8080 } } }
             - endpoint: { address: { socket_address: { address: sick, port_value: 8080 } } }
 
-      # The same endpoints, with Envoy asking each one GET /healthz every 2s.
-      # Two failures in a row mark it unhealthy; one success marks it healthy.
+      # The same endpoints, with Envoy asking each one GET /healthz every 2s
+      # (every 60s until the cluster first carries traffic). Any status but 200
+      # marks an endpoint unhealthy at once - unhealthy_threshold counts only
+      # timeouts and refused connections. One success marks it healthy.
       - name: checked
         type: STRICT_DNS
         lb_policy: ROUND_ROBIN
