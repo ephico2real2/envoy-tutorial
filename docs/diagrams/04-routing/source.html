@@ -61,14 +61,14 @@ a { color: var(--remote); }
   <header>
     <div class="eyebrow">envoy-tutorial · module 04 · routing</div>
     <h1>Routes: first match wins, and not every route reaches an upstream</h1>
-    <p class="lede">Every result drawn here was measured on the running proxy in namespace <code>envoy-04</code> with <code>./run.sh verify</code> and <code>./run.sh shadow</code>, against <code>04-routing/manifests/10-envoy-config.yaml</code>.</p>
+    <p class="lede">Every result drawn here was measured on the running proxy in namespace <code>envoy-04</code> by the README's steps 7–11 and <code>./run.sh verify</code> / <code>shadow</code>, against <code>04-routing/manifests/10-envoy-config.yaml</code>.</p>
   </header>
 
   <section>
     <h2>First match wins</h2>
     <figure>
       <div class="fig-scroll">
-<svg viewBox="0 0 980 496" role="img" aria-label="Routes are tried in order and the first match wins. With the catch-all last, thirteen probes give thirteen different results. With the catch-all moved first, every probe returns catch-all and the twelve routes below it are never reached. Envoy accepts both configs without a warning.">
+<svg viewBox="0 0 980 496" role="img" aria-label="Routes are tried in order and the first match wins. With the catch-all last, thirteen probes give thirteen different results. With the catch-all moved first, every probe returns catch-all and the twelve routes below it are never reached. Envoy accepts both configs, and nothing it logs mentions the order.">
   <defs><marker id="ah1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
   <g font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">
     <rect x="30" y="14" width="440" height="30" rx="6" fill="var(--remote-wash)" stroke="var(--remote)"/>
@@ -189,11 +189,11 @@ a { color: var(--remote); }
 <text x="940" y="411" text-anchor="end" fill="var(--none)">never reached</text>
 
     <text x="30" y="452" fill="var(--muted)">One probe per route. Left: 13 different results. Right: every probe returned x-matched-route: catch-all.</text>
-    <text x="30" y="474" font-weight="600">Envoy accepted the reordered config and logged no warning: in a route list, the order is the config.</text>
+    <text x="30" y="474" font-weight="600">Envoy accepted the reordered config, and nothing it logged mentions the order: the order is the config.</text>
   </g>
 </svg>
       </div>
-      <figcaption>Routes are tried in order and the first match wins. With the catch-all last, thirteen probes give thirteen results; moved first, it answers every probe and the twelve routes below it are never reached. Envoy accepts both configs without a warning.</figcaption>
+      <figcaption>Routes are tried in order and the first match wins. With the catch-all last, thirteen probes give thirteen results; moved first, it answers every probe and the twelve routes below it are never reached. Envoy accepts both configs, and nothing it logs mentions the order.</figcaption>
     </figure>
   </section>
 

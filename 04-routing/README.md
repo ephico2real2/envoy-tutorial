@@ -38,7 +38,7 @@ chain regardless of order. Here the order is the config.
 <!-- markdownlint-enable MD033 -->
 
 *Both columns are measured on the running proxy — the right one in step 11.
-Envoy accepts the reordered config and logs no warning.*
+Envoy accepts the reordered config, and nothing it logs mentions the order.*
 
 ## Who answers a request
 
@@ -207,12 +207,12 @@ $ for i in 1 2 3; do
 >   oc exec -n envoy-04 client -- curl -s -o /dev/null -w 'slow    %{http_code} %{time_total}s\n' http://envoy:8080/slow
 >   oc exec -n envoy-04 client -- curl -s -o /dev/null -w 'patient %{http_code} %{time_total}s\n' http://envoy:8080/patient
 > done
-slow    504 0.243171s
-patient 200 1.002376s
-slow    504 0.262478s
-patient 200 1.002081s
-slow    504 0.255988s
-patient 200 1.001973s
+slow    504 0.243633s
+patient 200 1.001813s
+slow    504 0.251724s
+patient 200 1.002106s
+slow    504 0.257319s
+patient 200 1.001805s
 ```
 
 The 504 comes from Envoy, not the app:
@@ -223,7 +223,7 @@ HTTP/1.1 504 Gateway Timeout
 x-matched-route: timeout-250ms
 content-length: 24
 content-type: text/plain
-date: Sat, 26 Sep 2026 02:38:44 GMT
+date: Sat, 26 Sep 2026 03:31:33 GMT
 server: envoy
 
 upstream request timeout
@@ -299,19 +299,20 @@ $ oc scale -n envoy-04 deploy/echo deploy/slow --replicas=0
 deployment.apps/echo scaled
 deployment.apps/slow scaled
 $ oc wait -n envoy-04 --for=delete pod -l 'app in (echo,slow)' --timeout=120s; sleep 10
-pod/echo-f8fc6d5c9-g4p4p condition met
-pod/echo-f8fc6d5c9-wcntb condition met
-pod/slow-68bfc7675b-kcqq5 condition met
+pod/echo-f8fc6d5c9-cxnnq condition met
+pod/echo-f8fc6d5c9-lbr8h condition met
+pod/slow-68bfc7675b-5q5kg condition met
 $ oc exec -n envoy-04 client -- curl -s -o /dev/null -w '%{http_code}\n' http://envoy:8080/healthz
 200
 $ oc exec -n envoy-04 client -- curl -s -o /dev/null -w '%{http_code}\n' http://envoy:8080/old
 301
-$ oc exec -n envoy-04 client -- curl -s http://envoy:8080/exact
-no healthy upstream
+$ oc exec -n envoy-04 client -- curl -s -w ' %{http_code}\n' http://envoy:8080/exact
+no healthy upstream 503
 ```
 
 **What just happened:** the health check still says 200 and the redirect still
-redirects; only the route to a cluster fails, with Envoy's `no healthy upstream`.
+redirects; only the route to a cluster fails — Envoy's own `503`, with the body
+`no healthy upstream`.
 A health check written as a `direct_response` reports on Envoy itself. One written
 as a route to a cluster reports on the cluster — a different question, and
 sometimes the one you want.
@@ -381,30 +382,30 @@ original:
 ```console
 $ ./run.sh shadow
 
-[1mmoving the catch-all to the top of the route list[0m
-  [32m✓[0m upstream echo_service has endpoints
-  [32m✓[0m upstream slow_service has endpoints
+moving the catch-all to the top of the route list
+  ✓ upstream echo_service has endpoints
+  ✓ upstream slow_service has endpoints
 
-[1mevery route above it is now dead[0m
-  [32m✓[0m /exact
-  [32m✓[0m /order/42
-  [32m✓[0m / with x-canary: yes
-  [32m✓[0m /anything?debug=1
-  [32m✓[0m /api/v1/thing
-  [32m✓[0m /user/42/profile
-  [32m✓[0m /rewrite-host
-  [32m✓[0m /slow (no longer 504s)
-  [32m✓[0m /patient
-  [32m✓[0m /budget
-  [32m✓[0m /old (no longer 301s)
-  [32m✓[0m /healthz (now proxied)
+every route above it is now dead
+  ✓ /exact
+  ✓ /order/42
+  ✓ / with x-canary: yes
+  ✓ /anything?debug=1
+  ✓ /api/v1/thing
+  ✓ /user/42/profile
+  ✓ /rewrite-host
+  ✓ /slow (no longer 504s)
+  ✓ /patient
+  ✓ /budget
+  ✓ /old (no longer 301s)
+  ✓ /healthz (now proxied)
 
-[1mrestoring the committed route order[0m
-  [32m✓[0m upstream echo_service has endpoints
-  [32m✓[0m upstream slow_service has endpoints
-  [32m✓[0m after restoring, /exact matches its own route again
+restoring the committed route order
+  ✓ upstream echo_service has endpoints
+  ✓ upstream slow_service has endpoints
+  ✓ after restoring, /exact matches its own route again
 
-[1mall checks passed[0m
+all checks passed
 ```
 
 **What just happened:** every one of those requests got `x-matched-route:
@@ -418,56 +419,56 @@ order *is* the config.
 ```console
 $ ./run.sh verify
 
-[1m1. match types, in the order Envoy tries them[0m
-  [32m✓[0m exact path /exact
-  [32m✓[0m regex /order/42
-  [32m✓[0m regex does NOT match /order/abc
-  [32m✓[0m header x-canary: yes
-  [32m✓[0m query ?debug=1
-  [32m✓[0m no discriminator falls to catch-all
+1. match types, in the order Envoy tries them
+  ✓ exact path /exact
+  ✓ regex /order/42
+  ✓ regex does NOT match /order/abc
+  ✓ header x-canary: yes
+  ✓ query ?debug=1
+  ✓ no discriminator falls to catch-all
 
-[1m2. first match wins — the same request, two orders[0m
-  [32m✓[0m /exact + canary header -> the earlier route
-  [32m✓[0m /api/v1/x + canary header -> the earlier route
+2. first match wins — the same request, two orders
+  ✓ /exact + canary header -> the earlier route
+  ✓ /api/v1/x + canary header -> the earlier route
 
-[1m3. rewrites, seen from the upstream's side[0m
-  [32m✓[0m prefix_rewrite strips /api/v1
-  [32m✓[0m regex_rewrite moves the capture
-  [32m✓[0m host_rewrite_literal changes Host upstream
+3. rewrites, seen from the upstream's side
+  ✓ prefix_rewrite strips /api/v1
+  ✓ regex_rewrite moves the capture
+  ✓ host_rewrite_literal changes Host upstream
 
-[1m4. timeouts[0m
-  [32m✓[0m 250ms timeout against a 1s upstream -> 504
-  [32m✓[0m 504 says what happened
-  [32m✓[0m 5s timeout against the same upstream -> 200
-  [32m✓[0m timeout is forwarded as a budget header
+4. timeouts
+  ✓ 250ms timeout against a 1s upstream -> 504
+  ✓ 504 says what happened
+  ✓ 5s timeout against the same upstream -> 200
+  ✓ timeout is forwarded as a budget header
 
-[1m5. routes Envoy answers without any upstream[0m
-  [32m✓[0m /old redirects 301
-  [32m✓[0m /old points at the new path
-  [32m✓[0m Location is an absolute URI, not a bare path
-  [32m✓[0m direct_response body
-  [32m✓[0m upstream counters are readable (non-zero)
-  [32m✓[0m 6 requests to /healthz and /old reach no upstream
+5. routes Envoy answers without any upstream
+  ✓ /old redirects 301
+  ✓ /old points at the new path
+  ✓ Location is an absolute URI, not a bare path
+  ✓ direct_response body
+  ✓ upstream counters are readable (non-zero)
+  ✓ 6 requests to /healthz and /old reach no upstream
 
-[1m6. matcher edge cases[0m
-  [32m✓[0m prefix is not segment-aware: /slowpoke matches prefix /slow
-  [32m✓[0m path_separated_prefix is: /patients misses /patient
-  [32m✓[0m path_separated_prefix still matches /patient/x
-  [32m✓[0m prefix /api/v1/ does not match /api/v1
-  [32m✓[0m path is case-sensitive: /EXACT
-  [32m✓[0m path is exact: /exact/ is another path
-  [32m✓[0m path ignores the query string
-  [32m✓[0m header NAME is case-insensitive
-  [32m✓[0m header VALUE is exact: YES != yes
-  [32m✓[0m query parameter NAME is case-sensitive
+6. matcher edge cases
+  ✓ prefix is not segment-aware: /slowpoke matches prefix /slow
+  ✓ path_separated_prefix is: /patients misses /patient
+  ✓ path_separated_prefix still matches /patient/x
+  ✓ prefix /api/v1/ does not match /api/v1
+  ✓ path is case-sensitive: /EXACT
+  ✓ path is exact: /exact/ is another path
+  ✓ path ignores the query string
+  ✓ header NAME is case-insensitive
+  ✓ header VALUE is exact: YES != yes
+  ✓ query parameter NAME is case-sensitive
 
-[1m7. the running proxy really holds these routes[0m
-  [32m✓[0m route_config 'routing' is loaded
-  [32m✓[0m prefix_rewrite is in the running config
-  [32m✓[0m 13 routes are loaded
-  [32m✓[0m the last route is the catch-all
+7. the running proxy really holds these routes
+  ✓ route_config 'routing' is loaded
+  ✓ prefix_rewrite is in the running config
+  ✓ 13 routes are loaded
+  ✓ the last route is the catch-all
 
-[1mall checks passed[0m
+all checks passed
 ```
 
 ## The options
@@ -504,7 +505,9 @@ Path matching is case-sensitive by default; the API reference documents
 one fired. It is a real option — adding headers to responses — not a routing one.
 
 One YAML detail in the regex rewrite: the substitution is single-quoted,
-`'/profile/\1'`. In double quotes, YAML consumes the backslash.
+`'/profile/\1'`. In double quotes `\1` is an invalid YAML escape, and Envoy
+refuses the whole file (measured on Envoy 1.39.1: *yaml-cpp: … unknown escape
+character: 1*).
 
 ## Troubleshooting
 
@@ -530,8 +533,9 @@ namespace "envoy-04" deleted
 ## What this module skipped
 
 Retries and `per_try_timeout` (module 02 shows they change the deadline the app
-is told; module 11 goes further), weighted clusters and traffic splitting, and
-routes delivered at runtime over RDS instead of written in the file.
+is told; module 11, still to come, goes further), weighted clusters and traffic
+splitting, and routes delivered at runtime over RDS instead of written in the
+file.
 
 ## References
 

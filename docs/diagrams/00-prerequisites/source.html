@@ -68,7 +68,7 @@ a { color: var(--remote); }
     <h2>The map</h2>
     <figure>
       <div class="fig-scroll">
-<svg viewBox="0 0 980 570" role="img" aria-label="Your laptop runs oc against the cluster. Each module creates its own namespace, envoy-NN, holding a client pod that runs curl, Envoy, and the echo app, from public images. Beside it are the platform pieces only some modules need: cert-manager, Gateway API CRDs, MetalLB, Prometheus Operator CRDs and, on OpenShift, user-workload monitoring.">
+<svg viewBox="0 0 980 570" role="img" aria-label="Your laptop runs oc against the cluster. Modules 01 to 04 each create their own namespace, envoy-NN, holding a client pod that runs curl, Envoy, and the echo app, from public images. Beside it are the platform pieces only some modules need: cert-manager, Gateway API CRDs, MetalLB, Prometheus Operator CRDs and, on OpenShift, user-workload monitoring.">
   <defs><marker id="p1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="p1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
   <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
 <rect x="150" y="16" width="360" height="56" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
@@ -79,7 +79,7 @@ a { color: var(--remote); }
 <rect x="20" y="120" width="940" height="400" rx="10" fill="none" stroke="currentColor" stroke-width="1.3"/>
 <text x="40" y="146" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">YOUR CLUSTER</text>
 <rect x="40" y="160" width="580" height="340" rx="8" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
-<text x="58" y="184" font-weight="600">namespace envoy-NN — one per module, so they never collide</text>
+<text x="58" y="184" font-weight="600">namespace envoy-NN — one per module, 01 to 04, so they never collide</text>
 <rect x="210" y="200" width="240" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
 <text x="224" y="221" font-weight="600">client pod</text>
 <text x="224" y="238" font-family="IBM Plex Mono, monospace" font-size="12">curlimages/curl:8.11.1</text>
@@ -115,7 +115,7 @@ a { color: var(--remote); }
   </g>
 </svg>
       </div>
-      <figcaption>Each module gets its own namespace with a client pod, Envoy and the echo app; a few platform pieces are needed only by the modules named.</figcaption>
+      <figcaption>Modules 01 to 04 each get their own namespace with a client pod, Envoy and the echo app; a few platform pieces are needed only by the modules named.</figcaption>
     </figure>
   </section>
 </div>

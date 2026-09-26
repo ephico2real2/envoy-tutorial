@@ -30,6 +30,7 @@ upstream_rq_total() {
 }
 
 verify() {
+  client_ready
   say "1. match types, in the order Envoy tries them"
   assert "exact path /exact"                 "exact-path"   "$(route_of /exact)"
   assert "regex /order/42"                   "regex"        "$(route_of /order/42)"

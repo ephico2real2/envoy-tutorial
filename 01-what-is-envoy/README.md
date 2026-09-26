@@ -107,7 +107,7 @@ deployment "echo" successfully rolled out
 ```console
 $ oc exec -n envoy-01 client -- curl -s http://echo:8080/direct
 {
-  "served_by": "echo-f8fc6d5c9-t6tg5",
+  "served_by": "echo-f8fc6d5c9-59sx7",
   "method": "GET",
   "path": "/direct",
   "headers": {
@@ -166,17 +166,17 @@ for traffic and `9901` for Envoy's admin interface.
 ```console
 $ oc exec -n envoy-01 client -- curl -s http://envoy:8080/direct
 {
-  "served_by": "echo-f8fc6d5c9-xpqps",
+  "served_by": "echo-f8fc6d5c9-59sx7",
   "method": "GET",
   "path": "/direct",
   "headers": {
     "host": "envoy:8080",
     "user-agent": "curl/8.11.1",
     "accept": "*/*",
-    "x-forwarded-for": "10.217.0.48",
+    "x-forwarded-for": "10.217.0.139",
     "x-forwarded-proto": "http",
-    "x-envoy-external-address": "10.217.0.48",
-    "x-request-id": "9f8cd1c9-9822-4505-9b9e-df7716bfe537",
+    "x-envoy-external-address": "10.217.0.139",
+    "x-request-id": "4011b412-1faf-4f40-bf53-1ad8085e3b47",
     "x-envoy-expected-rq-timeout-ms": "15000"
   }
 }
@@ -204,8 +204,8 @@ Twelve requests, and which of the two echo pods answered each:
 
 ```console
 $ for i in 1 2 3 4 5 6 7 8 9 10 11 12; do oc exec -n envoy-01 client -- curl -s http://envoy:8080/ | grep served_by; done | sort | uniq -c
-   7   "served_by": "echo-f8fc6d5c9-t6tg5",
-   5   "served_by": "echo-f8fc6d5c9-xpqps",
+   6   "served_by": "echo-f8fc6d5c9-59sx7",
+   6   "served_by": "echo-f8fc6d5c9-96fwg",
 ```
 
 **What just happened:** both pods answered. Two settings make that possible, and
@@ -218,9 +218,10 @@ clusterIP: None         # in the SERVICE: so DNS returns pod IPs, not one virtua
 ```
 
 Without `clusterIP: None`, DNS returns a single virtual IP, Envoy sees one
-endpoint, and `ROUND_ROBIN` has nothing to choose between. Module 05 measures
-exactly that failure, and how evenly requests split: the numbers above change
-from run to run — 6/6, 5/7 and 7/5 in three runs while writing this.
+endpoint, and `ROUND_ROBIN` has nothing to choose between. Module 05, still to
+come, will measure exactly that failure, and how evenly requests split: the
+numbers above change from run to run — 6/6, 5/7 and 7/5 in three runs while
+writing this.
 
 ### Step 8 — ask Envoy what it is doing
 
@@ -238,8 +239,8 @@ Which endpoints does the cluster have, and are they healthy?
 
 ```console
 $ oc exec -n envoy-01 client -- curl -s http://envoy:9901/clusters | grep health_flags
-echo_service::10.217.0.57:8080::health_flags::healthy
-echo_service::10.217.0.55:8080::health_flags::healthy
+echo_service::10.217.0.141:8080::health_flags::healthy
+echo_service::10.217.0.140:8080::health_flags::healthy
 ```
 
 How many requests has each side seen?
@@ -271,10 +272,10 @@ first:
 
 ```console
 $ sleep 10; oc logs -n envoy-01 deploy/envoy | grep -- '->' | tail -4
-GET / -> 10.217.0.57:8080 200 0ms
-GET / -> 10.217.0.55:8080 200 0ms
-GET / -> 10.217.0.55:8080 200 0ms
-GET / -> 10.217.0.57:8080 200 0ms
+GET / -> 10.217.0.140:8080 200 0ms
+GET / -> 10.217.0.140:8080 200 0ms
+GET / -> 10.217.0.141:8080 200 1ms
+GET / -> 10.217.0.141:8080 200 0ms
 ```
 
 **What just happened:** the `->` address on each line is the pod that served the
@@ -288,30 +289,30 @@ lines than you expect, the batch has not been written yet; run it again.
 ```console
 $ ./run.sh verify
 
-[1m1. the backend is reachable directly (no Envoy involved)[0m
-  [32m✓[0m echo answers on its own
-  [32m✓[0m no proxy fingerprint
+1. the backend is reachable directly (no Envoy involved)
+  ✓ echo answers on its own
+  ✓ no proxy fingerprint
 
-[1m2. the same request through Envoy[0m
-  [32m✓[0m still reaches the backend
-  [32m✓[0m x-forwarded-for added
-  [32m✓[0m x-request-id added
-  [32m✓[0m x-envoy-expected-rq-timeout
+2. the same request through Envoy
+  ✓ still reaches the backend
+  ✓ x-forwarded-for added
+  ✓ x-request-id added
+  ✓ x-envoy-expected-rq-timeout
 
-[1m3. the four nouns, from Envoy's own admin interface[0m
-  [32m✓[0m listener http_listener is in the running config
-  [32m✓[0m cluster echo_service is in the running config
+3. the four nouns, from Envoy's own admin interface
+  ✓ listener http_listener is in the running config
+  ✓ cluster echo_service is in the running config
 
-[1m4. Envoy is load balancing, not just forwarding[0m
-  [32m✓[0m reached 2 distinct backend pods over 12 requests
+4. Envoy is load balancing, not just forwarding
+  ✓ reached 2 distinct backend pods over 12 requests
 
-[1mall checks passed[0m
+all checks passed
 ```
 
 **Try this:** in `manifests/10-envoy-config.yaml`, change
 `use_remote_address: true` to `false`. Apply it, then **delete the Envoy pod** so
-it restarts with the new file — `oc rollout restart` is not enough, because the
-file is mounted with `subPath` and never updates in a running pod:
+a new one starts with the new file — the file is mounted with `subPath`, so the
+running pod never sees the change:
 
 ```bash
 oc apply -n envoy-01 -f manifests/10-envoy-config.yaml

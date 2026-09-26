@@ -24,7 +24,7 @@ run what the tutorial needs. One script checks all of it.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/00-prerequisites/cluster-map.dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/00-prerequisites/cluster-map.light.png">
-  <img alt="Your laptop runs oc against the cluster. Each module creates its own namespace, envoy-NN, holding a client pod that runs curl, Envoy, and the echo app, from public images. Beside it are the platform pieces only some modules need: cert-manager, Gateway API CRDs, MetalLB, Prometheus Operator CRDs and, on OpenShift, user-workload monitoring." src="../docs/diagrams/00-prerequisites/cluster-map.light.png">
+  <img alt="Your laptop runs oc against the cluster. Modules 01 to 04 each create their own namespace, envoy-NN, holding a client pod that runs curl, Envoy, and the echo app, from public images. Beside it are the platform pieces only some modules need: cert-manager, Gateway API CRDs, MetalLB, Prometheus Operator CRDs and, on OpenShift, user-workload monitoring." src="../docs/diagrams/00-prerequisites/cluster-map.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
 
@@ -70,8 +70,9 @@ Every module creates its own namespace, so this is the permission that matters:
 
 ```console
 $ oc auth can-i create namespace
-yes
 Warning: resource 'namespaces' is not namespace scoped
+
+yes
 ```
 
 **What just happened:** `yes` means you can run every module. The `Warning` line
@@ -85,35 +86,35 @@ control, such as CRC.
 ```console
 $ ./check.sh
 
-[1mcluster[0m
-  [32m✓[0m reachable, server v1.35.6
-  [32m✓[0m client: oc
-  [32m✓[0m OpenShift: yes  (SCC rules apply — modules note where)
+cluster
+  ✓ reachable, server v1.35.6
+  ✓ client: oc
+  ✓ OpenShift: yes  (SCC rules apply — modules note where)
 
-[1mpermissions[0m
-  [32m✓[0m can create namespace
-  [32m✓[0m can create deployment
-  [32m✓[0m can create service
-  [32m✓[0m can create configmap
+permissions
+  ✓ can create namespace
+  ✓ can create deployment
+  ✓ can create service
+  ✓ can create configmap
 
-[1mimages the modules pull[0m
+images the modules pull
   · python:3.12-slim        the echo app
   · envoyproxy/envoy:v1.39-latest  the proxy
   · curlimages/curl:8.11.1  the in-cluster client
   · alpine/openssl:3.3.2    module 03's test certificates
   (all public; nothing is built or pushed by this tutorial)
 
-[1moptional, per module[0m
-  [32m✓[0m cert-manager
-  [32m✓[0m Gateway API CRDs
-  [32m✓[0m MetalLB
-  [32m✓[0m Prometheus Operator CRDs
-  [32m✓[0m user-workload monitoring
+optional, per module
+  ✓ cert-manager
+  ✓ Gateway API CRDs
+  ✓ MetalLB
+  ✓ Prometheus Operator CRDs
+  ✓ user-workload monitoring
 
-[1ma real write, end to end[0m
-  [32m✓[0m the in-cluster client pod runs — the modules will run
+a real write, end to end
+  ✓ the in-cluster client pod runs — the modules will run
 
-[1mall checks passed[0m
+all checks passed
 ```
 
 **What just happened**, section by section:
@@ -133,7 +134,8 @@ a pod admitted, a container started. It deletes its own namespace when done.
 
 `check.sh` says `OpenShift: yes`, and that matters. OpenShift's default
 `restricted-v2` policy gives each namespace a range of user IDs and refuses pods
-that insist on a UID outside it — which upstream images often do. The client
+that insist on a UID outside it — which upstream Helm charts often do (module
+12's Envoy Gateway chart hard-codes `65532`). The client
 pod passing in step 4 means the common case is fine; where a module hits the
 problem, it says so and shows the fix. Module 12 has the worked example.
 
@@ -170,8 +172,8 @@ does the same steps in one go, once you know what they do:
 ./run.sh clean      # delete the namespace
 ```
 
-Every module uses its own namespace (`envoy-01`, `envoy-02`, …), so modules
-never collide and you can start at any of them.
+Every module uses its own namespace (`envoy-01` … `envoy-04`, and `gwapi-demo`
+for module 12), so modules never collide and you can start at any of them.
 
 ## Diagram sources
 

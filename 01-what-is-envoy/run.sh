@@ -15,6 +15,7 @@ deploy() {
 }
 
 verify() {
+  client_ready
   say "1. the backend is reachable directly (no Envoy involved)"
   DIRECT=$(incluster_curl "http://echo.$NS.svc:8080/direct")
   assert_contains "echo answers on its own" '"served_by"' "$DIRECT"

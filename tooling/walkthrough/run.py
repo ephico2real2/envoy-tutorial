@@ -15,6 +15,11 @@ README's own directory, against the current cluster:
 
 --update replaces each command's output in the README with what it printed on
 this run, so the pasted output is never older than the last successful run.
+stdout and stderr are pasted interleaved, in the order a terminal shows them,
+and without terminal colour codes, which markdown would print as "[1m". An
+output line that the next run would read back as a command (`$ `), as a
+continuation (`> ` first), or as the end of the block (a ``` fence) is refused
+rather than pasted.
 
 Two HTML comments, placed on the line before a block, change how it is run:
 
@@ -38,6 +43,11 @@ import sys
 
 TIMEOUT_S = 240
 DIRECTIVE = re.compile(r"<!--\s*walkthrough:\s*(skip|expect-exit\s+(\d+))\s*-->")
+# CSI sequences such as ESC[1m / ESC[32m: the scripts colour their output for a
+# terminal, and markdown shows the codes as literal text.
+ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+# A line CommonMark reads as the closing fence of a ``` block.
+CLOSING_FENCE = re.compile(r"^ {0,3}`{3,}[ \t]*$")
 
 
 def parse(lines: list[str]):
@@ -80,6 +90,20 @@ def parse(lines: list[str]):
             i += 1
 
 
+def unpasteable(real: list[str]) -> str | None:
+    """The first output line that would not read back as output, or None.
+
+    parse() takes `$ ` as a command and a leading `> ` as its continuation, and a
+    bare fence ends the block: pasted, such a line becomes a command the next
+    run executes, or cuts the block short and grows the README on every run.
+    """
+    for n, line in enumerate(real):
+        line = line.rstrip("\n")
+        if line.startswith("$ ") or (n == 0 and line.startswith("> ")) or CLOSING_FENCE.match(line):
+            return line
+    return None
+
+
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     update = "--update" in sys.argv
@@ -102,18 +126,27 @@ def main() -> int:
         for cmd_line, text, out_start, out_end in cmds:
             print(f"\n\033[1m$ {text.splitlines()[0]}{' …' if chr(10) in text else ''}\033[0m  (line {cmd_line + 1})")
             try:
+                # One pipe for both streams, so the output keeps the order the
+                # reader's terminal shows (oc prints its warnings before "yes").
                 p = subprocess.run(["bash", "-o", "pipefail", "-c", text], cwd=readme.parent, env=env,
-                                   capture_output=True, text=True, timeout=TIMEOUT_S)
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                   timeout=TIMEOUT_S)
             except subprocess.TimeoutExpired:
                 print(f"  \033[31m✗ timed out after {TIMEOUT_S}s\033[0m")
                 return 1
-            output = p.stdout + p.stderr
+            output = p.stdout
             print("  " + output.rstrip().replace("\n", "\n  ") if output.strip() else "  (no output)")
             if p.returncode != want:
                 print(f"  \033[31m✗ exit {p.returncode}, expected {want}\033[0m")
                 return 1
             ran += 1
-            real = [ln + "\n" for ln in output.rstrip("\n").split("\n")] if output.strip() else []
+            plain = ANSI.sub("", output)
+            real = [ln + "\n" for ln in plain.rstrip("\n").split("\n")] if plain.strip() else []
+            clash = unpasteable(real) if update else None
+            if clash is not None:
+                print(f"  \033[31m✗ not pasted: the output line {clash!r} would be read back as a command "
+                      f"or a fence on the next run; change the command so its output cannot\033[0m")
+                return 1
             replacements.append((out_start, out_end, real))
 
     if update:

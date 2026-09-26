@@ -34,7 +34,7 @@ not adding behaviour — it is declining a default you would not have chosen.
 
 Every value in that picture is what you get **if you leave the line out**.
 "measured" means it was read from a running Envoy on CRC; "API" means it is
-quoted from the Envoy API reference (linked at the bottom).
+taken from the Envoy API reference (linked at the bottom).
 
 ## Walkthrough
 
@@ -119,8 +119,8 @@ $ oc exec -n envoy-02 client -- curl -s http://envoy:8080/fields | grep expected
     "x-envoy-expected-rq-timeout-ms": "2000"
 ```
 
-**What just happened:** `2000` ms. Three timeouts are set in this config, and the
-one the app is told is not the obvious one:
+**What just happened:** `2000` ms. Three of this config's timeouts bound a
+request, and the one the app is told is not the obvious one:
 
 ```yaml
 request_timeout: 10s          # listener: how long to wait to RECEIVE the request
@@ -128,16 +128,20 @@ timeout: 5s                   # route: from sending it upstream to the full resp
 per_try_timeout: 2s           # retry policy: the deadline for each attempt
 ```
 
-With retries configured, the deadline that matters to the app is the one for
-*this attempt* — Envoy may abandon it and try another endpoint while the 5 s
-route budget is still running. The "Try this" in step 9 removes
-`per_try_timeout` and watches the number change.
+With a retry policy, the app is told the deadline of *this attempt* — and here
+it is the whole deadline. Envoy retries an attempt that timed out only under a
+`retry_on` that covers it, such as `reset`, `5xx` or `gateway-error`; this
+config's `connect-failure,refused-stream,unavailable` does not. Measured on
+Envoy 1.39.1 against an upstream that takes 3 s: `504` after 2.0 s with
+`upstream_rq_retry: 0`; under `reset`, `5xx` or `gateway-error`, two retries
+and `504` after 5.0 s, when the route's `timeout` ran out. The "Try this" in
+step 9 removes `per_try_timeout` and watches the number change.
 
 ### Step 6 — the access log is JSON
 
 ```console
 $ sleep 10; oc logs -n envoy-02 deploy/envoy | grep '"path":"/fields"' | tail -1
-{"bytes_in":0,"bytes_out":404,"code":200,"duration":1,"flags":"-","method":"GET","path":"/fields","protocol":"HTTP/1.1","req_id":"dd8efeb1-467c-4def-b5e9-054a623af2e5","start":"2026-09-26T02:31:44.621Z","upstream":"10.217.0.100:8080"}
+{"bytes_in":0,"bytes_out":406,"code":200,"duration":1,"flags":"-","method":"GET","path":"/fields","protocol":"HTTP/1.1","req_id":"2ce31844-15fa-480c-b87a-788709be6776","start":"2026-09-26T03:30:29.757Z","upstream":"10.217.0.148:8080"}
 ```
 
 **What just happened:** one JSON object per request, with the fields listed under
@@ -179,42 +183,44 @@ $ oc exec -n envoy-02 client -- curl -s http://envoy:9901/server_info | grep -E 
 ```
 
 **What just happened:** the `node` block at the top of the config, as the running
-proxy reports it. With several Envoys, this is how their logs and metrics are
-told apart — and what a control plane uses to recognise each one.
+proxy reports it — what a control plane uses to recognise each proxy. It is not
+in `/stats` or `/stats/prometheus` (measured on Envoy 1.39.1: no line contains
+`tutorial-envoy`), and this access log has no field for it, so on its own it does
+not tell several Envoys' metrics or logs apart.
 
 ### Step 9 — check yourself
 
 ```console
 $ ./run.sh verify
 
-[1mthe fields are actually in effect, not just in the file[0m
-  [32m✓[0m Server header rewritten to server_name
-  [32m✓[0m backend is told the per-try deadline (2s), not the route's 5s
+the fields are actually in effect, not just in the file
+  ✓ Server header rewritten to server_name
+  ✓ backend is told the per-try deadline (2s), not the route's 5s
 
-[1mthe access log is JSON with the fields we asked for[0m
-  [32m✓[0m log has "start"
-  [32m✓[0m log has "method"
-  [32m✓[0m log has "path"
-  [32m✓[0m log has "protocol"
-  [32m✓[0m log has "code"
-  [32m✓[0m log has "flags"
-  [32m✓[0m log has "duration"
-  [32m✓[0m log has "upstream"
-  [32m✓[0m log has "req_id"
+the access log is JSON with the fields we asked for
+  ✓ log has "start"
+  ✓ log has "method"
+  ✓ log has "path"
+  ✓ log has "protocol"
+  ✓ log has "code"
+  ✓ log has "flags"
+  ✓ log has "duration"
+  ✓ log has "upstream"
+  ✓ log has "req_id"
 
-[1mcircuit breakers are registered with the values we set[0m
-  [32m✓[0m max_connections 100
-  [32m✓[0m max_pending_requests 50
-  [32m✓[0m max_requests 200
+circuit breakers are registered with the values we set
+  ✓ max_connections 100
+  ✓ max_pending_requests 50
+  ✓ max_requests 200
 
-[1mthe retry policy is live[0m
-  [32m✓[0m retry_on set
-  [32m✓[0m num_retries 2
+the retry policy is live
+  ✓ retry_on set
+  ✓ num_retries 2
 
-[1mnode identity reaches the stats[0m
-  [32m✓[0m node id
+node identity is in /server_info
+  ✓ node id
 
-[1mall checks passed[0m
+all checks passed
 ```
 
 **Try this:** delete the line `per_try_timeout: 2s` from
@@ -237,7 +243,7 @@ seeing. Put the line back when you are done.
 ## The fields, their defaults, and when to change them
 
 "How we know" says where the default comes from: **measured** on a running Envoy
-on CRC, or quoted from the **API** reference.
+on CRC, or taken from the **API** reference.
 
 **The listener's HTTP connection manager**
 
@@ -275,11 +281,11 @@ one payment into two.
 
 | Field | Default | How we know | What it does |
 |---|---|---|---|
-| `type` | `STATIC` | API | how endpoints are found — module 05 compares the types |
+| `type` | `STATIC` | API | how endpoints are found — module 05 (still to come) compares the types |
 | `lb_policy` | `ROUND_ROBIN` | API | how to choose between endpoints |
 | `connect_timeout` | 5 s | API | how long to wait for a TCP connection to an endpoint |
 | `dns_refresh_rate` | 5 s | API | how often `STRICT_DNS` re-resolves the name |
-| `circuit_breakers` | **1024 / 1024 / 1024 / 3** | measured (step 7) | caps on connections, pending requests, requests and retries |
+| `circuit_breakers` | **1024 / 1024 / 1024 / 3** | measured (step 7's command, on module 01) | caps on connections, pending requests, requests and retries |
 
 ## Troubleshooting
 

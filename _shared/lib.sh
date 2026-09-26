@@ -67,6 +67,7 @@ wait_ready() {
 # not - so wait for the cluster to actually have a member before asserting.
 wait_upstream() {
   cluster=$1; svc=${2:-envoy}; tries=${3:-30}
+  client_ready
   for _ in $(seq 1 "$tries"); do
     if incluster_curl "http://$svc.$NS.svc:9901/clusters" 2>/dev/null \
          | grep -q "^${cluster}::[0-9].*::cx_total"; then
@@ -90,12 +91,24 @@ client_ensure() {
   fi
 }
 
+# Ensure the client once, in the script's own shell. It has to be called there:
+# nearly every incluster_curl runs inside $(...) or a pipeline, where both
+# client_ensure's `exit 1` and CLIENT_READY=1 end with the subshell - so a
+# client that never starts was retried (120s each) on every call, its error was
+# swallowed, and checks that pass on empty output passed. Every verify and
+# wait_upstream calls this first; subshells then inherit CLIENT_READY=1.
+CLIENT_READY=
+client_ready() {
+  [ -n "$CLIENT_READY" ] && return 0
+  client_ensure
+  CLIENT_READY=1
+}
+
 # Run a curl from inside the cluster, through the client pod. Nothing in these
 # modules requires an Ingress or a Route, so they work the same on kind as on
 # OpenShift. An earlier version used a throwaway `oc run --rm -i` per call; that
 # dropped the first line of output now and then and left Completed pods behind.
-CLIENT_READY=
 incluster_curl() {
-  [ -n "$CLIENT_READY" ] || { client_ensure; CLIENT_READY=1; }
+  [ -n "$CLIENT_READY" ] || client_ensure
   $KUBE exec -n "$NS" client -- curl -sS --max-time 10 "$@" 2>/dev/null
 }

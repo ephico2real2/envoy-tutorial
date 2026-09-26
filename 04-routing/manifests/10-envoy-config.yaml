@@ -89,8 +89,8 @@ data:
                     - header: { key: x-matched-route, value: prefix-rewrite }
 
                   # 6. REGEX REWRITE with a capture group. Single-quoted so the
-                  #    backslash reaches Envoy literally; in double quotes YAML
-                  #    would eat it and the substitution would be the text \1.
+                  #    backslash reaches Envoy literally; in double quotes \1 is
+                  #    an invalid YAML escape and Envoy refuses the file.
                   - match:
                       safe_regex: { regex: "/user/[0-9]+/profile" }
                     route:

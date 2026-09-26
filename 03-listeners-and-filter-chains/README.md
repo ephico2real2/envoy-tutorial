@@ -119,8 +119,8 @@ deployment "envoy" successfully rolled out
 
 **What just happened:** before Envoy starts, an init container (`certgen`)
 generates two self-signed certificates — `CN=shop.apps-crc.testing` and
-`CN=admin.apps-crc.testing` — into a volume the Envoy container reads. Module 08
-replaces this with cert-manager.
+`CN=admin.apps-crc.testing` — into a volume the Envoy container reads.
+Module 08, still to come, replaces this with cert-manager.
 
 ### Step 4 — choosing by `Host`, on plaintext :8080
 
@@ -154,7 +154,17 @@ x-matched-chain: sni-admin
 ```
 
 **What just happened:** same address, same port — and a different filter chain
-each time. The only thing that differed was the name in the TLS handshake.
+each time. curl also sent a different `Host` (it takes it from the URL:
+`shop.apps-crc.testing:8443`), so prove which one decided. Send the SNI `shop`
+with the `Host` header of `admin`:
+
+```console
+$ oc exec -n envoy-03 client -- curl -sk -i --connect-to shop.apps-crc.testing:8443:envoy:8443 -H 'Host: admin.apps-crc.testing' https://shop.apps-crc.testing:8443/ | grep x-matched
+x-matched-chain: sni-shop
+```
+
+Still `sni-shop`. The chain was chosen from the name in the TLS handshake,
+before any HTTP — and so before the `Host` header — was read.
 
 ### Step 6 — each chain presents its own certificate
 
@@ -227,27 +237,27 @@ every request would land on the same chain.
 ```console
 $ ./run.sh verify
 
-[1m1. virtual hosts pick on the Host header (after HTTP is parsed)[0m
-  [32m✓[0m Host shop.apps-crc.testing -> vhost shop
-  [32m✓[0m Host admin.apps-crc.testing -> vhost admin
-  [32m✓[0m unknown Host hits the catch-all 404
+1. virtual hosts pick on the Host header (after HTTP is parsed)
+  ✓ Host shop.apps-crc.testing -> vhost shop
+  ✓ Host admin.apps-crc.testing -> vhost admin
+  ✓ unknown Host hits the catch-all 404
 
-[1m2. filter chains pick on SNI (before any HTTP exists)[0m
-  [32m✓[0m SNI shop.apps-crc.testing -> chain sni-shop
-  [32m✓[0m SNI admin.apps-crc.testing -> chain sni-admin
+2. filter chains pick on SNI (before any HTTP exists)
+  ✓ SNI shop.apps-crc.testing -> chain sni-shop
+  ✓ SNI admin.apps-crc.testing -> chain sni-admin
 
-[1m3. each chain serves its own certificate[0m
-  [32m✓[0m SNI shop.apps-crc.testing is served the shop cert
-  [32m✓[0m SNI admin.apps-crc.testing is served the admin cert
+3. each chain serves its own certificate
+  ✓ SNI shop.apps-crc.testing is served the shop cert
+  ✓ SNI admin.apps-crc.testing is served the admin cert
 
-[1m4. tls_inspector is in the running listener[0m
-  [32m✓[0m tls_inspector is present
+4. tls_inspector is declared on the TLS listener
+  ✓ tls_listener declares tls_inspector
 
-[1m5. the Routes are passthrough (edge would terminate TLS at the router)[0m
-  [32m✓[0m route/shop is passthrough
-  [32m✓[0m route/admin is passthrough
+5. the Routes are passthrough (edge would terminate TLS at the router)
+  ✓ route/shop is passthrough
+  ✓ route/admin is passthrough
 
-[1mall checks passed[0m
+all checks passed
 ```
 
 **Try this — remove `tls_inspector`.** In `manifests/10-envoy-config.yaml`,
@@ -274,8 +284,10 @@ Envoy never learned the SNI and no `server_names` chain could match. Put the
 lines back when you are done.
 
 Worth knowing: `/config_dump` still mentions `tls_inspector` even when it is not
-declared, so **the config dump is not a reliable way to check this**. Test the
-behaviour, not the config.
+declared — the node's list of compiled-in extensions names it — so **grepping the
+whole dump cannot check this**. `/config_dump?resource=static_listeners` shows
+only what the listeners declare, and that is what step 9 reads. Test the
+behaviour too.
 
 ## The order that trips people up
 
@@ -290,9 +302,13 @@ The documented precedence, in order:
 6. source type, source IP, source port
 
 A chain with **no** `filter_chain_match` matches everything and is the fallback.
-Reordering chains in the file changes nothing — if two chains could both match,
-Envoy rejects the config rather than guessing. (Routes, in module 04, are the
-opposite: first match wins.)
+Reordering chains in the file changes nothing. Two chains that match at the
+same level are rejected rather than guessed between — measured on Envoy 1.39.1,
+a second chain that also names `shop.apps-crc.testing` fails with *multiple
+filter chains with overlapping matching rules are defined* — while a less
+specific chain, like the fallback above, is accepted and gets only what no more
+specific chain matches. (Routes, in module 04, are the opposite: first match
+wins.)
 
 ## The fields this module used
 

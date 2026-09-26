@@ -6,7 +6,11 @@ NS=envoy-tut-check
 
 say "cluster"
 SRV=$($KUBE version -o json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["serverVersion"]["gitVersion"])' 2>/dev/null)
-[ -n "$SRV" ] && ok "reachable, server $SRV" || { bad "cannot reach a cluster (KUBECONFIG=$KUBECONFIG)"; exit 1; }
+# lib.sh leaves KUBECONFIG unset when the reader's own ~/.kube/config has a
+# context, and lib.sh runs with set -u: a bare $KUBECONFIG here would abort
+# with "unbound variable" instead of printing this message.
+[ -n "$SRV" ] && ok "reachable, server $SRV" \
+  || { bad "cannot reach a cluster (KUBECONFIG=${KUBECONFIG:-~/.kube/config})"; exit 1; }
 ok "client: $KUBE"
 
 IS_OCP=no
@@ -54,8 +58,8 @@ if $KUBE wait -n "$NS" --for=condition=Ready pod/client --timeout=120s >/dev/nul
   ok "the in-cluster client pod runs — the modules will run"
 else
   bad "the client pod from _shared/client.yaml never became ready in $NS"
-  # On OpenShift this is usually the namespace uid-range vs an image's baked-in
-  # USER. The modules that hit it say so where it happens.
+  # Usually the image could not be pulled or a policy refused the pod; the
+  # README's troubleshooting table shows how to tell which.
   FAILED=$((FAILED+1))
 fi
 $KUBE delete ns "$NS" --wait=false >/dev/null 2>&1

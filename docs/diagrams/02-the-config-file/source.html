@@ -61,7 +61,7 @@ a { color: var(--remote); }
   <header>
     <div class="eyebrow">envoy-tutorial · module 02 · the config file</div>
     <h1>The config file, and what every field defaults to</h1>
-    <p class="lede">The structure of <code>02-the-config-file/manifests/10-envoy-config.yaml</code>. Defaults marked measured were read from the running proxy on CRC; the rest are quoted from the Envoy API reference.</p>
+    <p class="lede">The structure of <code>02-the-config-file/manifests/10-envoy-config.yaml</code>. Defaults marked measured were read from the running proxy on CRC; the rest are from the Envoy API reference.</p>
   </header>
 
   <section>
@@ -75,7 +75,7 @@ a { color: var(--remote); }
 <text x="40" y="42" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">envoy.yaml</text>
 <rect x="40" y="56" width="430" height="52" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
 <text x="54" y="76" font-weight="600">node</text>
-<text x="54" y="93" fill="var(--muted)">id, cluster — names this proxy in stats and to a control plane</text>
+<text x="54" y="93" fill="var(--muted)">id, cluster — names this proxy to a control plane; see /server_info</text>
 <rect x="490" y="56" width="450" height="52" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
 <text x="504" y="76" font-weight="600">admin</text>
 <text x="504" y="93" fill="var(--muted)">the admin interface, :9901 — /clusters, /stats, /config_dump</text>
@@ -131,7 +131,7 @@ a { color: var(--remote); }
 <text x="750" y="532" fill="var(--muted)" font-size="11.5">measured</text>
 <text x="520" y="444" font-family="IBM Plex Mono, monospace" font-size="12">circuit_breakers</text>
 <text x="20" y="604" font-weight="600">Each value is what you get if you leave the line out. Red: the defaults that bite — the reason this module sets them.</text>
-<text x="20" y="624" fill="var(--muted)">measured = seen on the running proxy on CRC · API = the Envoy API reference, quoted in the README</text>
+<text x="20" y="624" fill="var(--muted)">measured = seen on the running proxy on CRC · API = the Envoy API reference, linked in the README</text>
   </g>
 </svg>
       </div>

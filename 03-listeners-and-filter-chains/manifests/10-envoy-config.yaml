@@ -67,7 +67,7 @@ data:
         # Required for server_names matching below. Something has to read the
         # ClientHello before Envoy can know the SNI, and this is what does it.
         #
-        # Measured: delete these two lines, recreate the pod, and SNI selection
+        # Measured: delete these four lines, recreate the pod, and SNI selection
         # stops working for BOTH names. Note that /config_dump still mentions
         # tls_inspector when it is absent, so test the behaviour rather than
         # grepping the dump.

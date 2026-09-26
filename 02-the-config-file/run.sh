@@ -15,6 +15,7 @@ deploy() {
 }
 
 verify() {
+  client_ready
   say "the fields are actually in effect, not just in the file"
 
   R=$(incluster_curl -i "http://envoy.$NS.svc:8080/fields")
@@ -25,10 +26,10 @@ verify() {
   # so it shows up in the echoed body, not in the response headers.
   #
   # The value is 2000, which is neither the listener's request_timeout (10s)
-  # nor the route's timeout (5s): it is per_try_timeout. With a retry policy,
-  # the deadline that matters to the backend is the one for THIS attempt,
-  # because Envoy may give up on it and try another endpoint while the 5s
-  # route budget is still running.
+  # nor the route's timeout (5s): it is per_try_timeout. With a retry policy
+  # the backend is told THIS attempt's deadline - and with this retry_on it is
+  # the whole deadline: a timed-out attempt is not retried (measured on Envoy
+  # 1.39.1: 504 at 2.0s, upstream_rq_retry 0).
   assert_contains "backend is told the per-try deadline (2s), not the route's 5s" \
     '"x-envoy-expected-rq-timeout-ms": "2000"' "$R"
 
@@ -58,7 +59,7 @@ verify() {
   assert_contains "retry_on set"   'connect-failure' "$CB"
   assert_contains "num_retries 2"  '"num_retries": 2' "$CB"
 
-  say "node identity reaches the stats"
+  say "node identity is in /server_info"
   S=$(incluster_curl "http://envoy.$NS.svc:9901/server_info")
   assert_contains "node id" "tutorial-envoy" "$S"
   summary
