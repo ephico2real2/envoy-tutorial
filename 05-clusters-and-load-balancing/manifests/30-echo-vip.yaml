@@ -1,0 +1,15 @@
+# A second Service in front of the SAME echo pods - an ordinary ClusterIP one.
+#
+# The shared echo Service is headless (clusterIP: None), so DNS returns one IP
+# per pod. This one returns a single virtual IP, and kube-proxy picks a pod per
+# CONNECTION. The `vip` cluster points here to show what that does to Envoy's
+# load balancing.
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-vip
+  labels: { app: echo }
+spec:
+  selector: { app: echo }
+  ports:
+  - { name: http, port: 8080, targetPort: 8080 }

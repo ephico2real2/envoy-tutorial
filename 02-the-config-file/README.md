@@ -281,7 +281,7 @@ one payment into two.
 
 | Field | Default | How we know | What it does |
 |---|---|---|---|
-| `type` | `STATIC` | API | how endpoints are found — module 05 (still to come) compares the types |
+| `type` | `STATIC` | API | how endpoints are found — [module 05](../05-clusters-and-load-balancing/README.md) compares the types |
 | `lb_policy` | `ROUND_ROBIN` | API | how to choose between endpoints |
 | `connect_timeout` | 5 s | API | how long to wait for a TCP connection to an endpoint |
 | `dns_refresh_rate` | 5 s | API | how often `STRICT_DNS` re-resolves the name |

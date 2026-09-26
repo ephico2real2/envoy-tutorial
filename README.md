@@ -23,7 +23,8 @@ Every command runs as written from your laptop.
 | [`02-the-config-file`](02-the-config-file/README.md) | the config file, field by field, and what each field defaults to | **done** |
 | [`03-listeners-and-filter-chains`](03-listeners-and-filter-chains/README.md) | `filter_chain_match`, SNI, `tls_inspector`, passthrough Routes | **done** |
 | [`04-routing`](04-routing/README.md) | match types, first match wins, rewrites, timeouts, redirects, `direct_response` | **done** |
-| `05`–`11` | load balancing, filters, gRPC, TLS, observability, resilience | to come |
+| [`05-clusters-and-load-balancing`](05-clusters-and-load-balancing/README.md) | STATIC / STRICT_DNS / LOGICAL_DNS / EDS, the headless lesson, load-balancing policies measured, health checks | **done** |
+| `06`–`11` | filters, gRPC, TLS, observability, resilience | to come |
 | [`12-gateway-api`](12-gateway-api/README.md) | Envoy Gateway, `Gateway`, `HTTPRoute`, and the two OpenShift traps that block them | **done** |
 
 Module 12 was written first because it was the immediate need. The numbering is

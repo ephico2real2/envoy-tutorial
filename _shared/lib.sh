@@ -112,3 +112,10 @@ incluster_curl() {
   [ -n "$CLIENT_READY" ] || client_ensure
   $KUBE exec -n "$NS" client -- curl -sS --max-time 10 "$@" 2>/dev/null
 }
+
+# Run a shell snippet inside the client pod - for loops of many requests, which
+# as one `oc exec` take seconds instead of one round trip per request.
+incluster_sh() {
+  [ -n "$CLIENT_READY" ] || client_ensure
+  $KUBE exec -n "$NS" client -- sh -c "$1" 2>/dev/null
+}

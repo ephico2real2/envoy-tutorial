@@ -1,0 +1,144 @@
+# Two Envoys with the same config:
+#
+#   envoy          default --concurrency, one worker thread per CPU Envoy sees
+#   envoy-single   --concurrency 1, a single worker thread
+#
+# The difference is used in the load-balancing steps: every worker thread keeps
+# its own load-balancer state, so the same requests can split differently.
+#
+# Each pod also runs an echo "sidecar" on 127.0.0.1:8081 - the backend of the
+# STATIC cluster, an address fixed because it lives in the same pod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy
+  labels: { app: envoy }
+spec:
+  selector: { app: envoy }
+  ports:
+  - { name: http,  port: 8080, targetPort: 8080 }
+  - { name: admin, port: 9901, targetPort: 9901 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy-single
+  labels: { app: envoy-single }
+spec:
+  selector: { app: envoy-single }
+  ports:
+  - { name: http,  port: 8080, targetPort: 8080 }
+  - { name: admin, port: 9901, targetPort: 9901 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy
+  labels: { app: envoy }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: envoy } }
+  template:
+    metadata:
+      labels: { app: envoy }
+    spec:
+      containers:
+      - name: envoy
+        image: envoyproxy/envoy:v1.39-latest
+        args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+        ports:
+        - { name: http,  containerPort: 8080 }
+        - { name: admin, containerPort: 9901 }
+        readinessProbe:
+          httpGet: { path: /ready, port: 9901 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        volumeMounts:
+        - { name: config, mountPath: /etc/envoy/envoy.yaml, subPath: envoy.yaml }
+        # A directory mount, NOT subPath: this is what lets an edit to the eds
+        # ConfigMap reach the running pod.
+        - { name: eds, mountPath: /etc/eds }
+        resources:
+          requests: { cpu: "50m",  memory: "64Mi" }
+          limits:   { cpu: "500m", memory: "256Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+      - name: sidecar
+        image: python:3.12-slim
+        command: ["python", "/app/echo.py"]
+        env:
+        - { name: PORT, value: "8081" }
+        - name: POD_NAME
+          valueFrom: { fieldRef: { fieldPath: metadata.name } }
+        resources:
+          requests: { cpu: "10m",  memory: "32Mi" }
+          limits:   { cpu: "100m", memory: "64Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+        volumeMounts:
+        - { name: echo-src, mountPath: /app }
+      volumes:
+      - name: config
+        configMap: { name: envoy-config }
+      - name: eds
+        configMap: { name: eds }
+      - name: echo-src
+        configMap: { name: echo-src }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy-single
+  labels: { app: envoy-single }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: envoy-single } }
+  template:
+    metadata:
+      labels: { app: envoy-single }
+    spec:
+      containers:
+      - name: envoy
+        image: envoyproxy/envoy:v1.39-latest
+        # The one difference from the Deployment above.
+        args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info", "--concurrency", "1"]
+        ports:
+        - { name: http,  containerPort: 8080 }
+        - { name: admin, containerPort: 9901 }
+        readinessProbe:
+          httpGet: { path: /ready, port: 9901 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        volumeMounts:
+        - { name: config, mountPath: /etc/envoy/envoy.yaml, subPath: envoy.yaml }
+        - { name: eds, mountPath: /etc/eds }
+        resources:
+          requests: { cpu: "50m",  memory: "64Mi" }
+          limits:   { cpu: "500m", memory: "256Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+      - name: sidecar
+        image: python:3.12-slim
+        command: ["python", "/app/echo.py"]
+        env:
+        - { name: PORT, value: "8081" }
+        - name: POD_NAME
+          valueFrom: { fieldRef: { fieldPath: metadata.name } }
+        resources:
+          requests: { cpu: "10m",  memory: "32Mi" }
+          limits:   { cpu: "100m", memory: "64Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+        volumeMounts:
+        - { name: echo-src, mountPath: /app }
+      volumes:
+      - name: config
+        configMap: { name: envoy-config }
+      - name: eds
+        configMap: { name: eds }
+      - name: echo-src
+        configMap: { name: echo-src }
