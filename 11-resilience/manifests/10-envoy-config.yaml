@@ -1,0 +1,136 @@
+# Module 11 — resilience: what Envoy does when an upstream misbehaves.
+#
+# Behind every route but /slow: two healthy echo pods and one sick pod that
+# answers every request with 503. The routes differ only in the defence:
+#
+#   /none             nothing                           ~1 in 3 requests fails
+#   /retry            retry once on a 5xx
+#   /retry-elsewhere  retry once, and try hard to pick a different pod
+#   /ejecting         outlier detection: stop sending to a pod that keeps failing
+#   /slow             a circuit breaker in front of a slow app
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-config
+data:
+  envoy.yaml: |
+    admin:
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+    static_resources:
+      listeners:
+      - name: http
+        address:
+          socket_address: { address: 0.0.0.0, port_value: 8080 }
+        filter_chains:
+        - filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: ingress
+              access_log:
+              - name: envoy.access_loggers.stdout
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                  log_format:
+                    json_format:
+                      path:     "%REQ(:PATH)%"
+                      code:     "%RESPONSE_CODE%"
+                      flags:    "%RESPONSE_FLAGS%"
+                      attempts: "%UPSTREAM_REQUEST_ATTEMPT_COUNT%"
+                      upstream: "%UPSTREAM_HOST%"
+              route_config:
+                name: resilience
+                virtual_hosts:
+                - name: resilience
+                  domains: ["*"]
+                  # Tell the client how many attempts a response took, in
+                  # x-envoy-attempt-count - so retries are visible, not hidden.
+                  include_attempt_count_in_response: true
+                  routes:
+                  - match: { path: "/none" }
+                    route: { cluster: pool }
+                  - match: { path: "/retry" }
+                    route:
+                      cluster: pool
+                      retry_policy:
+                        # 5xx: retry any 5xx response. Only safe because these
+                        # are reads - module 02 has the rule.
+                        retry_on: 5xx
+                        num_retries: 1
+                  - match: { path: "/retry-elsewhere" }
+                    route:
+                      cluster: pool
+                      retry_policy:
+                        retry_on: 5xx
+                        num_retries: 1
+                        # Reject a host this request has already tried and pick
+                        # again - up to 3 more picks. If every pick is rejected,
+                        # Envoy sends the retry to the last one anyway, so with
+                        # RANDOM over 3 pods about 1 retry in 81 (1/3 to the 4th)
+                        # still lands on the sick pod.
+                        retry_host_predicate:
+                        - name: envoy.retry_host_predicates.previous_hosts
+                          typed_config:
+                            "@type": type.googleapis.com/envoy.extensions.retry.host.previous_hosts.v3.PreviousHostsPredicate
+                        host_selection_retry_max_attempts: 3
+                  - match: { path: "/ejecting" }
+                    route: { cluster: pool_outlier }
+                  - match: { path: "/slow" }
+                    route: { cluster: slow_limited, timeout: 5s }
+              http_filters:
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      clusters:
+      # RANDOM, not ROUND_ROBIN, on purpose: round robin would move a retry to
+      # the next pod anyway and hide what previous_hosts does.
+      - name: pool
+        type: STRICT_DNS
+        lb_policy: RANDOM
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: pool
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: echo, port_value: 8080 } } }
+            - endpoint: { address: { socket_address: { address: sick, port_value: 8080 } } }
+
+      # The same pods, with outlier detection: two 5xx in a row and a pod is
+      # ejected - taken out of the pool - for 30 s (longer each time it recurs).
+      # No health check involved: Envoy judges by the real traffic.
+      - name: pool_outlier
+        type: STRICT_DNS
+        lb_policy: RANDOM
+        connect_timeout: 1s
+        outlier_detection:
+          consecutive_5xx: 2
+          interval: 1s
+          base_ejection_time: 30s
+          max_ejection_percent: 50
+        load_assignment:
+          cluster_name: pool_outlier
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: echo, port_value: 8080 } } }
+            - endpoint: { address: { socket_address: { address: sick, port_value: 8080 } } }
+
+      # A circuit breaker: at most 2 requests in flight to the slow app and 2
+      # waiting for a connection. The rest are refused at once (503, flag UO)
+      # instead of piling up behind it. Both limits count across all of
+      # Envoy's worker threads.
+      - name: slow_limited
+        type: STRICT_DNS
+        connect_timeout: 1s
+        circuit_breakers:
+          thresholds:
+          - priority: DEFAULT
+            max_requests: 2
+            max_pending_requests: 2
+        load_assignment:
+          cluster_name: slow_limited
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: slow, port_value: 8080 } } }

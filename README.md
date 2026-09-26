@@ -29,7 +29,7 @@ Every command runs as written from your laptop.
 | [`08-tls-on-envoy`](08-tls-on-envoy/README.md) | a cert-manager certificate on Envoy; trust and SAN errors; passthrough vs edge vs reencrypt Routes | **done** |
 | [`09-grpc-end-to-end`](09-grpc-end-to-end/README.md) | gRPC over TLS, mutual TLS to the service, ALPN `h2`, and certificate rotation with SDS | **done** |
 | [`10-observability`](10-observability/README.md) | response flags in the access log, Envoy metrics in OpenShift's monitoring with PromQL, traces in Zipkin | **done** |
-| `11` | resilience | to come |
+| [`11-resilience`](11-resilience/README.md) | retries and `previous_hosts`, outlier detection, circuit breakers — each measured against a sick or slow pod | **done** |
 | [`12-gateway-api`](12-gateway-api/README.md) | Envoy Gateway, `Gateway`, `HTTPRoute`, and the two OpenShift traps that block them | **done** |
 
 Module 12 was written first because it was the immediate need. The numbering is
