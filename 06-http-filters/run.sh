@@ -22,9 +22,11 @@ restart_envoy() {
   wait_upstream echo_service
 }
 
-# codes10 <port> [curl args] - ten requests, their status codes in order.
-codes10() {
-  incluster_sh "for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null -w '%{http_code} ' ${2:-} http://envoy:$1/; done" | sed 's/ $//'
+# burst <port> <token> - ten unsigned requests, then one signed, in ONE exec:
+# the bucket refills continuously (one token every 12 s), so a pause between
+# them would let a token come back and change the answer.
+burst() {
+  incluster_sh "for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null -w '%{http_code} ' http://envoy:$1/; done; curl -s -o /dev/null -w '| %{http_code}' -H 'Authorization: Bearer $2' http://envoy:$1/"
 }
 
 verify() {
@@ -58,12 +60,10 @@ verify() {
 
   say "4. the order of jwt_authn and local_ratelimit"
   restart_envoy
-  assert "auth first (:8080): 10 unsigned requests"  "401 401 401 401 401 401 401 401 401 401" "$(codes10 8080)"
-  assert "auth first (:8080): then alice gets through" "200" \
-    "$(incluster_curl -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "http://envoy.$NS.svc:8080/")"
-  assert "limit first (:8081): 10 unsigned requests" "401 401 401 401 401 429 429 429 429 429" "$(codes10 8081)"
-  assert "limit first (:8081): alice is rate limited" "429" \
-    "$(incluster_curl -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "http://envoy.$NS.svc:8081/")"
+  assert "auth first (:8080): 10 unsigned, then alice gets through" \
+    "401 401 401 401 401 401 401 401 401 401 | 200" "$(burst 8080 "$TOKEN")"
+  assert "limit first (:8081): 10 unsigned, then alice is rate limited" \
+    "401 401 401 401 401 429 429 429 429 429 | 429" "$(burst 8081 "$TOKEN")"
   summary
 }
 

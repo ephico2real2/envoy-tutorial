@@ -92,9 +92,9 @@ data:
                   rules:
                   - match: { prefix: "/" }
                     requires: { provider_name: tutorial }
-              # 5. Rate limit: 5 requests, then 429 until the bucket refills a
-              #    minute later. Both switches are REQUIRED - without them the
-              #    filter is configured but limits nothing (step 9 measures it).
+              # 5. Rate limit: 5 tokens, refilled continuously at 5 per 60s (one
+              #    every 12s); empty -> 429. Both switches are REQUIRED - without
+              #    them the filter is configured but limits nothing (step 9 measures it).
               - name: envoy.filters.http.local_ratelimit
                 typed_config:
                   "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit

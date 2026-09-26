@@ -96,8 +96,8 @@ A **JSON Web Token** is three base64url parts joined by dots —
 ```console
 $ ./make-jwt.sh alice | tr '.' '\n'
 eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InR1dG9yaWFsIn0
-eyJpc3MiOiJlbnZveS10dXRvcmlhbCIsInN1YiI6ImFsaWNlIiwiZXhwIjoxNzkwMzk5MzIzfQ
-mBwkhK7k1yH0763K4puyBOQspp7yREM41336030kl0E
+eyJpc3MiOiJlbnZveS10dXRvcmlhbCIsInN1YiI6ImFsaWNlIiwiZXhwIjoxNzkwNDAxODk3fQ
+2UA837F4EYJO2QzNuo613DrbBeFI-EpyZ9vaWR1a4Lk
 ```
 
 The middle part is the **claims** — who the token is for, who issued it, when it
@@ -105,7 +105,7 @@ expires. It is only encoded, not encrypted, so anyone can read it:
 
 ```console
 $ ./make-jwt.sh alice | python3 -c 'import base64,sys; p=sys.stdin.read().split(".")[1]; print(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)).decode())'
-{"iss":"envoy-tutorial","sub":"alice","exp":1790399323}
+{"iss":"envoy-tutorial","sub":"alice","exp":1790401897}
 ```
 
 **What just happened:** `sub` is the user, `iss` the issuer Envoy expects, `exp`
@@ -146,7 +146,7 @@ A valid token — the app's reply, filtered to the lines that matter:
 
 ```console
 $ oc exec -n envoy-06 client -- curl -s -H "Authorization: Bearer $(./make-jwt.sh alice)" http://envoy:8080/ | grep -E '"served_by"|"x-user"|"x-filter-trace"|"authorization"'
-  "served_by": "echo-f8fc6d5c9-wt7pg",
+  "served_by": "echo-f8fc6d5c9-xgg87",
     "x-filter-trace": "trace-a,trace-b",
     "x-user": "alice",
 ```
@@ -209,15 +209,16 @@ blocks the page from making the real request.
 
 ### Step 8 — the order of `jwt_authn` and `local_ratelimit`
 
-Both listeners allow **5** requests, then answer `429 Too Many Requests` until
-the bucket refills a minute later. Restart Envoy first, so both buckets start
-full:
+Both listeners hold **5** tokens and answer `429 Too Many Requests` when the
+bucket is empty. The bucket refills continuously — 5 tokens per 60 s is one
+token every 12 s — so each command below sends ten requests with no token and
+then one signed by alice in a single `oc exec`, too quickly for a token to come
+back in between. Restart Envoy first, so both buckets start full:
 
 ```console
 $ oc delete pod -n envoy-06 -l app=envoy --wait=true
-pod "envoy-55f9dbb64b-4twp5" deleted from envoy-06 namespace
+pod "envoy-55f9dbb64b-b4lh9" deleted from envoy-06 namespace
 $ oc rollout status -n envoy-06 deploy/envoy --timeout=180s
-Waiting for deployment "envoy" rollout to finish: 0 of 1 updated replicas are available...
 deployment "envoy" successfully rolled out
 ```
 
@@ -225,20 +226,21 @@ Ten requests with no token, then one signed by alice — first to port 8080,
 where `jwt_authn` comes before the rate limiter:
 
 ```console
-$ oc exec -n envoy-06 client -- sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null -w "%{http_code} " http://envoy:8080/; done; echo'
+$ oc exec -n envoy-06 client -- sh -c "for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null -w '%{http_code} ' http://envoy:8080/; done; echo; curl -s -o /dev/null -w '%{http_code}\n' -H 'Authorization: Bearer $(./make-jwt.sh alice)' http://envoy:8080/"
 401 401 401 401 401 401 401 401 401 401 
-$ oc exec -n envoy-06 client -- curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $(./make-jwt.sh alice)" http://envoy:8080/
 200
 ```
 
 The same to port 8081, where the rate limiter comes first:
 
 ```console
-$ oc exec -n envoy-06 client -- sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null -w "%{http_code} " http://envoy:8081/; done; echo'
+$ oc exec -n envoy-06 client -- sh -c "for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null -w '%{http_code} ' http://envoy:8081/; done; echo; curl -s -w ' %{http_code}\n' -H 'Authorization: Bearer $(./make-jwt.sh alice)' http://envoy:8081/"
 401 401 401 401 401 429 429 429 429 429 
-$ oc exec -n envoy-06 client -- curl -s -w ' %{http_code}\n' -H "Authorization: Bearer $(./make-jwt.sh alice)" http://envoy:8081/
 local_rate_limited 429
 ```
+
+The script is in double quotes this time, so your laptop's shell still fills in
+`$(./make-jwt.sh alice)` before `oc exec` runs, as in step 5.
 
 And what each rate limiter saw:
 
@@ -260,7 +262,8 @@ limit_then_auth.http_local_rate_limit.rate_limited: 6
 - **8081** — five `401`s, then five `429`s, and alice got **`429`**
   (`local_rate_limited`). The rate limiter came first, so it counted the
   unsigned requests too: they spent all five tokens, and the real user is locked
-  out until the refill.
+  out until the next token arrives. Measured on CRC: 3 s after the ten requests
+  alice still got `429`; 13 s after, `200`.
 
 Same filters, same settings; only the order differs. With the limiter first,
 anyone can use up a real user's quota without a token at all.
@@ -288,30 +291,33 @@ $ ./run.sh verify
 
 4. the order of jwt_authn and local_ratelimit
   ✓ upstream echo_service has endpoints
-  ✓ auth first (:8080): 10 unsigned requests
-  ✓ auth first (:8080): then alice gets through
-  ✓ limit first (:8081): 10 unsigned requests
-  ✓ limit first (:8081): alice is rate limited
+  ✓ auth first (:8080): 10 unsigned, then alice gets through
+  ✓ limit first (:8081): 10 unsigned, then alice is rate limited
 
 all checks passed
 ```
 
 **Try this — a rate limiter that limits nothing.** In
-`manifests/10-envoy-config.yaml`, delete the four lines `filter_enabled:` …
-`filter_enforced:` … from the `limit_then_auth` rate limiter. Apply it, restart
-Envoy, and send the same ten unsigned requests to port 8081:
+`manifests/10-envoy-config.yaml`, delete lines 165–168 — `filter_enabled:`,
+`filter_enforced:` and the `default_value:` under each — from the
+`limit_then_auth` rate limiter (port 8081; leave port 8080's alone). Apply it,
+restart Envoy, send the same ten unsigned requests to port 8081, and read the
+limiter's counters:
 
 ```bash
 oc apply -n envoy-06 -f manifests/10-envoy-config.yaml
 oc delete pod -n envoy-06 -l app=envoy
 oc rollout status -n envoy-06 deploy/envoy
 oc exec -n envoy-06 client -- sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null -w "%{http_code} " http://envoy:8081/; done; echo'
+oc exec -n envoy-06 client -- curl -s 'http://envoy:9901/stats?filter=limit_then_auth\.http_local_rate_limit\.(enabled|ok|rate_limited)$'
 ```
 
 Measured on CRC: ten `401`s and no `429` at all, and the limiter's
 `enabled`, `ok` and `rate_limited` counters all stayed at `0`. Without those two
 fields the filter is configured but **switched off** — both default to 0% of
-requests. Put the lines back when you are done.
+requests. When you are done, put the lines back
+(`git checkout manifests/10-envoy-config.yaml`) and run the first three
+commands again.
 
 ## The filters
 
@@ -320,7 +326,7 @@ requests. Put the lines back when you are done.
 | `envoy.filters.http.cors` | applies the CORS policy set on the virtual host (`typed_per_filter_config`) | a preflight comes from an allowed origin → `200` + `access-control-*` |
 | `envoy.filters.http.lua` | runs a Lua function on each request — here, stamping `x-filter-trace` | never, here (it can: `request_handle:respond(...)`) |
 | `envoy.filters.http.jwt_authn` | checks the `Authorization: Bearer` token against `local_jwks`; copies `sub` to `x-user` | no token, or a bad one → `401` |
-| `envoy.filters.http.local_ratelimit` | a token bucket: 5 tokens, refilled every 60 s | the bucket is empty → `429` |
+| `envoy.filters.http.local_ratelimit` | a token bucket: 5 tokens, refilled continuously at 5 per 60 s — one every 12 s | the bucket is empty → `429` |
 | `envoy.filters.http.router` | sends the request to the route's cluster | — it is always last |
 
 **Fields worth knowing**
@@ -328,7 +334,7 @@ requests. Put the lines back when you are done.
 | Field | Default | Why it matters |
 |---|---|---|
 | `local_ratelimit.filter_enabled` / `filter_enforced` | **0% of requests** | without them the limiter does nothing — measured in the "Try this" |
-| `local_ratelimit.token_bucket` | — (required) | `max_tokens`, `tokens_per_fill`, `fill_interval` |
+| `local_ratelimit.token_bucket` | none | `max_tokens`, `tokens_per_fill`, `fill_interval`; Envoy accepts the filter without it, and then every request passes |
 | `jwt_authn` token location | `Authorization: Bearer …` or `?access_token=` | where the filter looks when `from_headers` / `from_params` are not set (API reference) |
 | `jwt_authn` provider `forward` | `false` | the token is removed before the request reaches the app |
 | `jwt_authn` provider `claim_to_headers` | none | copy claims such as `sub` into headers the app can read |
@@ -338,9 +344,11 @@ requests. Put the lines back when you are done.
 | You see | Why | Fix |
 |---|---|---|
 | `401 Jwt is missing` with a token | the header must be exactly `Authorization: Bearer <token>` | check the quoting — the `$(…)` must be inside double quotes |
-| `401 Jwt verification fails` for a real token | wrong key, wrong `iss`, or the token has expired | `make-jwt.sh` tokens last an hour — make a new one |
+| `401 Jwt verification fails` | the token was signed with a different key from the one in `local_jwks` | mint it with this module's `make-jwt.sh` |
+| `401 Jwt is expired` | the token's `exp` has passed — `make-jwt.sh` tokens last an hour | make a new one |
+| `401 Jwt issuer is not configured` | the token's `iss` is not `envoy-tutorial` | mint it with this module's `make-jwt.sh` |
 | every preflight gets `401` | `jwt_authn` is above `cors` in the list | put `cors` first |
-| step 8's numbers differ | earlier requests had already spent tokens | restart Envoy first, as step 8 does — the bucket starts full |
+| step 8's numbers differ | earlier requests had already spent tokens, or 12 s passed and a token came back | restart Envoy first, as step 8 does — the bucket starts full — and run each step-8 command whole |
 | no `429` ever | `filter_enabled` / `filter_enforced` missing | set both — see the "Try this" |
 
 ## Clean up

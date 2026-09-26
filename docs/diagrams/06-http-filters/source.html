@@ -95,7 +95,7 @@ a { color: var(--remote); }
 <rect x="30" y="296" width="200" height="34" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
 <text x="44" y="318" font-family="IBM Plex Mono, monospace" font-size="12">local_ratelimit</text>
 <line x1="230" y1="313" x2="258" y2="313" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#h1g)"/>
-<text x="264" y="317" fill="var(--gap)" font-weight="600">bucket of 5 empty → 429</text>
+<text x="264" y="317" fill="var(--gap)" font-weight="600">no token left → 429</text>
 <line x1="130" y1="330" x2="130" y2="342" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
 <rect x="30" y="344" width="200" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
 <text x="44" y="366" font-family="IBM Plex Mono, monospace" font-size="12">router</text>
@@ -121,7 +121,7 @@ a { color: var(--remote); }
 <rect x="520" y="248" width="200" height="34" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
 <text x="534" y="270" font-family="IBM Plex Mono, monospace" font-size="12">local_ratelimit</text>
 <line x1="720" y1="265" x2="748" y2="265" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#h1g)"/>
-<text x="754" y="269" fill="var(--gap)" font-weight="600">bucket of 5 empty → 429</text>
+<text x="754" y="269" fill="var(--gap)" font-weight="600">no token left → 429</text>
 <line x1="620" y1="282" x2="620" y2="294" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
 <rect x="520" y="296" width="200" height="34" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
 <text x="534" y="318" font-family="IBM Plex Mono, monospace" font-size="12">jwt_authn</text>
@@ -136,7 +136,7 @@ a { color: var(--remote); }
 <rect x="510" y="452" width="450" height="70" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
 <text x="524" y="473" fill="var(--gap)" font-weight="600">5 × 401, 5 × 429, then alice: 429</text>
 <text x="524" y="490">unsigned requests spent the 5 tokens</text>
-<text x="524" y="507" fill="var(--muted)">alice is locked out until the refill</text>
+<text x="524" y="507" fill="var(--muted)">alice waits for a token: one every 12 s</text>
 <text x="20" y="566" font-weight="600">The same filters, two of them swapped. HTTP filters run top to bottom, and one that answers a request stops it there.</text>
 <text x="20" y="586" fill="var(--muted)">Measured on CRC, each listener starting with a full bucket.</text>
   </g>
