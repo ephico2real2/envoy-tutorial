@@ -1,0 +1,141 @@
+<title>Envoy Config Anatomy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 02 · the config file</div>
+    <h1>The config file, and what every field defaults to</h1>
+    <p class="lede">The structure of <code>02-the-config-file/manifests/10-envoy-config.yaml</code>. Defaults marked measured were read from the running proxy on CRC; the rest are quoted from the Envoy API reference.</p>
+  </header>
+
+  <section>
+    <h2>envoy.yaml, top to bottom</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 634" role="img" aria-label="The shape of envoy.yaml: node and admin, then static_resources holding the listener, whose http_connection_manager has use_remote_address default false, server_name default envoy, generate_request_id default true, request_timeout default none, idle_timeout default one hour, and a route with timeout default 15 seconds and no retries; and the cluster, with lb_policy default ROUND_ROBIN, connect_timeout 5 seconds, dns_refresh_rate 5 seconds, and circuit breakers of 1024 connections, pending requests and requests and 3 retries.">
+  <defs><marker id="f2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="f2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="20" y="16" width="940" height="560" rx="10" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="40" y="42" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">envoy.yaml</text>
+<rect x="40" y="56" width="430" height="52" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="54" y="76" font-weight="600">node</text>
+<text x="54" y="93" fill="var(--muted)">id, cluster — names this proxy in stats and to a control plane</text>
+<rect x="490" y="56" width="450" height="52" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="504" y="76" font-weight="600">admin</text>
+<text x="504" y="93" fill="var(--muted)">the admin interface, :9901 — /clusters, /stats, /config_dump</text>
+<rect x="40" y="124" width="900" height="436" rx="8" fill="none" stroke="currentColor" stroke-width="1.2"/>
+<text x="58" y="146" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">static_resources</text>
+<rect x="58" y="158" width="864" height="248" rx="8" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="76" y="180" font-weight="600">listeners · http_listener :8080  →  http_connection_manager</text>
+<text x="76" y="206" font-family="IBM Plex Mono, monospace" font-size="12">use_remote_address</text>
+<text x="272" y="206" fill="var(--gap)" font-weight="600">false</text>
+<text x="422" y="206" fill="var(--muted)" font-size="11.5">measured</text>
+<text x="76" y="228" font-family="IBM Plex Mono, monospace" font-size="12">server_name</text>
+<text x="272" y="228">envoy</text>
+<text x="422" y="228" fill="var(--muted)" font-size="11.5">measured</text>
+<text x="76" y="250" font-family="IBM Plex Mono, monospace" font-size="12">generate_request_id</text>
+<text x="272" y="250">true</text>
+<text x="422" y="250" fill="var(--muted)" font-size="11.5">measured</text>
+<text x="76" y="272" font-family="IBM Plex Mono, monospace" font-size="12">request_timeout</text>
+<text x="272" y="272" fill="var(--gap)" font-weight="600">none — no limit</text>
+<text x="422" y="272" fill="var(--muted)" font-size="11.5">API</text>
+<text x="76" y="294" font-family="IBM Plex Mono, monospace" font-size="12">idle_timeout</text>
+<text x="272" y="294" fill="var(--gap)" font-weight="600">1 hour</text>
+<text x="422" y="294" fill="var(--muted)" font-size="11.5">API</text>
+<rect x="76" y="318" width="828" height="76" rx="7" fill="none" stroke="currentColor" stroke-width="1.2"/>
+<text x="92" y="338" font-weight="600">route_config → route</text>
+<text x="92" y="360" font-family="IBM Plex Mono, monospace" font-size="12">timeout</text>
+<text x="288" y="360">15 s</text>
+<text x="438" y="360" fill="var(--muted)" font-size="11.5">measured</text>
+<text x="92" y="382" font-family="IBM Plex Mono, monospace" font-size="12">retry_policy</text>
+<text x="288" y="382" fill="var(--gap)" font-weight="600">none — no retries</text>
+<text x="438" y="382" fill="var(--muted)" font-size="11.5">API</text>
+<rect x="58" y="418" width="864" height="130" rx="8" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="76" y="440" font-weight="600">clusters · echo_service</text>
+<text x="76" y="466" font-family="IBM Plex Mono, monospace" font-size="12">lb_policy</text>
+<text x="272" y="466">ROUND_ROBIN</text>
+<text x="422" y="466" fill="var(--muted)" font-size="11.5">API</text>
+<text x="76" y="488" font-family="IBM Plex Mono, monospace" font-size="12">connect_timeout</text>
+<text x="272" y="488">5 s</text>
+<text x="422" y="488" fill="var(--muted)" font-size="11.5">API</text>
+<text x="76" y="510" font-family="IBM Plex Mono, monospace" font-size="12">dns_refresh_rate</text>
+<text x="272" y="510">5 s</text>
+<text x="422" y="510" fill="var(--muted)" font-size="11.5">API</text>
+<text x="520" y="466" font-family="IBM Plex Mono, monospace" font-size="12">max_connections</text>
+<text x="690" y="466" fill="var(--gap)" font-weight="600">1024</text>
+<text x="750" y="466" fill="var(--muted)" font-size="11.5">measured</text>
+<text x="520" y="488" font-family="IBM Plex Mono, monospace" font-size="12">max_pending_requests</text>
+<text x="690" y="488" fill="var(--gap)" font-weight="600">1024</text>
+<text x="750" y="488" fill="var(--muted)" font-size="11.5">measured</text>
+<text x="520" y="510" font-family="IBM Plex Mono, monospace" font-size="12">max_requests</text>
+<text x="690" y="510" fill="var(--gap)" font-weight="600">1024</text>
+<text x="750" y="510" fill="var(--muted)" font-size="11.5">measured</text>
+<text x="520" y="532" font-family="IBM Plex Mono, monospace" font-size="12">max_retries</text>
+<text x="690" y="532">3</text>
+<text x="750" y="532" fill="var(--muted)" font-size="11.5">measured</text>
+<text x="520" y="444" font-family="IBM Plex Mono, monospace" font-size="12">circuit_breakers</text>
+<text x="20" y="604" font-weight="600">Each value is what you get if you leave the line out. Red: the defaults that bite — the reason this module sets them.</text>
+<text x="20" y="624" fill="var(--muted)">measured = seen on the running proxy on CRC · API = the Envoy API reference, quoted in the README</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>Leave a line out and you get its default. The ones in red are why this module sets them explicitly.</figcaption>
+    </figure>
+  </section>
+</div>
