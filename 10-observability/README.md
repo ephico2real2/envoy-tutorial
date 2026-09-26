@@ -80,8 +80,8 @@ Waiting for deployment "envoy" rollout to finish: 0 of 1 updated replicas are av
 deployment "envoy" successfully rolled out
 ```
 
-**What just happened:** Envoy has five routes, each built to produce one outcome
-— read the comment at the top of
+**What just happened:** Envoy has four routes and, on purpose, no catch-all, so
+the five paths in step 3 each end differently — read the comment at the top of
 [`manifests/10-envoy-config.yaml`](manifests/10-envoy-config.yaml). It logs each
 request as JSON, traces every request to Zipkin, and serves its metrics on
 `:9901`. The backends started first on purpose: an Envoy that starts before an
@@ -109,11 +109,11 @@ Envoy writes its log in batches, so wait a moment first:
 
 ```console
 $ sleep 10; for p in / /slow /down /refused /nowhere; do oc logs -n envoy-10 deploy/envoy --tail=50 | grep -F "\"path\":\"$p\"" | tail -1; done
-{"cluster":"echo","code":200,"details":"via_upstream","duration":1,"flags":"-","path":"/","trace_id":"a026442a9cba36d8","upstream":"10.217.1.174:8080"}
-{"cluster":"slow","code":504,"details":"response_timeout","duration":249,"flags":"UT","path":"/slow","trace_id":"bf206469d47fc78d","upstream":"10.217.1.176:8080"}
-{"cluster":"down","code":503,"details":"no_healthy_upstream","duration":0,"flags":"UH","path":"/down","trace_id":"fd944ab7ed541763","upstream":null}
-{"cluster":"refused","code":503,"details":"upstream_reset_before_response_started{remote_connection_failure|delayed_connect_error:_Connection_refused}","duration":0,"flags":"UF","path":"/refused","trace_id":"bfc839b52ace4545","upstream":"10.217.1.175:9999"}
-{"cluster":null,"code":404,"details":"route_not_found","duration":0,"flags":"NR","path":"/nowhere","trace_id":"079a4e7a3b2bd34e","upstream":null}
+{"cluster":"echo","code":200,"details":"via_upstream","duration":1,"flags":"-","path":"/","trace_id":"17614cf7541f1b98","upstream":"10.217.0.132:8080"}
+{"cluster":"slow","code":504,"details":"response_timeout","duration":258,"flags":"UT","path":"/slow","trace_id":"5c9aaad3641ccc60","upstream":"10.217.0.134:8080"}
+{"cluster":"down","code":503,"details":"no_healthy_upstream","duration":0,"flags":"UH","path":"/down","trace_id":"3ccc1819a704de75","upstream":null}
+{"cluster":"refused","code":503,"details":"upstream_reset_before_response_started{remote_connection_failure|delayed_connect_error:_Connection_refused}","duration":0,"flags":"UF","path":"/refused","trace_id":"45f5405736640eb1","upstream":"10.217.0.132:9999"}
+{"cluster":null,"code":404,"details":"route_not_found","duration":0,"flags":"NR","path":"/nowhere","trace_id":"66bf409709bec217","upstream":null}
 ```
 
 **What just happened:** each line carries `flags` — Envoy's own verdict — and
@@ -173,59 +173,89 @@ Waiting for deployment "traffic" rollout to finish: 0 of 1 updated replicas are 
 deployment "traffic" successfully rolled out
 ```
 
-Prometheus picks up a new `ServiceMonitor` within a minute or two, and a rate
-needs a couple of minutes of samples, so wait two and a half minutes. Then ask
-whether the target is up, and which pod answered:
+Prometheus reads a new `ServiceMonitor` only when it reloads its configuration,
+and user-workload monitoring checks for a new one every three minutes — measured
+while reviewing this step, the target took 125 to 208 s to appear. Give it a
+minute and a half, then wait until it is up and see how much longer it took (if
+it says `no`, run the loop again: the next check is at most three minutes away):
 
 ```console
-$ sleep 150; oc exec -n envoy-10 client -- curl -s --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt -H "Authorization: Bearer $(oc whoami -t)" -G --data-urlencode namespace=envoy-10 --data-urlencode 'query=up{job="envoy"}' https://thanos-querier.openshift-monitoring.svc:9092/api/v1/query | python3 -c 'import json,sys; [print(r["metric"]["pod"], "up" if r["value"][1] == "1" else "DOWN") for r in json.load(sys.stdin)["data"]["result"]]'
-envoy-756977ffbf-jg2pv up
+$ sleep 90
+$ start=$SECONDS; got=no; while [ $((SECONDS - start)) -lt 225 ]; do if oc whoami -t | sed 's/^/Authorization: Bearer /' | oc exec -i -n envoy-10 client -- curl -s --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt -H @- -G --data-urlencode namespace=envoy-10 --data-urlencode 'query=up{job="envoy"} == 1' https://thanos-querier.openshift-monitoring.svc:9092/api/v1/query | grep -q '"value"'; then got=yes; break; fi; sleep 5; done; echo "target up: $got, after about $((SECONDS - start)) s more"; [ "$got" = yes ]
+target up: yes, after about 92 s more
+```
+
+Then ask which pod answered:
+
+```console
+$ oc whoami -t | sed 's/^/Authorization: Bearer /' | oc exec -i -n envoy-10 client -- curl -s --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt -H @- -G --data-urlencode namespace=envoy-10 --data-urlencode 'query=up{job="envoy"}' https://thanos-querier.openshift-monitoring.svc:9092/api/v1/query | python3 -c 'import json,sys; [print(r["metric"]["pod"], "up" if r["value"][1] == "1" else "DOWN") for r in json.load(sys.stdin)["data"]["result"]]'
+envoy-756977ffbf-jm8b7 up
 $ oc get pods -n envoy-10 -l app=envoy -o name
-pod/envoy-756977ffbf-jg2pv
+pod/envoy-756977ffbf-jm8b7
 ```
 
 **What just happened:** `up` is `1` for the Envoy pod you started — compare the
-name with `oc get pods`. Rerun this module within a few minutes and you may also
-see the previous run's pod for a while: Prometheus keeps a series for five
-minutes after its target disappears. The query asked **Thanos** — OpenShift's query front
-end for Prometheus — through its per-namespace port (`9092`), with *your* token
-(`oc whoami -t`). It only answers for namespaces you are allowed to see. The
-`--cacert` is the cluster's service CA, which OpenShift mounts into every pod, so
-no `-k` is needed.
+name with `oc get pods`. A pod that goes away — a rollout, or a rerun of this
+module — usually drops out of `up` about half a minute later: Prometheus marks
+its series stale after two missed scrapes. When Prometheus drops the whole job
+first instead — at its next reload after the `ServiceMonitor` is deleted too —
+nothing marks the series stale, and the last sample answers for five minutes.
+Queries over a window, like step 7's `rate(…[2m])`, count a gone pod's samples
+until they age out of the window.
+
+The query asked **Thanos** — OpenShift's query front end for Prometheus —
+through its per-namespace port (`9092`), with *your* token (`oc whoami -t`). It
+answers only for a namespace in which you may `get pods.metrics.k8s.io` — the
+`view` role is enough — and only with that namespace's series. The token reaches
+`curl` on its standard input (`-H @-`), not its command line: `oc exec` sends the
+command line to the API server inside the request URL, which the audit log
+records. The `--cacert` is the cluster's service CA, which OpenShift mounts into
+every pod, so no `-k` is needed.
 
 ### Step 7 — ask questions in PromQL
 
-Requests per second, by response class, over the last two minutes:
+A rate over `[2m]` divides by the whole two minutes, so it reads true only once
+two minutes of samples exist — measured while reviewing this step, 26 s after
+the first scrape `rate(…[2m])` read 1.62 req/s where the samples rose at 5.87.
+Wait until Prometheus holds eight samples of the target — two minutes, at one
+every 15 s:
 
 ```console
-$ oc exec -n envoy-10 client -- curl -s --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt -H "Authorization: Bearer $(oc whoami -t)" -G --data-urlencode namespace=envoy-10 --data-urlencode 'query=sum by (envoy_response_code_class) (rate(envoy_http_downstream_rq_xx{envoy_http_conn_manager_prefix="ingress"}[2m]))' https://thanos-querier.openshift-monitoring.svc:9092/api/v1/query | python3 -c 'import json,sys; [print("%sxx  %.2f req/s" % (r["metric"]["envoy_response_code_class"], float(r["value"][1]))) for r in json.load(sys.stdin)["data"]["result"]]'
+$ start=$SECONDS; got=no; while [ $((SECONDS - start)) -lt 225 ]; do if oc whoami -t | sed 's/^/Authorization: Bearer /' | oc exec -i -n envoy-10 client -- curl -s --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt -H @- -G --data-urlencode namespace=envoy-10 --data-urlencode 'query=count_over_time(up{job="envoy"}[2m]) >= 8' https://thanos-querier.openshift-monitoring.svc:9092/api/v1/query | grep -q '"value"'; then got=yes; break; fi; sleep 5; done; echo "two minutes of samples: $got, after about $((SECONDS - start)) s"; [ "$got" = yes ]
+two minutes of samples: yes, after about 102 s
+```
+
+Then requests per second, by response class, over the last two minutes:
+
+```console
+$ oc whoami -t | sed 's/^/Authorization: Bearer /' | oc exec -i -n envoy-10 client -- curl -s --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt -H @- -G --data-urlencode namespace=envoy-10 --data-urlencode 'query=sum by (envoy_response_code_class) (rate(envoy_http_downstream_rq_xx{envoy_http_conn_manager_prefix="ingress"}[2m]))' https://thanos-querier.openshift-monitoring.svc:9092/api/v1/query | python3 -c 'import json,sys; [print("%sxx  %.2f req/s" % (r["metric"]["envoy_response_code_class"], float(r["value"][1]))) for r in json.load(sys.stdin)["data"]["result"]]'
 1xx  0.00 req/s
-2xx  6.10 req/s
+2xx  6.02 req/s
 3xx  0.00 req/s
-4xx  0.77 req/s
-5xx  2.31 req/s
+4xx  0.76 req/s
+5xx  2.29 req/s
 ```
 
 The 99th-percentile upstream time per cluster, in milliseconds:
 
 ```console
-$ oc exec -n envoy-10 client -- curl -s --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt -H "Authorization: Bearer $(oc whoami -t)" -G --data-urlencode namespace=envoy-10 --data-urlencode 'query=histogram_quantile(0.99, sum by (le, envoy_cluster_name) (rate(envoy_cluster_upstream_rq_time_bucket[2m])))' https://thanos-querier.openshift-monitoring.svc:9092/api/v1/query | python3 -c 'import json,sys; [print("%-6s p99 %s ms" % (r["metric"]["envoy_cluster_name"], r["value"][1])) for r in json.load(sys.stdin)["data"]["result"]]'
-zipkin p99 4.794716981132075 ms
-echo   p99 0.49577464788732395 ms
+$ oc whoami -t | sed 's/^/Authorization: Bearer /' | oc exec -i -n envoy-10 client -- curl -s --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt -H @- -G --data-urlencode namespace=envoy-10 --data-urlencode 'query=histogram_quantile(0.99, sum by (le, envoy_cluster_name) (rate(envoy_cluster_upstream_rq_time_bucket[2m])))' https://thanos-querier.openshift-monitoring.svc:9092/api/v1/query | python3 -c 'import json,sys; [print("%-6s p99 %s ms" % (r["metric"]["envoy_cluster_name"], r["value"][1])) for r in json.load(sys.stdin)["data"]["result"]]'
+echo   p99 0.49578446909667195 ms
+zipkin p99 4.470769230769228 ms
 ```
 
 And the requests that timed out, per second, per cluster:
 
 ```console
-$ oc exec -n envoy-10 client -- curl -s --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt -H "Authorization: Bearer $(oc whoami -t)" -G --data-urlencode namespace=envoy-10 --data-urlencode 'query=sum by (envoy_cluster_name) (rate(envoy_cluster_upstream_rq_timeout[2m])) > 0' https://thanos-querier.openshift-monitoring.svc:9092/api/v1/query | python3 -c 'import json,sys; [print("%-6s %.2f timeouts/s" % (r["metric"]["envoy_cluster_name"], float(r["value"][1]))) for r in json.load(sys.stdin)["data"]["result"]]'
-slow   0.77 timeouts/s
+$ oc whoami -t | sed 's/^/Authorization: Bearer /' | oc exec -i -n envoy-10 client -- curl -s --cacert /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt -H @- -G --data-urlencode namespace=envoy-10 --data-urlencode 'query=sum by (envoy_cluster_name) (rate(envoy_cluster_upstream_rq_timeout[2m])) > 0' https://thanos-querier.openshift-monitoring.svc:9092/api/v1/query | python3 -c 'import json,sys; [print("%-6s %.2f timeouts/s" % (r["metric"]["envoy_cluster_name"], float(r["value"][1]))) for r in json.load(sys.stdin)["data"]["result"]]'
+slow   0.76 timeouts/s
 ```
 
 **What just happened:** the traffic generator sends eight `200`s, one `404` and
 three `5xx`s per round, and the rates come out in that 8 : 1 : 3 ratio.
 
-The `zipkin` line in the p99 is Envoy's own traffic: every span it sends to
-Zipkin is an upstream request too. The p99 query has **no line for `slow`** — and
+The `zipkin` line in the p99 is Envoy's own traffic: it sends its spans to
+Zipkin as upstream requests too, a few spans to each. The p99 query has **no line for `slow`** — and
 that is the lesson. The
 upstream-time histogram only records responses that came back; every `/slow`
 request timed out, so there was nothing to record. Measured while writing this,
@@ -242,7 +272,7 @@ Take the `trace_id` from a `/down` log line and ask Zipkin for that trace:
 
 ```console
 $ oc exec -n envoy-10 client -- curl -s "http://zipkin:9411/api/v2/trace/$(oc logs -n envoy-10 deploy/envoy --tail=100 | grep -F '"path":"/down"' | tail -1 | sed 's/.*"trace_id":"\([0-9a-f]*\)".*/\1/')" | python3 -c 'import json,sys; [print(s["kind"], s["name"], "duration=%sus" % s["duration"], {k: v for k, v in s["tags"].items() if k in ("http.url", "http.status_code", "response_flags", "error")}) for s in json.load(sys.stdin)]'
-SERVER envoy:8080 duration=30us {'error': 'true', 'http.status_code': '503', 'http.url': 'http://envoy:8080/down', 'response_flags': 'UH'}
+SERVER envoy:8080 duration=38us {'error': 'true', 'http.status_code': '503', 'http.url': 'http://envoy:8080/down', 'response_flags': 'UH'}
 ```
 
 **What just happened:** the log line and the trace are the same request, joined by
@@ -257,7 +287,7 @@ $ ./run.sh verify
 
 1. Envoy's own counters, from the admin port
   ✓ Prometheus format on /stats/prometheus
-  ✓ a latency histogram per cluster
+  ✓ a latency histogram for the echo cluster
 
 2. every outcome, named in the access log
   ✓ / -> 200
@@ -315,8 +345,8 @@ all checks passed
 | You see | Why | Fix |
 |---|---|---|
 | a `trace_id` of `null` | logged with `%REQ(X-B3-TRACEID)%`, which is only set on requests forwarded upstream | use `%TRACE_ID%` |
-| `up{job="envoy"}` returns nothing | Prometheus has not reloaded yet, or the `ServiceMonitor` port name does not match the Service | wait a minute; check `port: admin` exists on the `envoy` Service |
-| a `rate(…)` query returns nothing | fewer than two samples in the window | wait two minutes after traffic starts |
+| `up{job="envoy"}` returns nothing | Prometheus has not reloaded yet — a new `ServiceMonitor` waits for the next check, every three minutes — or the `ServiceMonitor` port name does not match the Service | wait; check `port: admin` exists on the `envoy` Service |
+| a `rate(…)` query returns nothing, or too little | fewer than two samples in the window, or a window not yet full — `rate` divides by all of it | run step 7's first loop until it says yes |
 | the console asks for a namespace | Observe → Metrics is namespaced for non-admin users | pick `envoy-10` |
 
 ## Clean up
@@ -337,7 +367,7 @@ namespace "envoy-10" deleted
 - [Envoy — response flags](https://www.envoyproxy.io/docs/envoy/latest/configuration/observability/access_log/usage#config-access-log-format-response-flags)
 - [Envoy — tracing](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/observability/tracing)
 - [Envoy — statistics](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/observability/statistics)
-- [OpenShift — monitoring your own services](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/monitoring/configuring-user-workload-monitoring)
+- [OpenShift — configuring user workload monitoring](https://docs.redhat.com/en/documentation/monitoring_stack_for_red_hat_openshift/4.22/html/configuring_user_workload_monitoring/index)
 - [Prometheus — `histogram_quantile`](https://prometheus.io/docs/prometheus/latest/querying/functions/#histogram_quantile)
 - [Zipkin — API](https://zipkin.io/zipkin-api/)
 
