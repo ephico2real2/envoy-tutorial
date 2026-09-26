@@ -99,8 +99,10 @@ data:
             - endpoint: { address: { socket_address: { address: sick, port_value: 8080 } } }
 
       # The same pods, with outlier detection: two 5xx in a row and a pod is
-      # ejected - taken out of the pool - for 30 s (longer each time it recurs).
-      # No health check involved: Envoy judges by the real traffic.
+      # ejected - taken out of the pool - for 30 s. Longer only if it fails again
+      # within one interval of coming back: every interval it stays in takes one
+      # off its ejection count. No health check involved: Envoy judges by the
+      # real traffic.
       - name: pool_outlier
         type: STRICT_DNS
         lb_policy: RANDOM
@@ -120,7 +122,8 @@ data:
       # A circuit breaker: at most 2 requests in flight to the slow app and 2
       # waiting for a connection. The rest are refused at once (503, flag UO)
       # instead of piling up behind it. Both limits count across all of
-      # Envoy's worker threads.
+      # Envoy's worker threads, which check a count and then increment it with
+      # no lock between - so a race can let one or two more through.
       - name: slow_limited
         type: STRICT_DNS
         connect_timeout: 1s

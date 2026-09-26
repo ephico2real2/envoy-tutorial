@@ -39,12 +39,17 @@ verify() {
   assert "some requests fail" "yes" "$([ "$(count "$C" 503)" -gt 0 ] 2>/dev/null && echo yes || echo no)"
 
   say "2. retries"
-  # previous_hosts lowers the odds of retrying on the sick pod; it does not
-  # make them zero (see the config), so compare rather than demand 180 of 180.
+  # previous_hosts lowers the odds of retrying on the sick pod to 1 in 81; it
+  # does not make them zero (see the config), so neither check demands 180 of
+  # 180. Over 180 requests /retry fails about 20 times and /retry-elsewhere
+  # about once; more than 6 happens once in 86,000 runs. "Fewer than /retry"
+  # alone would pass almost half the time with a predicate that does nothing.
   R=$(count "$(codes /retry 180)" 503); E=$(count "$(codes /retry-elsewhere 180)" 503)
   echo "  503s in 180 requests: /retry ${R:-0}, /retry-elsewhere ${E:-0}"
   assert "retrying on another host fails less often than a plain retry" "yes" \
     "$([ "${E:-0}" -lt "${R:-0}" ] && echo yes || echo no)"
+  assert "retrying on another host fails at most 6 times in 180" "yes" \
+    "$([ "${E:-0}" -le 6 ] && echo yes || echo no)"
   # Every response carries the header; a retried one says 2. Over 30 requests,
   # none retried is (2/3)^30 - about 5 in a million.
   assert_contains "a retried response says x-envoy-attempt-count: 2" "x-envoy-attempt-count: 2" \
@@ -64,8 +69,11 @@ verify() {
   REFUSED=$(printf '%s\n' "$B" | awk '$1 == 503' | wc -l | tr -d ' ')
   SLOWEST_REFUSAL=$(printf '%s\n' "$B" | awk '$1 == 503 && $2 > m { m = $2 } END { print m + 0 }')
   echo "  10 at once: $OK answered, $REFUSED refused, the slowest refusal in ${SLOWEST_REFUSAL}s"
-  # 2 in flight plus at most 2 waiting can be served; everything else is refused.
-  assert "2 to 4 answered (max_requests 2 + max_pending_requests 2)" "yes" \
+  # max_requests 2 in flight. A request waiting for a connection is refused when
+  # it gets one, because 2 are still in flight (README step 7). Worker threads
+  # check the shared count and then increment it, with no lock between, so a
+  # race can let a third or fourth request through.
+  assert "2 to 4 answered (max_requests 2, and worker threads can race past it)" "yes" \
     "$([ "$OK" -ge 2 ] && [ "$OK" -le 4 ] && echo yes || echo no)"
   assert "the other requests were refused with 503" "10" "$((OK + REFUSED))"
   assert "every refusal came back at once, not after the app's 1 s" "yes" \
