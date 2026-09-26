@@ -55,6 +55,9 @@ for k in ("iss", "aud", "azp", "preferred_username"):
 print("roles", " ".join(sorted(c.get("realm_access", {}).get("roles", []))))' "$1"
 }
 token() { kc -d client_id="$1" "${@:2}" "$REALM/protocol/openid-connect/token"; }
+# claim <name> <claims output> - that one claim's value, exactly: a role check must
+# fail on an extra role, which a substring match lets through.
+claim() { sed -n "s/^$1 //p" <<<"$2"; }
 
 verify() {
   client_ensure
@@ -81,9 +84,9 @@ verify() {
   A=$(claims "$(token shop-cli -d grant_type=password -d username=alice -d password=alice-lab-password)")
   assert_contains "alice: issued by the realm"        "iss $REALM"      "$A"
   assert_contains "alice: for shop-api (aud)"         "aud shop-api"    "$A"
-  assert_contains "alice: role reader only"           "roles reader"    "$A"
+  assert          "alice: role reader only"           "reader"          "$(claim roles "$A")"
   B=$(claims "$(token shop-cli -d grant_type=password -d username=bob -d password=bob-lab-password)")
-  assert_contains "bob: roles admin and reader"       "roles admin reader" "$B"
+  assert          "bob: roles admin and reader"       "admin reader"    "$(claim roles "$B")"
   S=$(claims "$(token orders-service -d grant_type=client_credentials -d client_secret=orders-service-lab-secret)")
   assert_contains "orders-service: its own token"     "preferred_username service-account-orders-service" "$S"
   assert_contains "orders-service: for shop-api (aud)" "aud shop-api"   "$S"
@@ -95,13 +98,20 @@ verify() {
 clean() {
   warn=$($KUBE get securitypolicy -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {end}' 2>/dev/null)
   [ -n "$warn" ] && echo "  note: SecurityPolicies that may use this Keycloak: $warn"
+  # The database's volume outlives its claim here: CRC's StorageClass has
+  # reclaimPolicy Retain, and an earlier clean left a Released PV - and the data
+  # on the node's disk - behind (measured). Mark it Delete while the claim still
+  # exists, so deleting the namespace deletes the volume too.
+  local pv; pv=$($KUBE get pvc data-postgres-0 -n "$NS" -o jsonpath='{.spec.volumeName}' 2>/dev/null)
+  [ -n "$pv" ] && $KUBE patch pv "$pv" --type=merge -p '{"spec":{"persistentVolumeReclaimPolicy":"Delete"}}' >/dev/null
   $KUBE delete keycloakrealmimport tutorial -n "$NS" --ignore-not-found >/dev/null 2>&1
   $KUBE delete keycloak keycloak -n "$NS" --ignore-not-found --wait=true >/dev/null 2>&1
   CSV=$(installed_csv)
   $KUBE delete subscription rhbk-operator -n "$NS" --ignore-not-found >/dev/null 2>&1
   [ -n "$CSV" ] && $KUBE delete csv "$CSV" -n "$NS" --ignore-not-found >/dev/null 2>&1
   $KUBE delete ns "$NS" --wait=false >/dev/null 2>&1
-  ok "namespace $NS deleting, with the operator, the database and its volume claim"
+  ok "namespace $NS deleting, with the operator, the database and its volume${pv:+ $pv}"
+  echo "  note: OLM leaves the CRDs keycloaks.k8s.keycloak.org and keycloakrealmimports.k8s.keycloak.org installed"
 }
 
 case "${1:-deploy}" in

@@ -36,7 +36,7 @@ uses them.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/17-keycloak-jwt/flow.dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/17-keycloak-jwt/flow.light.png">
-  <img alt="A caller gets a token from Keycloak's token endpoint, then calls the Gateway with it. The Gateway's jwt_authn filter checks the token's signature with Keycloak's public keys, which it fetched itself from keycloak-service.keycloak.svc:8443 over TLS - allowed by a ReferenceGrant and trusted through a BackendTLSPolicy - and cached for 300 seconds. It checks the issuer and the audience shop-api, then, on /admin, that the realm role admin is present. Measured answers: no token 401, an edited token 401 Jwt verification fails, another realm 401 Jwt issuer is not configured, another audience 403, alice on /admin 403 RBAC access denied, alice on /api and bob on /admin 200 with x-user set." src="../docs/diagrams/17-keycloak-jwt/flow.light.png">
+  <img alt="A caller gets a token from Keycloak's token endpoint, then calls the Gateway with it. The Gateway's jwt_authn filter checks the token's issuer and its audience shop-api, then its signature with Keycloak's public keys, which it fetched itself from keycloak-service.keycloak.svc:8443 over TLS - allowed by a ReferenceGrant and trusted through a BackendTLSPolicy - and cached for 300 seconds; then, on /admin, that the realm role admin is present. Measured answers: no token 401, an edited token 401 Jwt verification fails, another realm 401 Jwt issuer is not configured, another audience 403, alice on /admin 403 RBAC access denied, alice on /api and bob on /admin 200 with x-user set." src="../docs/diagrams/17-keycloak-jwt/flow.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
 
@@ -142,7 +142,11 @@ Accepted=True Policy has been accepted.
 
 Both accepted. Now the tokens. [`token.sh`](token.sh) asks module 16's Keycloak
 for one, from the `client` pod in the `keycloak` namespace — read it: it is the
-same `curl` as module 16, step 10. Without a token, and with alice's:
+same request as module 16, step 10, except that the form goes to `curl` on its
+standard input. `oc exec` sends a command's arguments in the request URL, and the
+API server's audit log keeps that URL (measured) — a password passed as
+`-d password=…` would be stored there; on stdin it is not. Without a token, and
+with alice's:
 
 ```console
 $ oc exec -n envoy-17 client -- curl -s -w '  -> %{http_code}\n' "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/api"
@@ -184,7 +188,8 @@ http.http-10080.jwt_authn.jwks_fetch_success: 1
 **What just happened:** the keys come from their **own cluster**, over TLS
 (`ssl.handshake`), and a `200`. The fetch counters may show a failure before the
 first success — in the run shown, one attempt failed and the next succeeded; the
-Gateway keeps trying until it has the keys. Two defaults matter: **`cache_duration: 300s`** —
+Gateway keeps trying until it has the keys. Two of Envoy Gateway's defaults
+matter: **`cache_duration: 300s`** (Envoy's own default is 10 minutes) —
 the keys are kept five minutes, then fetched again, which is how a key Keycloak
 rotates in reaches the Gateway — and **`async_fetch`**: they are fetched when the
 listener starts, not on the first request.
@@ -219,8 +224,15 @@ Jwt issuer is not configured  -> 401
 | Token | Answer | Check that failed |
 |---|---|---|
 | edited | `401 Jwt verification fails` | the **signature** — the claims no longer match what Keycloak signed |
-| another audience | **`403`** `Audiences in Jwt are not allowed` | the **audience** — valid, but not for this API. Note the `403`, not `401` |
-| another realm | `401 Jwt issuer is not configured` | the **issuer** — signed by Keycloak, but not by this realm |
+| another audience | **`403`** `Audiences in Jwt are not allowed` | the **audience** — not for this API. Note the `403`, not `401` |
+| another realm | `401 Jwt issuer is not configured` | the **issuer** — not this realm |
+
+The checks run in a fixed order: the issuer, the expiry, the audience — and only
+then the signature, with the keys (Envoy's `jwt_authn`, `authenticator.cc`). So
+the `403` for the audience and the `401` for the issuer say nothing about the
+signature: measured, a token Keycloak never signed, with another `aud`, gets the
+same `403`. Only a request that gets past `jwt_authn` — a `200`, or step 6's
+`403 RBAC` — has had its signature checked.
 
 And a service with its own identity gets through as itself:
 
@@ -247,13 +259,16 @@ Overridden=True This policy is being overridden by other securityPolicies for th
 **What just happened:** the Gateway's policy now says **`Overridden=True`** for
 `envoy-17/admin`. A `SecurityPolicy` on a route **replaces** the Gateway's for
 that route — the two are not merged — which is why `50-admin-only.yaml` repeats
-the JWT provider instead of relying on the Gateway's. Now alice, then bob:
+the JWT provider instead of relying on the Gateway's: all of it, both
+`claimToHeaders` included. Envoy clears from a request only the headers its
+provider sets — with `x-client` left out, a caller's own `x-client` header would
+reach the app on `/admin` (measured). Now alice, then bob:
 
 ```console
 $ oc exec -n envoy-17 client -- curl -s -w '  -> %{http_code}\n' -H "authorization: Bearer $(./token.sh alice)" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/admin"
 RBAC: access denied  -> 403
 $ oc exec -n envoy-17 client -- curl -s -w '  -> %{http_code}\n' -H "authorization: Bearer $(./token.sh bob)" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/admin" | grep -E '"x-user"|->'
-    "x-user": "bob"
+    "x-user": "bob",
 }  -> 200
 ```
 
@@ -325,6 +340,7 @@ $ ./run.sh verify
 3. who gets through /admin (realm role admin)
   ✓ alice (reader) -> 403
   ✓ bob (admin) -> 200
+  ✓ ...and the app gets the token's client, not the caller's x-client
 
 all checks passed
 ```
@@ -354,7 +370,8 @@ all checks passed
 | `401 Jwks remote fetch is failed` for every token | the Gateway cannot fetch the keys — measured without the `BackendTLSPolicy` | step 3; `jwt_authn.jwks_fetch_failed` counts the attempts |
 | `401 Jwt issuer is not configured` | `iss` differs from `issuer` — another realm, or Keycloak's `hostname` changed | compare with the realm's discovery document (module 16, step 9) |
 | `403 Audiences in Jwt are not allowed` | the token is not for `shop-api` — no audience mapper on its client | add the mapper (module 16's realm) |
-| `401 Jwt verification fails` | the signature does not match — edited, or signed by a key the Gateway has not fetched | fetch fresh keys: they are cached 300 s |
+| `401 Jwt verification fails` | the signature does not match the claims — the token was edited | a fresh token from Keycloak |
+| `401 Jwks doesn't have key to match kid or alg from Jwt` | the token names a key (`kid`) the Gateway has not fetched — Keycloak rotated its keys; measured with a new key | wait for the next fetch, at most `cache_duration` (300 s), or restart the Gateway's Envoy |
 | `403 RBAC: access denied` | valid token, missing role | give the user the role in Keycloak |
 | a route policy ignores the Gateway's JWT settings | a route's `SecurityPolicy` replaces the Gateway's; status says `Overridden` | repeat the provider in the route's policy |
 | `500` for every request; the policy says `Accepted=False` … `backend ref to Service keycloak/keycloak-service not permitted by any ReferenceGrant` | the `ReferenceGrant` in `keycloak` is missing — measured | step 3 |
@@ -388,7 +405,7 @@ configmap "keycloak-ca" deleted from keycloak namespace
 - [Envoy Gateway — JWT claim-based authorization](https://gateway.envoyproxy.io/docs/tasks/security/jwt-claim-authorization/)
 - [Gateway API — `ReferenceGrant`](https://gateway-api.sigs.k8s.io/api-types/referencegrant/)
 - [Envoy — JWT authentication filter](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/jwt_authn_filter)
-- [Red Hat build of Keycloak — Server Administration Guide](https://docs.redhat.com/en/documentation/red_hat_build_of_keycloak/26.4/html-single/server_administration_guide/index)
+- [Red Hat build of Keycloak 26.6 — Server Administration Guide](https://docs.redhat.com/en/documentation/red_hat_build_of_keycloak/26.6/html-single/server_administration_guide/index)
 
 ## Diagram sources
 

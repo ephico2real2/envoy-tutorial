@@ -68,7 +68,7 @@ a { color: var(--remote); }
     <h2>The lab</h2>
     <figure>
       <div class="fig-scroll">
-<svg viewBox="0 0 980 526" role="img" aria-label="The Keycloak lab in namespace keycloak. The rhbk-operator, installed from the redhat-operators catalog with a manually approved InstallPlan, runs the Keycloak server described by a Keycloak resource. Keycloak stores its data in a PostgreSQL StatefulSet with a 1 GiB volume, serves HTTPS with a cert-manager certificate from enterprise-ca, and is reached from outside through a passthrough Route at keycloak.apps-crc.testing and from inside at keycloak-service.keycloak.svc:8443. A KeycloakRealmImport creates the realm tutorial: roles reader and admin, users alice and bob, clients shop-api, shop-cli and orders-service. A client asks the token endpoint for a token, signed RS256 with a private key; the public keys are published at the realm&#x27;s certs endpoint.">
+<svg viewBox="0 0 980 526" role="img" aria-label="The Keycloak lab in namespace keycloak. The rhbk-operator, installed from the redhat-operators catalog with a manually approved InstallPlan, runs the Keycloak server described by a Keycloak resource. Keycloak stores its data in a PostgreSQL StatefulSet with a 1 GiB volume claim, serves HTTPS with a cert-manager certificate from enterprise-ca, and is reached from outside through a passthrough Route at keycloak.apps-crc.testing and from inside at keycloak-service.keycloak.svc:8443. A KeycloakRealmImport creates the realm tutorial: roles reader and admin, users alice and bob, clients shop-api, shop-cli and orders-service. A client asks the token endpoint for a token, signed RS256 with a private key; the public keys are published at the realm&#x27;s certs endpoint.">
   <defs><marker id="k1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="k1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
   <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
 <rect x="20" y="12" width="940" height="40" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
@@ -77,7 +77,7 @@ a { color: var(--remote); }
 <text x="20" y="72" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">NAMESPACE keycloak</text>
 <rect x="20" y="80" width="280" height="72" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
 <text x="34" y="101" font-weight="600">PostgreSQL</text>
-<text x="34" y="118" font-family="IBM Plex Mono, monospace" font-size="12">StatefulSet postgres-0</text>
+<text x="34" y="118" font-family="IBM Plex Mono, monospace" font-size="12">StatefulSet postgres</text>
 <text x="34" y="135" fill="var(--muted)">1 GiB claim · lab password</text>
 <rect x="340" y="80" width="300" height="72" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
 <text x="354" y="101" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">Keycloak server</text>

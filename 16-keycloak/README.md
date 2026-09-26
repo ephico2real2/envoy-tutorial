@@ -28,7 +28,8 @@ the Gateway in front of it.
 - [`00-prerequisites`](../00-prerequisites/README.md) passes, including
   **cert-manager** and the `enterprise-ca` `ClusterIssuer` (module 08).
 - **cluster-admin** rights: installing an operator is a cluster-level change.
-- About 2 GiB of free memory: Keycloak requests 1 GiB, PostgreSQL 128 MiB.
+- About 3.5 GiB of free memory (requests, measured): Keycloak 1 GiB, the operator
+  450 MiB, PostgreSQL 128 MiB — and, while step 8's import runs, its Job 1.7 GiB.
 - Work from this folder: `cd 16-keycloak`.
 - This lab uses the namespace **`keycloak`** and takes about 20 minutes. Leave it
   running for module 17.
@@ -39,7 +40,7 @@ the Gateway in front of it.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/16-keycloak/lab.dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/16-keycloak/lab.light.png">
-  <img alt="The Keycloak lab in namespace keycloak. The rhbk-operator, installed from the redhat-operators catalog with a manually approved InstallPlan, runs the Keycloak server described by a Keycloak resource. Keycloak stores its data in a PostgreSQL StatefulSet with a 1 GiB volume, serves HTTPS with a cert-manager certificate from enterprise-ca, and is reached from outside through a passthrough Route at keycloak.apps-crc.testing and from inside at keycloak-service.keycloak.svc:8443. A KeycloakRealmImport creates the realm tutorial: roles reader and admin, users alice and bob, clients shop-api, shop-cli and orders-service. A client asks the token endpoint for a token, signed RS256 with a private key; the public keys are published at the realm's certs endpoint." src="../docs/diagrams/16-keycloak/lab.light.png">
+  <img alt="The Keycloak lab in namespace keycloak. The rhbk-operator, installed from the redhat-operators catalog with a manually approved InstallPlan, runs the Keycloak server described by a Keycloak resource. Keycloak stores its data in a PostgreSQL StatefulSet with a 1 GiB volume claim, serves HTTPS with a cert-manager certificate from enterprise-ca, and is reached from outside through a passthrough Route at keycloak.apps-crc.testing and from inside at keycloak-service.keycloak.svc:8443. A KeycloakRealmImport creates the realm tutorial: roles reader and admin, users alice and bob, clients shop-api, shop-cli and orders-service. A client asks the token endpoint for a token, signed RS256 with a private key; the public keys are published at the realm's certs endpoint." src="../docs/diagrams/16-keycloak/lab.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
 
@@ -84,7 +85,7 @@ operatorgroup.operators.coreos.com/keycloak created
 subscription.operators.coreos.com/rhbk-operator created
 $ sleep 30; oc get installplan -n keycloak -o custom-columns=NAME:.metadata.name,CSV:.spec.clusterServiceVersionNames,APPROVED:.spec.approved
 NAME            CSV                             APPROVED
-install-2jxgw   [rhbk-operator.v26.6.7-opr.1]   false
+install-nsls6   [rhbk-operator.v26.6.7-opr.1]   false
 ```
 
 **What just happened:** OLM — the Operator Lifecycle Manager — prepared an
@@ -93,12 +94,12 @@ and wait for the operator:
 
 ```console
 $ oc patch installplan "$(oc get subscription rhbk-operator -n keycloak -o jsonpath='{.status.installPlanRef.name}')" -n keycloak --type=merge -p '{"spec":{"approved":true}}'
-installplan.operators.coreos.com/install-2jxgw patched
+installplan.operators.coreos.com/install-nsls6 patched
 $ for i in $(seq 1 60); do [ "$(oc get csv "$(oc get subscription rhbk-operator -n keycloak -o jsonpath='{.status.installedCSV}')" -n keycloak -o jsonpath='{.status.phase}' 2>/dev/null)" = Succeeded ] && break; sleep 5; done; oc get subscription rhbk-operator -n keycloak -o jsonpath='{.status.installedCSV}{"\n"}'
 rhbk-operator.v26.6.7-opr.1
 $ oc get pods -n keycloak
 NAME                             READY   STATUS    RESTARTS   AGE
-rhbk-operator-864584d99b-g6ssq   1/1     Running   0          4s
+rhbk-operator-864584d99b-vp6b2   1/1     Running   0          4s
 $ oc api-resources --api-group=k8s.keycloak.org
 NAME                   SHORTNAMES   APIVERSION                 NAMESPACED   KIND
 keycloakrealmimports                k8s.keycloak.org/v2beta1   true         KeycloakRealmImport
@@ -128,7 +129,7 @@ Waiting for 1 pods to be ready...
 partitioned roll out complete: 1 new pods have been updated...
 $ oc get pvc -n keycloak
 NAME              STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE
-data-postgres-0   Bound    pvc-3cfe2fba-1320-440d-9712-927b71e43277   119Gi      RWO            crc-csi-hostpath-provisioner   <unset>                 10s
+data-postgres-0   Bound    pvc-f43d69f9-15c6-4ff4-b8dd-7d1c2d88bd57   119Gi      RWO            crc-csi-hostpath-provisioner   <unset>                 10s
 ```
 
 The claim asked for 1 GiB, and the capacity shown is 119Gi: CRC's storage
@@ -146,10 +147,10 @@ $ oc apply -f manifests/30-certificate.yaml
 certificate.cert-manager.io/keycloak-tls created
 $ oc wait certificate/keycloak-tls -n keycloak --for=condition=Ready --timeout=120s
 certificate.cert-manager.io/keycloak-tls condition met
-$ oc get secret keycloak-tls -n keycloak -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -issuer -ext subjectAltName
+$ oc get secret keycloak-tls -n keycloak -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -issuer -text | grep -E '^issuer=|Subject Alternative Name|DNS:'
 issuer=O=Enterprise POC, CN=Enterprise Root CA
-X509v3 Subject Alternative Name: critical
-    DNS:keycloak.apps-crc.testing, DNS:keycloak-service.keycloak.svc, DNS:keycloak-service.keycloak.svc.cluster.local
+            X509v3 Subject Alternative Name: critical
+                DNS:keycloak.apps-crc.testing, DNS:keycloak-service.keycloak.svc, DNS:keycloak-service.keycloak.svc.cluster.local
 ```
 
 ### Step 5 — the Keycloak server
@@ -167,14 +168,14 @@ $ oc wait keycloak/keycloak -n keycloak --for=condition=Ready --timeout=600s
 keycloak.k8s.keycloak.org/keycloak condition met
 $ oc get pods,svc -n keycloak
 NAME                                 READY   STATUS    RESTARTS   AGE
-pod/keycloak-0                       1/1     Running   0          18s
-pod/postgres-0                       1/1     Running   0          29s
-pod/rhbk-operator-864584d99b-g6ssq   1/1     Running   0          34s
+pod/keycloak-0                       1/1     Running   0          19s
+pod/postgres-0                       1/1     Running   0          30s
+pod/rhbk-operator-864584d99b-vp6b2   1/1     Running   0          34s
 
 NAME                         TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)             AGE
-service/keycloak-discovery   ClusterIP   None           <none>        7800/TCP            18s
-service/keycloak-service     ClusterIP   10.217.5.95    <none>        8443/TCP,9000/TCP   18s
-service/postgres             ClusterIP   10.217.4.129   <none>        5432/TCP            29s
+service/keycloak-discovery   ClusterIP   None           <none>        7800/TCP            20s
+service/keycloak-service     ClusterIP   10.217.4.237   <none>        8443/TCP,9000/TCP   20s
+service/postgres             ClusterIP   10.217.5.53    <none>        5432/TCP            30s
 ```
 
 **What just happened:** the operator created a **StatefulSet** (`keycloak-0`) and
@@ -272,8 +273,8 @@ issuer https://keycloak.apps-crc.testing/realms/tutorial
 token_endpoint https://keycloak.apps-crc.testing/realms/tutorial/protocol/openid-connect/token
 jwks_uri https://keycloak.apps-crc.testing/realms/tutorial/protocol/openid-connect/certs
 $ oc exec -n keycloak client -- curl -s --cacert /tmp/ca.crt https://keycloak.apps-crc.testing/realms/tutorial/protocol/openid-connect/certs | python3 -c 'import json,sys; [print(k["kid"], k["kty"], k["alg"], k["use"]) for k in json.load(sys.stdin)["keys"]]'
-upX_njqd2niPqHliU1z3gss9gaUpCZFgYmMvSG81aHE RSA RSA-OAEP enc
-uj2jYsE0lFQFsh3Y9Gn3HcRojsaFH-rOUCR1_93tpY4 RSA RS256 sig
+HY5l3XzuNadZ2xIchNsYV2EBAgQpIjmu4403ICimT5E RSA RS256 sig
+EZIXcGTQWGX0i4b90eU1CKUE1yErXE1m6lx7wACsSO4 RSA RSA-OAEP enc
 ```
 
 **What just happened:**
@@ -292,7 +293,7 @@ base64 parts; the second is the **claims**:
 
 ```console
 $ oc exec -n keycloak client -- curl -s --cacert /tmp/ca.crt -d grant_type=password -d client_id=shop-cli -d username=alice -d password=alice-lab-password https://keycloak.apps-crc.testing/realms/tutorial/protocol/openid-connect/token | python3 -c 'import base64,json,sys; t = json.load(sys.stdin)["access_token"]; part = lambda i: json.loads(base64.urlsafe_b64decode(t.split(".")[i] + "==")); h, c = part(0), part(1); print("header:", h["alg"], "kid", h["kid"]); [print(" ", k, c.get(k)) for k in ("iss", "aud", "azp", "preferred_username", "realm_access")]; print("  lives", c["exp"] - c["iat"], "s")'
-header: RS256 kid uj2jYsE0lFQFsh3Y9Gn3HcRojsaFH-rOUCR1_93tpY4
+header: RS256 kid HY5l3XzuNadZ2xIchNsYV2EBAgQpIjmu4403ICimT5E
   iss https://keycloak.apps-crc.testing/realms/tutorial
   aud shop-api
   azp shop-cli
@@ -380,16 +381,24 @@ all checks passed
 ## Clean up
 
 Leave the lab running if you go on to module 17. To remove it — the server, the
-database and its volume claim, and the operator:
+database and its volume, and the operator. On CRC the database's volume outlives
+its claim — the StorageClass keeps volumes (`reclaimPolicy: Retain`), and an
+earlier clean-up left one behind, `Released`, data and all (measured) — so mark it
+for deletion first:
 
 <!-- walkthrough: skip -->
 ```console
+$ oc patch pv "$(oc get pvc data-postgres-0 -n keycloak -o jsonpath='{.spec.volumeName}')" --type=merge -p '{"spec":{"persistentVolumeReclaimPolicy":"Delete"}}'
 $ oc delete keycloakrealmimport tutorial -n keycloak
 $ oc delete keycloak keycloak -n keycloak
 $ oc delete subscription rhbk-operator -n keycloak
 $ oc delete csv rhbk-operator.v26.6.7-opr.1 -n keycloak
 $ oc delete namespace keycloak --wait=false
 ```
+
+OLM leaves the operator's two CRDs, `keycloaks.k8s.keycloak.org` and
+`keycloakrealmimports.k8s.keycloak.org`; delete them only if no other Keycloak
+operator on the cluster uses them.
 
 ## The shortcut
 
@@ -398,8 +407,8 @@ $ oc delete namespace keycloak --wait=false
 
 ## References
 
-- [Red Hat build of Keycloak 26.4 — Operator Guide](https://docs.redhat.com/en/documentation/red_hat_build_of_keycloak/26.4/html-single/operator_guide/index)
-- [Red Hat build of Keycloak — Server Administration Guide](https://docs.redhat.com/en/documentation/red_hat_build_of_keycloak/26.4/html-single/server_administration_guide/index)
+- [Red Hat build of Keycloak 26.6 — Operator Guide](https://docs.redhat.com/en/documentation/red_hat_build_of_keycloak/26.6/html-single/operator_guide/index)
+- [Red Hat build of Keycloak 26.6 — Server Administration Guide](https://docs.redhat.com/en/documentation/red_hat_build_of_keycloak/26.6/html-single/server_administration_guide/index)
 - [OpenShift — installing operators with OLM](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/operators/user-tasks)
 - [OpenID Connect Discovery 1.0](https://openid.net/specs/openid-connect-discovery-1_0.html)
 - [RFC 7517 — JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517)

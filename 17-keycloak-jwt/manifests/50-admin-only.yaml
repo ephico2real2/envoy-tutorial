@@ -1,6 +1,6 @@
 # Step 6. /admin needs the realm role "admin". A policy on the route replaces
-# the Gateway's for that route, so it repeats the JWT provider and adds the
-# authorization rule.
+# the Gateway's for that route, so it repeats the JWT provider - all of it,
+# claimToHeaders included - and adds the authorization rule.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy
 metadata:
@@ -18,8 +18,12 @@ spec:
         uri: https://keycloak-service.keycloak.svc:8443/realms/tutorial/protocol/openid-connect/certs
         backendRefs:
         - { group: "", kind: Service, name: keycloak-service, namespace: keycloak, port: 8443 }
+      # Both headers, as in 40-jwt.yaml. Envoy clears from a request only the
+      # headers its provider sets: leave x-client out here and a caller's own
+      # x-client header reaches the app on /admin (measured).
       claimToHeaders:
       - { claim: preferred_username, header: x-user }
+      - { claim: azp, header: x-client }
   authorization:
     defaultAction: Deny
     rules:

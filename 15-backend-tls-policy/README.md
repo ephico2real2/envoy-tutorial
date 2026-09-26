@@ -40,8 +40,8 @@ As in module 13, step 1:
 
 ```console
 $ oc apply -f ../12-gateway-api/manifests/20-envoyproxy.yaml -f ../12-gateway-api/manifests/10-gatewayclass.yaml
-envoyproxy.gateway.envoyproxy.io/openshift-scc created
-gatewayclass.gateway.networking.k8s.io/eg created
+envoyproxy.gateway.envoyproxy.io/openshift-scc unchanged
+gatewayclass.gateway.networking.k8s.io/eg unchanged
 $ oc apply -f manifests/10-gateway.yaml
 namespace/envoy-15 created
 gateway.gateway.networking.k8s.io/eg created
@@ -70,11 +70,11 @@ $ oc apply -n envoy-15 -f manifests/20-certificate.yaml
 certificate.cert-manager.io/secure-echo-tls created
 $ oc wait -n envoy-15 certificate/secure-echo-tls --for=condition=Ready --timeout=120s
 certificate.cert-manager.io/secure-echo-tls condition met
-$ oc get secret secure-echo-tls -n envoy-15 -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -subject -issuer -ext subjectAltName
+$ oc get secret secure-echo-tls -n envoy-15 -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -subject -issuer -text | grep -E '^(subject|issuer)=|Subject Alternative Name|DNS:'
 subject=
 issuer=O=Enterprise POC, CN=Enterprise Root CA
-X509v3 Subject Alternative Name: critical
-    DNS:secure-echo.envoy-15.svc, DNS:secure-echo.envoy-15.svc.cluster.local
+            X509v3 Subject Alternative Name: critical
+                DNS:secure-echo.envoy-15.svc, DNS:secure-echo.envoy-15.svc.cluster.local
 ```
 
 The certificate names `secure-echo.envoy-15.svc`, and the enterprise CA signed
@@ -109,7 +109,7 @@ pod/client condition met
 $ sleep 3; oc exec -n envoy-15 client -- curl -s -w '  -> %{http_code}\n' "http://$(oc get gateway eg -n envoy-15 -o jsonpath='{.status.addresses[0].value}')/secure"
 upstream connect error or disconnect/reset before headers. reset reason: connection termination  -> 503
 $ oc logs -n envoy-15 deploy/secure-echo --tail=20 | grep 'handshake failed' | tail -1
-TLS handshake failed from 10.217.1.55: [SSL: HTTP_REQUEST] http request (_ssl.c:1010)
+TLS handshake failed from 10.217.0.201: [SSL: HTTP_REQUEST] http request (_ssl.c:1010)
 ```
 
 **What just happened:** `503`. Nothing in an `HTTPRoute` says "TLS" — it names a
@@ -130,7 +130,7 @@ $ sleep 5; oc get backendtlspolicy secure-echo -n envoy-15 -o jsonpath='{range .
 ResolvedRefs=True Resolved all the Object references.
 Accepted=True Policy has been accepted.
 $ oc exec -n envoy-15 client -- curl -s "http://$(oc get gateway eg -n envoy-15 -o jsonpath='{.status.addresses[0].value}')/secure" | python3 -c 'import json,sys; d = json.load(sys.stdin); print(d["served_by"], d["tls"])'
-secure-echo-84bd487c8f-cv88r {'version': 'TLSv1.3', 'cipher': 'TLS_AES_256_GCM_SHA384', 'sni': 'secure-echo.envoy-15.svc'}
+secure-echo-84bd487c8f-2ttzn {'version': 'TLSv1.3', 'cipher': 'TLS_AES_256_GCM_SHA384', 'sni': 'secure-echo.envoy-15.svc'}
 ```
 
 **What just happened:** the policy is accepted, and the backend now answers — over
@@ -175,7 +175,11 @@ $ ../_shared/eg-admin.sh envoy-15/eg 'config_dump?resource=dynamic_active_cluste
 | `hostname: secure-echo.envoy-15.svc` | `sni` — the name asked for | `sni` |
 | … the same name | `match_typed_subject_alt_names`, `DNS` exact — the name the certificate must carry | `match_typed_subject_alt_names` |
 | `caCertificateRefs: enterprise-ca` | the CA, delivered by the controller over **SDS** (`secure-echo/envoy-15-ca`) | `trusted_ca` from a file |
-| — | TLS 1.2 to 1.3 | the defaults |
+| — | TLS 1.2 to 1.3, set explicitly | nothing — and Envoy's default for a client is TLS 1.2 only |
+
+That is why step 4 saw TLS 1.3. The same connection without the two
+`tls_params` — module 09's way — stops at TLS 1.2 (measured: `TLSv1.2`,
+`ECDHE-RSA-AES256-GCM-SHA384`).
 
 The TLS settings sit in the cluster's `transport_socket_matches` — one per
 backend of the route, picked by endpoint — which is how a route with several
@@ -187,7 +191,11 @@ backends can use TLS to some and not others.
 same policy expecting `payments.envoy-15.svc`, a name the certificate does not
 carry. Changing a policy changes the **cluster**, and a changed cluster takes
 about 15 seconds to reach Envoy (module 14, step 4 — measured here too, 15.3 to
-15.4 s), so wait before asking:
+15.4 s), so wait before asking. Step 4's first policy arrived at once (0.2 s,
+measured) because it changed the **endpoints** too: each endpoint now carries the
+name of the TLS settings it uses — the `match` of step 4's
+`transport_socket_matches` — and a changed endpoint list needs no wait. Changing
+the policy again leaves the endpoints as they are.
 
 ```console
 $ oc apply -f manifests/55-wrong-hostname.yaml
@@ -203,9 +211,14 @@ cluster.httproute/envoy-15/secure/rule/0.ssl.handshake: 1
 **What just happened:** `503`, `remote connection failure` — the client sees only
 that the connection behind the Gateway failed. The Gateway's counters say why:
 **`ssl.fail_verify_san`** — the certificate is trusted, but it does not carry
-the expected name. The Gateway received the certificate and rejected it; the
-backend's log shows the connection cut off mid-handshake
-(`UNEXPECTED_EOF_WHILE_READING`).
+the expected name. The Gateway received the certificate, rejected it, and told
+the backend why with a TLS alert — `certificate unknown` — which the backend logs
+as its handshake failure:
+
+```console
+$ oc logs -n envoy-15 deploy/secure-echo --tail=20 | grep 'handshake failed' | tail -1
+TLS handshake failed from 10.217.0.201: [SSL: SSLV3_ALERT_CERTIFICATE_UNKNOWN] ssl/tls alert certificate unknown (_ssl.c:1010)
+```
 
 ### Step 6 — the wrong CA
 
@@ -293,7 +306,7 @@ What the standard policy does **not** do is present a client certificate — mod
 | `503` … `remote connection failure`; `ssl.fail_verify_san` rises | the certificate does not carry `hostname` (step 5) | fix `hostname`, or the certificate's `dnsNames` |
 | `503` … `remote connection failure`; `ssl.fail_verify_error` rises | the certificate does not chain to the trusted CA (step 6) | reference the CA that signed it |
 | `500`, and the policy says `Accepted=False` `NoValidCACertificate`, `ResolvedRefs=False` `InvalidCACertificateRef` | the CA ConfigMap does not exist — measured | create it in the policy's namespace |
-| a CA ConfigMap without a `ca.crt` key works | Envoy Gateway v1.9.1 accepted one under another key — measured — though the spec calls it invalid | use `ca.crt`; another implementation will refuse it |
+| a CA ConfigMap without a `ca.crt` key works | Envoy Gateway v1.9.1 falls back to a `tls.crt` key, or to the only key of a one-key ConfigMap — measured; with two keys and neither name it refuses (`No ca found in configmap`, `500`). The spec calls any ConfigMap without `ca.crt` invalid | use `ca.crt`; another implementation will refuse it |
 | a changed policy seems ignored | a cluster change takes about 15 s to reach Envoy | wait; read the generated config (step 4) |
 
 ## Clean up

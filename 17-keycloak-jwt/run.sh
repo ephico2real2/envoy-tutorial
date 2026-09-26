@@ -5,8 +5,6 @@ NS=envoy-17
 . ../_shared/lib.sh
 . ../_shared/gateway.sh
 
-KC=https://keycloak.apps-crc.testing/realms
-
 # Module 16's lab must be up: this module checks the tokens that Keycloak issues.
 need_keycloak() {
   [ "$($KUBE get keycloak keycloak -n keycloak -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = True ] \
@@ -31,16 +29,11 @@ deploy() {
   ok "Gateway eg programmed at $(gw_address "$NS" eg)"
 }
 
-# token <curl -d args...> - an access token from the realm, fetched from the
-# client pod in the keycloak namespace (it holds the CA, module 16 step 6).
-token() {
-  $KUBE exec -n keycloak client -- curl -s --cacert /tmp/ca.crt "$@" \
-    | python3 -c 'import json, sys; print(json.load(sys.stdin).get("access_token", ""))'
-}
-# call <token|""> <path> - the response body and, last, " -> <status>".
+# call <token|""> <path> [curl args...] - the response body and, last, " -> <status>".
 call() {
-  if [ -n "$1" ]; then incluster_curl -w ' -> %{http_code}' -H "authorization: Bearer $1" "http://$ADDR$2"
-  else incluster_curl -w ' -> %{http_code}' "http://$ADDR$2"; fi
+  local tok=$1 path=$2; shift 2
+  if [ -n "$tok" ]; then incluster_curl -w ' -> %{http_code}' -H "authorization: Bearer $tok" "$@" "http://$ADDR$path"
+  else incluster_curl -w ' -> %{http_code}' "$@" "http://$ADDR$path"; fi
 }
 condition() { $KUBE get "$1" -n "$2" -o jsonpath="{.status.ancestors[0].conditions[?(@.type==\"$3\")].status}"; }
 
@@ -52,9 +45,11 @@ verify() {
   $KUBE get secret keycloak-tls -n keycloak -o jsonpath='{.data.ca\.crt}' | base64 -d \
     | $KUBE exec -i -n keycloak client -- sh -c 'cat > /tmp/ca.crt'
   ADDR=$(gw_address "$NS" eg)
-  [ -n "$ADDR" ] || { bad "Gateway eg has no address"; summary; exit 1; }
-  ALICE=$(token -d grant_type=password -d client_id=shop-cli -d username=alice -d password=alice-lab-password "$KC/tutorial/protocol/openid-connect/token")
-  BOB=$(token -d grant_type=password -d client_id=shop-cli -d username=bob -d password=bob-lab-password "$KC/tutorial/protocol/openid-connect/token")
+  [ -n "$ADDR" ] || { bad "Gateway eg has no address"; FAILED=$((FAILED+1)); summary; exit 1; }
+  # Every token through token.sh: one code path, and no password on an `oc exec`
+  # command line - the API server's audit log records those (token.sh, top).
+  ALICE=$(./token.sh alice)
+  BOB=$(./token.sh bob)
 
   say "1. the policies"
   assert "BackendTLSPolicy to keycloak-service accepted" "True" "$(condition backendtlspolicy/keycloak-service keycloak Accepted)"
@@ -79,19 +74,20 @@ print(".".join([h, base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rst
 PY
 )
   assert_contains "a token edited to add a role -> 401" "Jwt verification fails -> 401" "$(call "$TAMPERED" /api)"
-  OTHER_AUD=$(token -d grant_type=password -d client_id=admin-cli -d username=alice -d password=alice-lab-password "$KC/tutorial/protocol/openid-connect/token")
+  OTHER_AUD=$(./token.sh alice-admin-cli)
   assert_contains "a token not meant for shop-api -> 403" "Audiences in Jwt are not allowed -> 403" "$(call "$OTHER_AUD" /api)"
-  MASTER=$(token -d grant_type=password -d client_id=admin-cli \
-    -d username="$($KUBE get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.username}' | base64 -d)" \
-    -d password="$($KUBE get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.password}' | base64 -d)" \
-    "$KC/master/protocol/openid-connect/token")
+  MASTER=$(./token.sh master-admin)
   assert_contains "a token from another realm -> 401" "Jwt issuer is not configured -> 401" "$(call "$MASTER" /api)"
-  SVC=$(token -d grant_type=client_credentials -d client_id=orders-service -d client_secret=orders-service-lab-secret "$KC/tutorial/protocol/openid-connect/token")
+  SVC=$(./token.sh orders-service)
   assert_contains "orders-service -> 200, as itself" '"x-user": "service-account-orders-service"' "$(call "$SVC" /api)"
 
   say "3. who gets through /admin (realm role admin)"
   assert_contains "alice (reader) -> 403" "RBAC: access denied -> 403" "$(call "$ALICE" /admin)"
-  assert_contains "bob (admin) -> 200"    " -> 200"                    "$(call "$BOB" /admin)"
+  # A caller's own x-client must not reach the app: the route's policy replaces
+  # the Gateway's, so it must set (and so clear) every header the Gateway's sets.
+  R=$(call "$BOB" /admin -H 'x-client: forged-client')
+  assert_contains "bob (admin) -> 200"    " -> 200"                    "$R"
+  assert_contains "...and the app gets the token's client, not the caller's x-client" '"x-client": "shop-cli"' "$R"
   summary
 }
 

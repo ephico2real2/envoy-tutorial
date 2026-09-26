@@ -40,13 +40,25 @@ for c in json.load(sys.stdin)["configs"]:
         ca = cv.get("validation_context_sds_secret_config", {}).get("name") or "system_ca_certificates"
         print("sni=%s san=%s ca=%s" % (tc.get("sni"), ",".join(san), ca))'
 }
-# apply_and_wait <file> - apply a policy and wait until Envoy's TLS config
-# changes: a cluster-only change takes about 15 s to arrive (module 14, step 4).
+# want <file> - the upstream TLS (in tls_conf's words) that manifests/<file> asks for.
+want() {
+  case "$1" in
+    50-backendtlspolicy.yaml) echo "sni=secure-echo.$NS.svc san=secure-echo.$NS.svc ca=secure-echo/$NS-ca" ;;
+    55-wrong-hostname.yaml)   echo "sni=payments.$NS.svc san=payments.$NS.svc ca=secure-echo/$NS-ca" ;;
+    56-system-cas.yaml)       echo "sni=secure-echo.$NS.svc san=secure-echo.$NS.svc ca=system_ca_certificates" ;;
+  esac
+}
+# apply_and_wait <file> - apply a policy and wait until Envoy runs exactly the TLS
+# config it asks for: a change to an existing policy is a cluster-only change,
+# about 15 s (module 14, step 4). Waiting for that config - not for "any change" -
+# also covers a re-run whose policy is already in place; a timeout is a failed check.
 apply_and_wait() {
-  local before; before=$(tls_conf)
+  local want_conf; want_conf=$(want "$1")
   $KUBE apply -f "manifests/$1" >/dev/null
-  for _ in $(seq 1 60); do [ "$(tls_conf)" != "$before" ] && return 0; sleep 1; done
-  bad "Envoy's TLS config did not change within 60 s of applying $1"
+  for _ in $(seq 1 60); do [ "$(tls_conf)" = "$want_conf" ] && return 0; sleep 1; done
+  bad "Envoy's TLS config is not [$want_conf] 60 s after applying $1 - it is [$(tls_conf)]"
+  FAILED=$((FAILED+1))
+  return 1
 }
 ssl_stat() { ../_shared/eg-admin.sh "$NS/eg" "stats?filter=^cluster\.httproute/$NS/secure/rule/0\.ssl\.$1\$" | awk -F': ' '{ print $2 }'; }
 code() { incluster_curl -o /dev/null -w '%{http_code}' "http://$ADDR/secure"; }
@@ -54,10 +66,9 @@ code() { incluster_curl -o /dev/null -w '%{http_code}' "http://$ADDR/secure"; }
 verify() {
   client_ready
   ADDR=$(gw_address "$NS" eg)
-  [ -n "$ADDR" ] || { bad "Gateway eg has no address"; summary; exit 1; }
+  [ -n "$ADDR" ] || { bad "Gateway eg has no address"; FAILED=$((FAILED+1)); summary; exit 1; }
   # A previous run may have been interrupted on a failure step.
-  [ "$(tls_conf)" = "sni=secure-echo.$NS.svc san=secure-echo.$NS.svc ca=secure-echo/$NS-ca" ] \
-    || apply_and_wait 50-backendtlspolicy.yaml
+  [ "$(tls_conf)" = "$(want 50-backendtlspolicy.yaml)" ] || apply_and_wait 50-backendtlspolicy.yaml
 
   say "1. the policy"
   for c in Accepted ResolvedRefs; do
@@ -70,8 +81,7 @@ verify() {
   assert_contains "the backend answered"                   '"served_by"'                          "$BODY"
   assert_contains "over TLS 1.3"                           '"version": "TLSv1.3"'                 "$BODY"
   assert_contains "asking for the policy's hostname (SNI)" "\"sni\": \"secure-echo.$NS.svc\""    "$BODY"
-  assert "Envoy got: SNI, SAN check and CA from the policy" \
-    "sni=secure-echo.$NS.svc san=secure-echo.$NS.svc ca=secure-echo/$NS-ca" "$(tls_conf)"
+  assert "Envoy got: SNI, SAN check and CA from the policy" "$(want 50-backendtlspolicy.yaml)" "$(tls_conf)"
 
   say "3. a name the certificate does not carry is refused"
   apply_and_wait 55-wrong-hostname.yaml
