@@ -69,9 +69,25 @@ wait_upstream() {
   bad "upstream $cluster never got an endpoint"; exit 1
 }
 
-# Run a curl from inside the cluster. Nothing in these modules requires an
-# Ingress or a Route, so they work the same on kind as on OpenShift.
+# The long-lived in-cluster client from _shared/client.yaml - the same pod the
+# walkthroughs tell the reader to start. Idempotent; fatal if it never becomes
+# ready, because every check after it would fail for a reason that has nothing
+# to do with Envoy.
+client_ensure() {
+  $KUBE get pod client -n "$NS" >/dev/null 2>&1 \
+    || $KUBE apply -n "$NS" -f "$(dirname "${BASH_SOURCE[0]}")/client.yaml" >/dev/null
+  if ! $KUBE wait -n "$NS" --for=condition=Ready pod/client --timeout=120s >/dev/null 2>&1; then
+    bad "pod/client never became ready in $NS"
+    exit 1
+  fi
+}
+
+# Run a curl from inside the cluster, through the client pod. Nothing in these
+# modules requires an Ingress or a Route, so they work the same on kind as on
+# OpenShift. An earlier version used a throwaway `oc run --rm -i` per call; that
+# dropped the first line of output now and then and left Completed pods behind.
+CLIENT_READY=
 incluster_curl() {
-  $KUBE run "curl-$RANDOM" -n "$NS" --rm -i --restart=Never --quiet \
-    --image=curlimages/curl:8.11.1 -- -sS --max-time 10 "$@" 2>/dev/null
+  [ -n "$CLIENT_READY" ] || { client_ensure; CLIENT_READY=1; }
+  $KUBE exec -n "$NS" client -- curl -sS --max-time 10 "$@" 2>/dev/null
 }

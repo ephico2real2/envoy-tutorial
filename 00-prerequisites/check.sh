@@ -37,12 +37,14 @@ $KUBE get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1 \
 
 say "a real write, end to end"
 ns_ensure
-if $KUBE run probe -n "$NS" --image=curlimages/curl:8.11.1 --restart=Never --quiet \
-     --command -- sleep 5 >/dev/null 2>&1; then
-  ok "pod created — the modules will run"
-  $KUBE delete pod probe -n "$NS" --wait=false >/dev/null 2>&1
+# The exact pod every module's walkthrough starts, so a pass here means the
+# modules' client will be admitted and its image pulled - not merely that some
+# pod could be created.
+$KUBE apply -n "$NS" -f ../_shared/client.yaml >/dev/null 2>&1
+if $KUBE wait -n "$NS" --for=condition=Ready pod/client --timeout=120s >/dev/null 2>&1; then
+  ok "the in-cluster client pod runs — the modules will run"
 else
-  bad "could not create a pod in $NS"
+  bad "the client pod from _shared/client.yaml never became ready in $NS"
   # On OpenShift this is usually the namespace uid-range vs an image's baked-in
   # USER. The modules that hit it say so where it happens.
   FAILED=$((FAILED+1))

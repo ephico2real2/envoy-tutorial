@@ -27,21 +27,17 @@ verify() {
   for h in shop admin; do
     # --resolve maps the SNI name to the Service IP, so the TLS handshake
     # carries the right server_name without needing real DNS.
-    R=$($KUBE run sni-$RANDOM -n "$NS" --rm -i --restart=Never --quiet \
-        --image=curlimages/curl:8.11.1 -- \
-        -sS -i -k --max-time 10 --resolve "$h.apps-crc.testing:8443:$(svc_ip)" \
-        "https://$h.apps-crc.testing:8443/" 2>/dev/null)
+    R=$(incluster_curl -i -k --resolve "$h.apps-crc.testing:8443:$(svc_ip)" \
+        "https://$h.apps-crc.testing:8443/")
     assert_contains "SNI $h.apps-crc.testing -> chain sni-$h" "x-matched-chain: sni-$h" "$R"
   done
 
   say "3. each chain serves its own certificate"
   for h in shop admin; do
-    # s_client needs something on stdin or it prints DONE and exits before
-    # the handshake output appears. `echo Q |` is the usual incantation.
-    CN=$($KUBE run tls-$RANDOM -n "$NS" --rm -i --restart=Never --quiet \
-         --image=alpine/openssl:3.3.2 --command -- sh -c \
-         "echo Q | openssl s_client -connect $(svc_ip):8443 -servername $h.apps-crc.testing 2>/dev/null | grep -m1 subject=" \
-         2>/dev/null | tr -d ' ')
+    # curl's %{certs} write-out prints the certificate the server presented,
+    # so the same client pod reads it - no separate openssl image needed.
+    CN=$(incluster_curl -k -o /dev/null --resolve "$h.apps-crc.testing:8443:$(svc_ip)" \
+         -w '%{certs}' "https://$h.apps-crc.testing:8443/" | grep -m1 -i '^subject:' | tr -d ' ')
     assert_contains "SNI $h.apps-crc.testing is served the $h cert" "CN=$h.apps-crc.testing" "$CN"
   done
 

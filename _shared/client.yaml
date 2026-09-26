@@ -1,0 +1,35 @@
+# A long-lived pod to run curl from INSIDE the cluster.
+#
+# Envoy and the apps in these modules are ClusterIP Services: names like
+# http://envoy:8080 resolve only inside the cluster, so a curl typed on your
+# laptop cannot reach them. Every walkthrough starts this pod once, then runs
+#
+#   oc exec -n <namespace> client -- curl ...
+#
+# One pod for the whole module rather than a throwaway `oc run --rm` per
+# request: `oc run -i` can drop the first line of output, and `--rm`
+# sometimes leaves Completed pods behind.
+#
+# The securityContext is what OpenShift's restricted-v2 SCC requires, so this
+# runs for any user, not only cluster-admin. No runAsUser is set - OpenShift
+# assigns one from the namespace's range.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: client
+  labels: { app: client }
+spec:
+  containers:
+  - name: curl
+    image: curlimages/curl:8.11.1
+    command: ["sleep", "infinity"]
+    resources:
+      requests: { cpu: "10m", memory: "16Mi" }
+      limits:   { cpu: "200m", memory: "64Mi" }
+    securityContext:
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+      capabilities: { drop: ["ALL"] }
+      seccompProfile: { type: RuntimeDefault }
+  # Deleting the namespace should not wait 30s for `sleep` to ignore SIGTERM.
+  terminationGracePeriodSeconds: 0
