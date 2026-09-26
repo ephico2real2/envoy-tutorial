@@ -1,0 +1,126 @@
+<title>Keycloak Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 16 · a Keycloak lab</div>
+    <h1>A real identity provider</h1>
+    <p class="lede">Drawn from <code>16-keycloak/manifests/</code>; installed and measured on CRC in namespace <code>keycloak</code>.</p>
+  </header>
+
+  <section>
+    <h2>The lab</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 526" role="img" aria-label="The Keycloak lab in namespace keycloak. The rhbk-operator, installed from the redhat-operators catalog with a manually approved InstallPlan, runs the Keycloak server described by a Keycloak resource. Keycloak stores its data in a PostgreSQL StatefulSet with a 1 GiB volume, serves HTTPS with a cert-manager certificate from enterprise-ca, and is reached from outside through a passthrough Route at keycloak.apps-crc.testing and from inside at keycloak-service.keycloak.svc:8443. A KeycloakRealmImport creates the realm tutorial: roles reader and admin, users alice and bob, clients shop-api, shop-cli and orders-service. A client asks the token endpoint for a token, signed RS256 with a private key; the public keys are published at the realm&#x27;s certs endpoint.">
+  <defs><marker id="k1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="k1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="20" y="12" width="940" height="40" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="34" y="37" font-weight="600">catalog redhat-operators → Subscription (channel stable-v26.6) → InstallPlan, approved by hand → rhbk-operator 26.6.7</text>
+<line x1="490" y1="52" x2="490" y2="78" stroke="currentColor" stroke-width="1.3" marker-end="url(#k1)"/>
+<text x="20" y="72" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">NAMESPACE keycloak</text>
+<rect x="20" y="80" width="280" height="72" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="34" y="101" font-weight="600">PostgreSQL</text>
+<text x="34" y="118" font-family="IBM Plex Mono, monospace" font-size="12">StatefulSet postgres-0</text>
+<text x="34" y="135" fill="var(--muted)">1 GiB claim · lab password</text>
+<rect x="340" y="80" width="300" height="72" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="354" y="101" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">Keycloak server</text>
+<text x="354" y="118">the Keycloak resource → keycloak-0</text>
+<text x="354" y="135" fill="var(--muted)">hostname keycloak.apps-crc.testing</text>
+<rect x="680" y="80" width="280" height="72" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="694" y="101" font-weight="600">TLS certificate</text>
+<text x="694" y="118">keycloak-tls, from enterprise-ca</text>
+<text x="694" y="135" fill="var(--muted)">for the Route&#x27;s and the Service&#x27;s name</text>
+<line x1="300" y1="116" x2="338" y2="116" stroke="currentColor" stroke-width="1.3" marker-end="url(#k1)"/>
+<line x1="680" y1="116" x2="642" y2="116" stroke="currentColor" stroke-width="1.3" marker-end="url(#k1)"/>
+<text x="306" y="108" fill="var(--muted)">db</text>
+<text x="648" y="108" fill="var(--muted)">tls</text>
+<line x1="490" y1="152" x2="490" y2="178" stroke="currentColor" stroke-width="1.3" marker-end="url(#k1)"/>
+<rect x="170" y="180" width="640" height="92" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="184" y="201" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">realm tutorial — a KeycloakRealmImport, run once by a Job</text>
+<text x="184" y="218">roles: reader, admin · users: alice (reader), bob (reader, admin)</text>
+<text x="184" y="235">clients: shop-api — the audience · shop-cli — password grant (lab only)</text>
+<text x="184" y="252">orders-service — client credentials, a secret</text>
+<line x1="330" y1="272" x2="250" y2="300" stroke="currentColor" stroke-width="1.3" marker-end="url(#k1)"/>
+<line x1="650" y1="272" x2="730" y2="300" stroke="currentColor" stroke-width="1.3" marker-end="url(#k1)"/>
+<rect x="20" y="302" width="460" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="34" y="323" font-weight="600">from outside: Route keycloak.apps-crc.testing</text>
+<text x="34" y="340" fill="var(--muted)">passthrough — callers see Keycloak&#x27;s own certificate</text>
+<rect x="500" y="302" width="460" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="514" y="323" font-weight="600">from inside: keycloak-service.keycloak.svc:8443</text>
+<text x="514" y="340" fill="var(--muted)">the same certificate, the Service&#x27;s name</text>
+<line x1="250" y1="358" x2="250" y2="386" stroke="currentColor" stroke-width="1.3" marker-end="url(#k1)"/>
+<line x1="730" y1="358" x2="730" y2="386" stroke="currentColor" stroke-width="1.3" marker-end="url(#k1)"/>
+<rect x="20" y="388" width="460" height="72" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="34" y="409" font-family="IBM Plex Mono, monospace" font-size="12">.../protocol/openid-connect/token</text>
+<text x="34" y="426">a token signed RS256 with the PRIVATE key:</text>
+<text x="34" y="443" fill="var(--muted)">iss the realm · aud shop-api · roles · 300 s</text>
+<rect x="500" y="388" width="460" height="72" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="514" y="409" font-family="IBM Plex Mono, monospace" font-size="12">.../protocol/openid-connect/certs</text>
+<text x="514" y="426">the PUBLIC keys (JWKS), by kid:</text>
+<text x="514" y="443" fill="var(--muted)">what anyone checking a token fetches</text>
+<text x="20" y="494" font-weight="600">The identity provider signs with a key it never shares; whoever checks a token needs only the public half.</text>
+<text x="20" y="514" fill="var(--muted)">Measured on CRC: Red Hat build of Keycloak 26.6.7, realm tutorial, tokens for alice and orders-service decoded.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>An operator runs Keycloak on its own database and certificate; the realm defines who may get tokens, and the keys to check them are public.</figcaption>
+    </figure>
+  </section>
+</div>

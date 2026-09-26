@@ -1,0 +1,28 @@
+# One Keycloak server, run by the operator.
+apiVersion: k8s.keycloak.org/v2beta1
+kind: Keycloak
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  instances: 1
+  db:
+    vendor: postgres
+    host: postgres
+    database: keycloak
+    usernameSecret: { name: keycloak-db, key: username }
+    passwordSecret: { name: keycloak-db, key: password }
+  http:
+    # Keycloak serves HTTPS itself, with the certificate from 30-certificate.
+    tlsSecret: keycloak-tls
+  hostname:
+    # The public name: it goes into every token's issuer (iss) and every URL
+    # Keycloak writes into its discovery document.
+    hostname: https://keycloak.apps-crc.testing
+  # The operator can create an Ingress; this lab uses an explicit passthrough
+  # Route instead (50-route.yaml), so the TLS path is plain to see.
+  ingress:
+    enabled: false
+  resources:
+    requests: { cpu: "200m", memory: "1Gi" }
+    limits:   { memory: "2Gi" }

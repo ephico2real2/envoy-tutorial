@@ -1,0 +1,90 @@
+# The realm "tutorial": who exists, what roles they have, and which
+# applications may ask for tokens. The operator imports it once, with a Job;
+# an import never changes a realm that already exists.
+#
+# LAB ONLY: the users' passwords and the client secret are written here in
+# clear so every step can be repeated. A real realm is managed through the
+# admin console or an identity-management pipeline, never from a git file.
+apiVersion: k8s.keycloak.org/v2beta1
+kind: KeycloakRealmImport
+metadata:
+  name: tutorial
+  namespace: keycloak
+spec:
+  keycloakCRName: keycloak
+  realm:
+    realm: tutorial
+    enabled: true
+    # Access tokens live 5 minutes: a stolen token is useful only briefly.
+    accessTokenLifespan: 300
+    roles:
+      realm:
+      - { name: reader, description: may read the shop's data }
+      - { name: admin,  description: may change it }
+    clients:
+    # The API the tokens are FOR. It never asks for a token itself; its name is
+    # the audience (aud) the other two clients put into their tokens.
+    - clientId: shop-api
+      enabled: true
+      publicClient: false
+      bearerOnly: false
+      standardFlowEnabled: false
+      directAccessGrantsEnabled: false
+      serviceAccountsEnabled: false
+    # A command-line tool a person uses: username and password straight to the
+    # token endpoint (the "password" grant). Fine for a lab; OAuth 2.1 drops
+    # this grant - a real app sends the person to Keycloak's login page.
+    - clientId: shop-cli
+      enabled: true
+      publicClient: true
+      standardFlowEnabled: false
+      directAccessGrantsEnabled: true
+      protocolMappers:
+      - name: audience-shop-api
+        protocol: openid-connect
+        protocolMapper: oidc-audience-mapper
+        config:
+          included.client.audience: shop-api
+          access.token.claim: "true"
+          id.token.claim: "false"
+    # A service calling the API on its own behalf: a client id and secret, no
+    # person involved (the "client_credentials" grant).
+    - clientId: orders-service
+      enabled: true
+      publicClient: false
+      secret: orders-service-lab-secret
+      standardFlowEnabled: false
+      directAccessGrantsEnabled: false
+      serviceAccountsEnabled: true
+      protocolMappers:
+      - name: audience-shop-api
+        protocol: openid-connect
+        protocolMapper: oidc-audience-mapper
+        config:
+          included.client.audience: shop-api
+          access.token.claim: "true"
+          id.token.claim: "false"
+    users:
+    # Keycloak's user profile expects a name and an email: without them a
+    # password login fails with "Account is not fully set up".
+    - username: alice
+      enabled: true
+      email: alice@shop.example.com
+      emailVerified: true
+      firstName: Alice
+      lastName: Reader
+      realmRoles: [reader]
+      credentials: [{ type: password, value: alice-lab-password, temporary: false }]
+    - username: bob
+      enabled: true
+      email: bob@shop.example.com
+      emailVerified: true
+      firstName: Bob
+      lastName: Admin
+      realmRoles: [reader, admin]
+      credentials: [{ type: password, value: bob-lab-password, temporary: false }]
+    # The user Keycloak keeps for orders-service's own tokens, and its role.
+    - username: service-account-orders-service
+      enabled: true
+      serviceAccountClientId: orders-service
+      realmRoles: [reader]

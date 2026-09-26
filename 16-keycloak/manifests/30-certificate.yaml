@@ -1,0 +1,20 @@
+# Keycloak's TLS certificate, from cert-manager and the enterprise CA
+# (module 08). Two kinds of caller, two kinds of name:
+#   - browsers and CLIs, through the OpenShift Route - keycloak.apps-crc.testing
+#   - in-cluster callers, such as a Gateway fetching the signing keys in module
+#     17, straight to the Service - keycloak-service.keycloak.svc
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: keycloak-tls
+  namespace: keycloak
+spec:
+  secretName: keycloak-tls
+  dnsNames:
+  - keycloak.apps-crc.testing
+  - keycloak-service.keycloak.svc
+  - keycloak-service.keycloak.svc.cluster.local
+  issuerRef:
+    name: enterprise-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

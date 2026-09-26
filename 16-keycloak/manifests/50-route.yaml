@@ -1,0 +1,13 @@
+# The way in from outside the cluster. passthrough: the router forwards the TLS
+# bytes untouched and Keycloak's own certificate is what the client sees
+# (module 08's route types).
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  host: keycloak.apps-crc.testing
+  to: { kind: Service, name: keycloak-service }
+  port: { targetPort: https }
+  tls: { termination: passthrough }
