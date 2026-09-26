@@ -1,0 +1,13 @@
+# Step 5. Module 11's circuit breaker: at most 2 requests in flight to the slow
+# app and 2 waiting; the rest are refused at once.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: slow
+  namespace: envoy-14
+spec:
+  targetRefs:
+  - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: slow }
+  circuitBreaker:
+    maxParallelRequests: 2
+    maxPendingRequests: 2

@@ -1,0 +1,35 @@
+# Three plain HTTPRoutes - no retries, no limits, no authentication. Every
+# behaviour in this module is added afterwards by a policy that targets one of
+# them, without touching the route itself.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: pool
+  namespace: envoy-14
+spec:
+  parentRefs: [{ name: eg }]
+  rules:
+  - matches: [{ path: { type: PathPrefix, value: /pool } }]
+    backendRefs: [{ name: pool, port: 8080 }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: slow
+  namespace: envoy-14
+spec:
+  parentRefs: [{ name: eg }]
+  rules:
+  - matches: [{ path: { type: PathPrefix, value: /slow } }]
+    backendRefs: [{ name: slow, port: 8080 }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: api
+  namespace: envoy-14
+spec:
+  parentRefs: [{ name: eg }]
+  rules:
+  - matches: [{ path: { type: PathPrefix, value: /api } }]
+    backendRefs: [{ name: echo, port: 8080 }]
