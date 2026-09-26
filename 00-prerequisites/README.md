@@ -147,7 +147,7 @@ problem, it says so and shows the fix. Module 12 has the worked example.
 
 | | Modules |
 |---|---|
-| cert-manager | 08, 09, 12 |
+| cert-manager | 08, 09 |
 | Gateway API CRDs | 12 |
 | MetalLB (or any LoadBalancer) | 12 |
 | Prometheus Operator CRDs | 10 |

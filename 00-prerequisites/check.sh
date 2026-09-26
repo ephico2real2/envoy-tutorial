@@ -36,7 +36,7 @@ echo "  (module 07's pods also pip-install grpcio at start: egress to pypi.org)"
 
 say "optional, per module"
 have() { $KUBE get crd "$1" >/dev/null 2>&1 && ok "$2" || printf '  · %s — not installed (only module %s needs it)\n' "$2" "$3"; }
-have certificates.cert-manager.io "cert-manager"           "08, 09, 12"
+have certificates.cert-manager.io "cert-manager"           "08, 09"
 have gateways.gateway.networking.k8s.io "Gateway API CRDs" "12"
 have ipaddresspools.metallb.io "MetalLB"                   "12"
 $KUBE get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1 \
