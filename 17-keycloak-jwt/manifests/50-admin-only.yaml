@@ -1,0 +1,33 @@
+# Step 6. /admin needs the realm role "admin". A policy on the route replaces
+# the Gateway's for that route, so it repeats the JWT provider and adds the
+# authorization rule.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: admin-only
+  namespace: envoy-17
+spec:
+  targetRefs:
+  - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: admin }
+  jwt:
+    providers:
+    - name: keycloak
+      issuer: https://keycloak.apps-crc.testing/realms/tutorial
+      audiences: [shop-api]
+      remoteJWKS:
+        uri: https://keycloak-service.keycloak.svc:8443/realms/tutorial/protocol/openid-connect/certs
+        backendRefs:
+        - { group: "", kind: Service, name: keycloak-service, namespace: keycloak, port: 8443 }
+      claimToHeaders:
+      - { claim: preferred_username, header: x-user }
+  authorization:
+    defaultAction: Deny
+    rules:
+    - name: admins
+      action: Allow
+      principal:
+        jwt:
+          provider: keycloak
+          claims:
+          # Keycloak puts realm roles in realm_access.roles - a nested list.
+          - { name: realm_access.roles, valueType: StringArray, values: [admin] }

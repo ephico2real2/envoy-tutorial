@@ -1,0 +1,122 @@
+<title>Keycloak JWT Gateway</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 17 · Keycloak tokens at the Gateway</div>
+    <h1>Who signed, for whom, with which role</h1>
+    <p class="lede">Drawn from <code>17-keycloak-jwt/manifests/</code>; every answer was measured on CRC in namespace <code>envoy-17</code>.</p>
+  </header>
+
+  <section>
+    <h2>The checks</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 494" role="img" aria-label="A caller gets a token from Keycloak&#x27;s token endpoint, then calls the Gateway with it. The Gateway&#x27;s jwt_authn filter checks the token&#x27;s signature with Keycloak&#x27;s public keys, which it fetched itself from keycloak-service.keycloak.svc:8443 over TLS - allowed by a ReferenceGrant and trusted through a BackendTLSPolicy - and cached for 300 seconds. It checks the issuer and the audience shop-api, then, on /admin, that the realm role admin is present. Measured answers: no token 401, an edited token 401 Jwt verification fails, another realm 401 Jwt issuer is not configured, another audience 403, alice on /admin 403 RBAC access denied, alice on /api and bob on /admin 200 with x-user set.">
+  <defs><marker id="j1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="j1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="250" y="12" width="480" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="264" y="33" font-weight="600">caller — alice, bob, or orders-service</text>
+<text x="264" y="50" font-family="IBM Plex Mono, monospace" font-size="12">GET /api or /admin, authorization: Bearer &lt;token&gt;</text>
+<rect x="760" y="12" width="200" height="56" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="774" y="33" font-weight="600">Keycloak (module 16)</text>
+<text x="774" y="50" fill="var(--muted)">① the token endpoint</text>
+<line x1="760" y1="40" x2="732" y2="40" stroke="currentColor" stroke-width="1.3" marker-end="url(#j1)"/>
+<line x1="490" y1="68" x2="490" y2="94" stroke="currentColor" stroke-width="1.3" marker-end="url(#j1)"/>
+<rect x="250" y="96" width="480" height="150" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="264" y="117" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">GATEWAY eg — jwt_authn, then authorization</text>
+<text x="264" y="134">② signature — with Keycloak&#x27;s public keys</text>
+<text x="264" y="151" font-family="IBM Plex Mono, monospace" font-size="12">③ iss = …/realms/tutorial</text>
+<text x="264" y="168" font-family="IBM Plex Mono, monospace" font-size="12">④ aud contains shop-api</text>
+<text x="264" y="185" font-family="IBM Plex Mono, monospace" font-size="12">⑤ on /admin: realm_access.roles contains admin</text>
+<text x="264" y="202" fill="var(--muted)">then: x-user, x-client for the app</text>
+<text x="264" y="219" fill="var(--muted)">fails closed: no keys, nothing passes</text>
+<rect x="760" y="110" width="200" height="122" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="774" y="131" font-weight="600">keycloak-service</text>
+<text x="774" y="148">…svc:8443, the realm&#x27;s certs</text>
+<text x="774" y="165">over TLS: BackendTLSPolicy</text>
+<text x="774" y="182">allowed: ReferenceGrant</text>
+<text x="774" y="199" fill="var(--muted)">cached 300 s</text>
+<line x1="732" y1="170" x2="758" y2="170" stroke="currentColor" stroke-width="1.3" marker-end="url(#j1)"/>
+<text x="745" y="162" text-anchor="middle" fill="var(--muted)">keys</text>
+<line x1="410" y1="246" x2="250" y2="280" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#j1g)"/>
+<line x1="570" y1="246" x2="730" y2="280" stroke="currentColor" stroke-width="1.3" marker-end="url(#j1)"/>
+<rect x="20" y="282" width="460" height="134" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="34" y="303" fill="var(--gap)" font-weight="600">refused — measured</text>
+<text x="34" y="320" font-family="IBM Plex Mono, monospace" font-size="12">no token → 401 Jwt is missing</text>
+<text x="34" y="337" font-family="IBM Plex Mono, monospace" font-size="12">edited token → 401 Jwt verification fails</text>
+<text x="34" y="354" font-family="IBM Plex Mono, monospace" font-size="12">another realm → 401 Jwt issuer is not configured</text>
+<text x="34" y="371" font-family="IBM Plex Mono, monospace" font-size="12">another audience → 403 Audiences … not allowed</text>
+<text x="34" y="388" font-family="IBM Plex Mono, monospace" font-size="12">alice on /admin → 403 RBAC: access denied</text>
+<rect x="500" y="282" width="460" height="80" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="514" y="303" fill="var(--remote)" font-weight="600">allowed — measured</text>
+<text x="514" y="320" font-family="IBM Plex Mono, monospace" font-size="12">alice, orders-service on /api → 200</text>
+<text x="514" y="337" font-family="IBM Plex Mono, monospace" font-size="12">bob on /admin → 200</text>
+<line x1="730" y1="362" x2="730" y2="388" stroke="currentColor" stroke-width="1.3" marker-end="url(#j1)"/>
+<rect x="500" y="390" width="460" height="40" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="514" y="415" font-weight="600">echo — told x-user: alice | bob | service-account-…</text>
+<text x="20" y="462" font-weight="600">The Gateway trusts Keycloak&#x27;s signature, not the caller: it checks who signed, for whom, and with which role.</text>
+<text x="20" y="482" fill="var(--muted)">Measured on CRC in envoy-17 against module 16&#x27;s realm tutorial; 401 = who are you, 403 = you may not.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>Keycloak signs; the Gateway fetches the public keys itself, checks signature, issuer, audience and role, and refuses everything if it has no keys.</figcaption>
+    </figure>
+  </section>
+</div>
