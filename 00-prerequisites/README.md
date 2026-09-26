@@ -24,7 +24,7 @@ run what the tutorial needs. One script checks all of it.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/00-prerequisites/cluster-map.dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/00-prerequisites/cluster-map.light.png">
-  <img alt="Your laptop runs oc against the cluster. Modules 01 to 04 each create their own namespace, envoy-NN, holding a client pod that runs curl, Envoy, and the echo app, from public images. Beside it are the platform pieces only some modules need: cert-manager, Gateway API CRDs, MetalLB, Prometheus Operator CRDs and, on OpenShift, user-workload monitoring." src="../docs/diagrams/00-prerequisites/cluster-map.light.png">
+  <img alt="Your laptop runs oc against the cluster. Each module creates its own namespace, envoy-NN for most, holding a client pod that runs curl, Envoy, and the echo app, from public images; module 12 uses gwapi-demo and module 16 keycloak, and in modules 12 to 15 and 17 Envoy Gateway generates the Envoy in envoy-gateway-system. Beside it are the platform pieces only some modules need: cert-manager and the enterprise-ca ClusterIssuer for 08, 09, 15 and 16; Gateway API CRDs and MetalLB for 12 to 15 and 17; Prometheus Operator CRDs and, on OpenShift, user-workload monitoring for 10." src="../docs/diagrams/00-prerequisites/cluster-map.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
 
@@ -108,6 +108,7 @@ images the modules pull
 
 optional, per module
   ✓ cert-manager
+  ✓ ClusterIssuer enterprise-ca
   ✓ Gateway API CRDs
   ✓ MetalLB
   ✓ Prometheus Operator CRDs
@@ -147,9 +148,10 @@ problem, it says so and shows the fix. Module 12 has the worked example.
 
 | | Modules |
 |---|---|
-| cert-manager | 08, 09 |
-| Gateway API CRDs | 12 |
-| MetalLB (or any LoadBalancer) | 12 |
+| cert-manager | 08, 09, 15, 16 |
+| a CA `ClusterIssuer` — `enterprise-ca` here | 08, 09, 15, 16 — on another cluster, change `issuerRef.name` in their manifests |
+| Gateway API CRDs | 12–15, 17 |
+| MetalLB (or any LoadBalancer) | 12–15, 17 — every module with a `Gateway` |
 | Prometheus Operator CRDs | 10 |
 | user-workload monitoring (OpenShift) | 10 — it decides whether *your* namespaces' metrics are collected |
 
@@ -160,7 +162,7 @@ problem, it says so and shows the fix. Module 12 has the worked example.
 | `cannot reach a cluster` | `oc` has no working login | step 2 |
 | `can create namespace — expected [yes], got [no]` | not a cluster admin | use a cluster you control, such as CRC |
 | `the client pod … never became ready` | the image could not be pulled, or a policy refused the pod | `oc get events -n envoy-tut-check` while `check.sh` runs; check egress to Docker Hub |
-| an optional line says "not installed" | that platform piece is absent | only the modules named need it — carry on |
+| an optional line says "not installed" or "not found" | that platform piece is absent | only the modules named need it — carry on |
 
 ## How every module works
 

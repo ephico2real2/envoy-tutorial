@@ -71,15 +71,16 @@ a { color: var(--remote); }
 <svg viewBox="0 0 980 494" role="img" aria-label="A caller gets a token from Keycloak&#x27;s token endpoint, then calls the Gateway with it. The Gateway&#x27;s jwt_authn filter checks the token&#x27;s issuer and its audience shop-api, then its signature with Keycloak&#x27;s public keys, which it fetched itself from keycloak-service.keycloak.svc:8443 over TLS - allowed by a ReferenceGrant and trusted through a BackendTLSPolicy - and cached for 300 seconds; then, on /admin, that the realm role admin is present. Measured answers: no token 401, an edited token 401 Jwt verification fails, another realm 401 Jwt issuer is not configured, another audience 403, alice on /admin 403 RBAC access denied, alice on /api and bob on /admin 200 with x-user set.">
   <defs><marker id="j1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="j1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
   <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
-<rect x="250" y="12" width="480" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<rect x="250" y="12" width="450" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
 <text x="264" y="33" font-weight="600">caller — alice, bob, or orders-service</text>
 <text x="264" y="50" font-family="IBM Plex Mono, monospace" font-size="12">GET /api or /admin, authorization: Bearer &lt;token&gt;</text>
 <rect x="760" y="12" width="200" height="56" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
 <text x="774" y="33" font-weight="600">Keycloak (module 16)</text>
 <text x="774" y="50" fill="var(--muted)">① the token endpoint</text>
-<line x1="760" y1="40" x2="732" y2="40" stroke="currentColor" stroke-width="1.3" marker-end="url(#j1)"/>
-<line x1="490" y1="68" x2="490" y2="94" stroke="currentColor" stroke-width="1.3" marker-end="url(#j1)"/>
-<rect x="250" y="96" width="480" height="150" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<line x1="758" y1="40" x2="702" y2="40" stroke="currentColor" stroke-width="1.3" marker-end="url(#j1)"/>
+<text x="730" y="32" text-anchor="middle" fill="var(--muted)">token</text>
+<line x1="475" y1="68" x2="475" y2="94" stroke="currentColor" stroke-width="1.3" marker-end="url(#j1)"/>
+<rect x="250" y="96" width="450" height="150" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
 <text x="264" y="117" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">GATEWAY eg — jwt_authn, then authorization</text>
 <text x="264" y="134" font-family="IBM Plex Mono, monospace" font-size="12">② iss = …/realms/tutorial</text>
 <text x="264" y="151" font-family="IBM Plex Mono, monospace" font-size="12">③ aud contains shop-api</text>
@@ -93,8 +94,8 @@ a { color: var(--remote); }
 <text x="774" y="165">over TLS: BackendTLSPolicy</text>
 <text x="774" y="182">allowed: ReferenceGrant</text>
 <text x="774" y="199" fill="var(--muted)">cached 300 s</text>
-<line x1="732" y1="170" x2="758" y2="170" stroke="currentColor" stroke-width="1.3" marker-end="url(#j1)"/>
-<text x="745" y="162" text-anchor="middle" fill="var(--muted)">keys</text>
+<line x1="758" y1="170" x2="702" y2="170" stroke="currentColor" stroke-width="1.3" marker-end="url(#j1)"/>
+<text x="730" y="162" text-anchor="middle" fill="var(--muted)">keys</text>
 <line x1="410" y1="246" x2="250" y2="280" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#j1g)"/>
 <line x1="570" y1="246" x2="730" y2="280" stroke="currentColor" stroke-width="1.3" marker-end="url(#j1)"/>
 <rect x="20" y="282" width="460" height="134" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
