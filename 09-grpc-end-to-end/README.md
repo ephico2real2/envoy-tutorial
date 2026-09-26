@@ -27,11 +27,7 @@ already using.
 ## Two TLS connections, two certificates on Envoy
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/09-grpc-end-to-end/end-to-end.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/09-grpc-end-to-end/end-to-end.light.png">
-  <img alt="grpcurl, trusting only the enterprise CA, calls grpc.apps-crc.testing over TLS with ALPN h2. A passthrough Route forwards the TLS to Envoy, which presents its envoy-edge certificate. Envoy then opens a second, mutual TLS connection to the catalog service: it presents its client certificate carrying a SPIFFE identity and checks that the service's certificate names catalog.envoy-09.svc. The service logs the caller's identity. Without a client certificate the service drops the connection; with the wrong expected name, the caller gets Unavailable and ssl.fail_verify_san counts it." src="../docs/diagrams/09-grpc-end-to-end/end-to-end.light.png">
-</picture>
+<img alt="grpcurl, trusting only the enterprise CA, calls grpc.apps-crc.testing over TLS with ALPN h2. A passthrough Route forwards the TLS to Envoy, which presents its envoy-edge certificate. Envoy then opens a second, mutual TLS connection to the catalog service: it presents its client certificate carrying a SPIFFE identity and checks that the service's certificate names catalog.envoy-09.svc. The service logs the caller's identity. Without a client certificate the service drops the connection; with the wrong expected name, the caller gets Unavailable and ssl.fail_verify_san counts it." src="../docs/diagrams/09-grpc-end-to-end/end-to-end.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ## Walkthrough
@@ -220,11 +216,7 @@ Offer `h2`; do not rely on the client being lenient.
 ### Step 9 — cert-manager renews a certificate Envoy is using
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/09-grpc-end-to-end/rotation.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/09-grpc-end-to-end/rotation.light.png">
-  <img alt="When the envoy-edge Secret is deleted, cert-manager issues a new certificate within seconds, and about a minute later the kubelet updates the files mounted in the Envoy pod. The listener on 8443, loading the certificate through SDS with a watched directory, presents the new certificate after about a minute with no restart. The listener on 8444, with the certificate as plain filenames, keeps presenting the old one until Envoy restarts." src="../docs/diagrams/09-grpc-end-to-end/rotation.light.png">
-</picture>
+<img alt="When the envoy-edge Secret is deleted, cert-manager issues a new certificate within seconds, and about a minute later the kubelet updates the files mounted in the Envoy pod. The listener on 8443, loading the certificate through SDS with a watched directory, presents the new certificate after about a minute with no restart. The listener on 8444, with the certificate as plain filenames, keeps presenting the old one until Envoy restarts." src="../docs/diagrams/09-grpc-end-to-end/rotation.light.png">
 <!-- markdownlint-enable MD033 -->
 
 Two listeners serve **the same** certificate, loaded two ways: `:8443` through

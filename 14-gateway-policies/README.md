@@ -17,11 +17,7 @@ applies one policy, measures the effect against the same misbehaving backends as
 module 11, and reads what Envoy got.
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/14-gateway-policies/policies.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/14-gateway-policies/policies.light.png">
-  <img alt="Three plain HTTPRoutes, /pool, /slow and /api, with no retry, limit or authentication in them. Policies attach to them with targetRefs: a BackendTrafficPolicy on pool with a retry on 503 and a passive health check; a BackendTrafficPolicy on slow with a circuit breaker of 2 in flight and 2 waiting; on api, a BackendTrafficPolicy rate limit of 3 a minute and a SecurityPolicy with JWT and CORS. Envoy got: for pool, a route retry_policy with previous_hosts and 5 picks added by Envoy Gateway, and cluster outlier detection that ejected the sick pod; for slow, cluster circuit breakers, of 10 at once 2 served, sometimes 3 or more, and the rest refused at once; for api, the filters cors, jwt_authn, local_ratelimit in Envoy Gateway&#x27;s order, 401 without a token, 429 after 3, and the token forwarded to the app." src="../docs/diagrams/14-gateway-policies/policies.light.png">
-</picture>
+<img alt="Three plain HTTPRoutes, /pool, /slow and /api, with no retry, limit or authentication in them. Policies attach to them with targetRefs: a BackendTrafficPolicy on pool with a retry on 503 and a passive health check; a BackendTrafficPolicy on slow with a circuit breaker of 2 in flight and 2 waiting; on api, a BackendTrafficPolicy rate limit of 3 a minute and a SecurityPolicy with JWT and CORS. Envoy got: for pool, a route retry_policy with previous_hosts and 5 picks added by Envoy Gateway, and cluster outlier detection that ejected the sick pod; for slow, cluster circuit breakers, of 10 at once 2 served, sometimes 3 or more, and the rest refused at once; for api, the filters cors, jwt_authn, local_ratelimit in Envoy Gateway&#x27;s order, 401 without a token, 429 after 3, and the token forwarded to the app." src="../docs/diagrams/14-gateway-policies/policies.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ## What you'll learn

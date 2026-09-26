@@ -25,11 +25,7 @@ nothing but the service's own `.proto` file.
 ## Two clients, one port, one gRPC-only service
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/07-modernising-grpc/request-paths.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/07-modernising-grpc/request-paths.light.png">
-  <img alt="A REST client using curl over HTTP/1.1 and a gRPC client using grpcurl over HTTP/2 both call Envoy on port 8080. The grpc_json_transcoder, reading catalog.pb, rewrites GET /v1/items/widget into the gRPC call Catalog/GetItem and converts JSON to protobuf and back; native gRPC passes through unchanged. The router sends everything to the catalog service over HTTP/2. The service speaks only gRPC: plain curl straight at it fails with Received HTTP/0.9 when not allowed." src="../docs/diagrams/07-modernising-grpc/request-paths.light.png">
-</picture>
+<img alt="A REST client using curl over HTTP/1.1 and a gRPC client using grpcurl over HTTP/2 both call Envoy on port 8080. The grpc_json_transcoder, reading catalog.pb, rewrites GET /v1/items/widget into the gRPC call Catalog/GetItem and converts JSON to protobuf and back; native gRPC passes through unchanged. The router sends everything to the catalog service over HTTP/2. The service speaks only gRPC: plain curl straight at it fails with Received HTTP/0.9 when not allowed." src="../docs/diagrams/07-modernising-grpc/request-paths.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ## Walkthrough
@@ -173,11 +169,7 @@ total 16
 ```
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/07-modernising-grpc/one-proto.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/07-modernising-grpc/one-proto.light.png">
-  <img alt="One file, catalog.proto, stored as a ConfigMap, is compiled twice whenever a pod starts: in the catalog pod into the Python stubs the server imports, and in the Envoy pod, with include_imports, into the descriptor set catalog.pb that grpc_json_transcoder reads to build its REST routes." src="../docs/diagrams/07-modernising-grpc/one-proto.light.png">
-</picture>
+<img alt="One file, catalog.proto, stored as a ConfigMap, is compiled twice whenever a pod starts: in the catalog pod into the Python stubs the server imports, and in the Envoy pod, with include_imports, into the descriptor set catalog.pb that grpc_json_transcoder reads to build its REST routes." src="../docs/diagrams/07-modernising-grpc/one-proto.light.png">
 <!-- markdownlint-enable MD033 -->
 
 **What just happened:** the Envoy pod ran `protoc` on the **same** `catalog.proto`

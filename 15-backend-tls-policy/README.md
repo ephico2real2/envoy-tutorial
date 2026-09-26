@@ -8,11 +8,7 @@ cluster". Module 09 closed that gap by hand, with an `UpstreamTlsContext` in an
 reach this port, use TLS, trust this CA, and expect this name.
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/15-backend-tls-policy/outcomes.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/15-backend-tls-policy/outcomes.light.png">
-  <img alt="A client sends plain HTTP to the Gateway for /secure; the HTTPRoute sends it to the Service secure-echo, whose pods speak only TLS with a certificate for secure-echo.envoy-15.svc signed by enterprise-ca. A BackendTLSPolicy attaches to that Service. Four measured outcomes: with no policy, the Gateway speaks plain HTTP to the TLS port, the backend logs a failed handshake and the client gets 503. With the right policy, TLS 1.3 with SNI secure-echo.envoy-15.svc and 200. With hostname payments, the SAN check fails, 503, ssl.fail_verify_san. With wellKnownCACertificates System, the chain leads to no trusted CA, 503, ssl.fail_verify_error." src="../docs/diagrams/15-backend-tls-policy/outcomes.light.png">
-</picture>
+<img alt="A client sends plain HTTP to the Gateway for /secure; the HTTPRoute sends it to the Service secure-echo, whose pods speak only TLS with a certificate for secure-echo.envoy-15.svc signed by enterprise-ca. A BackendTLSPolicy attaches to that Service. Four measured outcomes: with no policy, the Gateway speaks plain HTTP to the TLS port, the backend logs a failed handshake and the client gets 503. With the right policy, TLS 1.3 with SNI secure-echo.envoy-15.svc and 200. With hostname payments, the SAN check fails, 503, ssl.fail_verify_san. With wellKnownCACertificates System, the chain leads to no trusted CA, 503, ssl.fail_verify_error." src="../docs/diagrams/15-backend-tls-policy/outcomes.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ## What you'll learn

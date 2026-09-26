@@ -136,11 +136,7 @@ Rule 1 (`/canary`) is first, the catch-all rule 0 is **last**, and `/canary`
 became **`path_separated_prefix`** — Envoy's segment-wise prefix match.
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/13-httproute-traffic/precedence.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/13-httproute-traffic/precedence.light.png">
-  <img alt="An HTTPRoute with three rules written in this order: rule 0, PathPrefix slash to echo; rule 1, PathPrefix /canary to canary; rule 2, PathPrefix slash plus header x-canary yes to canary. Envoy Gateway ranks every match by specificity: exact path, then longest prefix, then most header matches, a method match counting as one, then most query matches, and on a tie the older route, then the route name, then rule order. Envoy receives the routes sorted: /canary first, then slash with the header, then the catch-all last, and takes the first match. Measured: /canary/x reaches canary, /canaryfoo reaches echo because a prefix matches whole path segments, and x-canary yes reaches canary." src="../docs/diagrams/13-httproute-traffic/precedence.light.png">
-</picture>
+<img alt="An HTTPRoute with three rules written in this order: rule 0, PathPrefix slash to echo; rule 1, PathPrefix /canary to canary; rule 2, PathPrefix slash plus header x-canary yes to canary. Envoy Gateway ranks every match by specificity: exact path, then longest prefix, then most header matches, a method match counting as one, then most query matches, and on a tie the older route, then the route name, then rule order. Envoy receives the routes sorted: /canary first, then slash with the header, then the catch-all last, and takes the first match. Measured: /canary/x reaches canary, /canaryfoo reaches echo because a prefix matches whole path segments, and x-canary yes reaches canary." src="../docs/diagrams/13-httproute-traffic/precedence.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ### Step 3 — a header match
@@ -201,11 +197,7 @@ above gave the canary 18 to 23, where a coin toss would spread from about 12 to
 restarts.
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/13-httproute-traffic/split.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/13-httproute-traffic/split.light.png">
-  <img alt="An HTTPRoute rule with two backendRefs, echo with weight 90 and canary with weight 10. Envoy gets one route to one cluster, httproute/envoy-13/split/rule/0, in which each backendRef is a locality: backend/0 with weight 90 holds the two echo pods, backend/1 with weight 10 holds the canary pod. Envoy picks a locality with a weighted round-robin schedule, then a pod inside it with least_request. Measured: 180 answers from echo and 20 from the canary out of 200 requests." src="../docs/diagrams/13-httproute-traffic/split.light.png">
-</picture>
+<img alt="An HTTPRoute rule with two backendRefs, echo with weight 90 and canary with weight 10. Envoy gets one route to one cluster, httproute/envoy-13/split/rule/0, in which each backendRef is a locality: backend/0 with weight 90 holds the two echo pods, backend/1 with weight 10 holds the canary pod. Envoy picks a locality with a weighted round-robin schedule, then a pod inside it with least_request. Measured: 180 answers from echo and 20 from the canary out of 200 requests." src="../docs/diagrams/13-httproute-traffic/split.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ### Step 5 — rewrite and redirect

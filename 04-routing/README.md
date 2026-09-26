@@ -30,11 +30,7 @@ chain regardless of order. Here the order is the config.
 ## First match wins — and what a catch-all in the wrong place does
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/04-routing/first-match-wins.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/04-routing/first-match-wins.light.png">
-  <img alt="Routes are tried in order and the first match wins: with the catch-all last, thirteen routes give thirteen outcomes; moved to the top, it answers every request and the twelve routes below it are never reached." src="../docs/diagrams/04-routing/first-match-wins.light.png">
-</picture>
+<img alt="Routes are tried in order and the first match wins: with the catch-all last, thirteen routes give thirteen outcomes; moved to the top, it answers every request and the twelve routes below it are never reached." src="../docs/diagrams/04-routing/first-match-wins.light.png">
 <!-- markdownlint-enable MD033 -->
 
 *Both columns are measured on the running proxy — the right one in step 11.
@@ -46,11 +42,7 @@ Traffic flows down: client, then Envoy, then — only for some routes — the
 upstream.
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/04-routing/who-answers.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/04-routing/who-answers.light.png">
-  <img alt="Traffic flows down from the client to Envoy and, for a route to a cluster, on to the upstream. A route to a cluster is answered by the upstream. A route whose timeout expires is answered by Envoy with a 504 after 0.25 seconds. A redirect and a direct_response are answered by Envoy alone, and the upstream request counters do not move." src="../docs/diagrams/04-routing/who-answers.light.png">
-</picture>
+<img alt="Traffic flows down from the client to Envoy and, for a route to a cluster, on to the upstream. A route to a cluster is answered by the upstream. A route whose timeout expires is answered by Envoy with a 504 after 0.25 seconds. A redirect and a direct_response are answered by Envoy alone, and the upstream request counters do not move." src="../docs/diagrams/04-routing/who-answers.light.png">
 <!-- markdownlint-enable MD033 -->
 
 *Who answers depends on the route's action, not its match. Steps 7–9 measure

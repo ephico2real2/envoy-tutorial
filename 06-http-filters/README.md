@@ -31,11 +31,7 @@ The rule this module exists to teach:
 ## The same filters, two of them swapped
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/06-http-filters/filter-order.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/06-http-filters/filter-order.light.png">
-  <img alt="Two listeners with the same filters: cors, two Lua trace filters, jwt_authn, local_ratelimit and the router. On port 8080 jwt_authn comes first: ten unsigned requests get 401 and never reach the rate limiter, so alice's signed request then gets 200. On port 8081 the rate limiter comes first: the unsigned requests use up its five tokens, five get 401 and five get 429, and alice's signed request gets 429." src="../docs/diagrams/06-http-filters/filter-order.light.png">
-</picture>
+<img alt="Two listeners with the same filters: cors, two Lua trace filters, jwt_authn, local_ratelimit and the router. On port 8080 jwt_authn comes first: ten unsigned requests get 401 and never reach the rate limiter, so alice's signed request then gets 200. On port 8081 the rate limiter comes first: the unsigned requests use up its five tokens, five get 401 and five get 429, and alice's signed request gets 429." src="../docs/diagrams/06-http-filters/filter-order.light.png">
 <!-- markdownlint-enable MD033 -->
 
 *Two listeners in one Envoy. Step 8 measures both columns.*

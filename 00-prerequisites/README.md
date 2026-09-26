@@ -21,11 +21,7 @@ run what the tutorial needs. One script checks all of it.
 ## What the tutorial puts in your cluster
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/00-prerequisites/cluster-map.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/00-prerequisites/cluster-map.light.png">
-  <img alt="Your laptop runs oc against the cluster. Each module creates its own namespace, envoy-NN for most, holding a client pod that runs curl, Envoy, and the echo app, from public images; module 12 uses gwapi-demo and module 16 keycloak, and in modules 12 to 15 and 17 Envoy Gateway generates the Envoy in envoy-gateway-system. Beside it are the platform pieces only some modules need: cert-manager and the enterprise-ca ClusterIssuer for 08, 09, 15 and 16; Gateway API CRDs and MetalLB for 12 to 15 and 17; Prometheus Operator CRDs and, on OpenShift, user-workload monitoring for 10." src="../docs/diagrams/00-prerequisites/cluster-map.light.png">
-</picture>
+<img alt="Your laptop runs oc against the cluster. Each module creates its own namespace, envoy-NN for most, holding a client pod that runs curl, Envoy, and the echo app, from public images; module 12 uses gwapi-demo and module 16 keycloak, and in modules 12 to 15 and 17 Envoy Gateway generates the Envoy in envoy-gateway-system. Beside it are the platform pieces only some modules need: cert-manager and the enterprise-ca ClusterIssuer for 08, 09, 15 and 16; Gateway API CRDs and MetalLB for 12 to 15 and 17; Prometheus Operator CRDs and, on OpenShift, user-workload monitoring for 10." src="../docs/diagrams/00-prerequisites/cluster-map.light.png">
 <!-- markdownlint-enable MD033 -->
 
 Nothing is built and nothing is pushed. Every app is a stock image with its

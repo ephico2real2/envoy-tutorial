@@ -27,11 +27,7 @@ different ways, each answering a different question:
 ## One request, three records
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/10-observability/three-records.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/10-observability/three-records.light.png">
-  <img alt="One request to /down, which has no endpoint, produces three records. Envoy's metrics count it as a 5xx on /stats/prometheus, scraped by OpenShift's user-workload monitoring and graphed in the console. The access log describes it: code 503, flag UH, no_healthy_upstream, with a trace_id. That trace_id opens the Zipkin trace, whose span carries status 503, response flag UH and error true." src="../docs/diagrams/10-observability/three-records.light.png">
-</picture>
+<img alt="One request to /down, which has no endpoint, produces three records. Envoy's metrics count it as a 5xx on /stats/prometheus, scraped by OpenShift's user-workload monitoring and graphed in the console. The access log describes it: code 503, flag UH, no_healthy_upstream, with a trace_id. That trace_id opens the Zipkin trace, whose span carries status 503, response flag UH and error true." src="../docs/diagrams/10-observability/three-records.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ## Walkthrough

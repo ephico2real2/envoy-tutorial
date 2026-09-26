@@ -29,11 +29,7 @@ API has no vocabulary for — retry budgets, the proxy's own pod spec, WASM
 extensions.
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../docs/diagrams/12-gateway-api/api-groups.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../../docs/diagrams/12-gateway-api/api-groups.light.png">
-  <img alt="What you write falls into two API groups that the same Gateway controller, Envoy Gateway here, implements: Gateway, HTTPRoute and GRPCRoute in the standard gateway.networking.k8s.io API, portable across vendors; and EnvoyProxy, SecurityPolicy and the rest in the vendor extension group gateway.envoyproxy.io, Envoy Gateway only." src="../../docs/diagrams/12-gateway-api/api-groups.light.png">
-</picture>
+<img alt="What you write falls into two API groups that the same Gateway controller, Envoy Gateway here, implements: Gateway, HTTPRoute and GRPCRoute in the standard gateway.networking.k8s.io API, portable across vendors; and EnvoyProxy, SecurityPolicy and the rest in the vendor extension group gateway.envoyproxy.io, Envoy Gateway only." src="../../docs/diagrams/12-gateway-api/api-groups.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ## Why the platforms differ

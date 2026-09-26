@@ -21,11 +21,7 @@ team that wants a route edits the same file. The Gateway API splits it along
 the line the org already has.
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/12-gateway-api/ownership.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/12-gateway-api/ownership.light.png">
-  <img alt="The cluster operator owns the GatewayClass, which names the controller, and the Gateway: ports, TLS, and who may attach. The application team's HTTPRoute holds paths and backends and attaches to the Gateway, subject to allowedRoutes. The controller generates an Envoy Deployment and LoadBalancer Service, which you do not edit, and which sends traffic to your Service." src="../docs/diagrams/12-gateway-api/ownership.light.png">
-</picture>
+<img alt="The cluster operator owns the GatewayClass, which names the controller, and the Gateway: ports, TLS, and who may attach. The application team's HTTPRoute holds paths and backends and attaches to the Gateway, subject to allowedRoutes. The controller generates an Envoy Deployment and LoadBalancer Service, which you do not edit, and which sends traffic to your Service." src="../docs/diagrams/12-gateway-api/ownership.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ## What you'll learn
@@ -323,11 +319,7 @@ echo-f8fc6d5c9-x5tbk   10.217.0.105
 | nothing | load balancing **`least_request`** — Envoy Gateway's default | 05 |
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/12-gateway-api/generated.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/12-gateway-api/generated.light.png">
-  <img alt="What you write and what Envoy got. The Gateway's HTTP listener on port 80 became the Envoy listener gwapi-demo/eg/http on port 10080, which the Service maps port 80 to. The HTTPRoute rule, PathPrefix / to Service echo, became a route with prefix / to the cluster httproute/gwapi-demo/echo/rule/0. The Service echo became that cluster's endpoints: an EDS cluster using least_request whose endpoints are the two echo pod IPs, not the Service's virtual IP. In between, Envoy Gateway watches the objects, translates them, and pushes the config over xDS from the envoy-gateway Service on port 18000." src="../docs/diagrams/12-gateway-api/generated.light.png">
-</picture>
+<img alt="What you write and what Envoy got. The Gateway's HTTP listener on port 80 became the Envoy listener gwapi-demo/eg/http on port 10080, which the Service maps port 80 to. The HTTPRoute rule, PathPrefix / to Service echo, became a route with prefix / to the cluster httproute/gwapi-demo/echo/rule/0. The Service echo became that cluster's endpoints: an EDS cluster using least_request whose endpoints are the two echo pod IPs, not the Service's virtual IP. In between, Envoy Gateway watches the objects, translates them, and pushes the config over xDS from the envoy-gateway Service on port 18000." src="../docs/diagrams/12-gateway-api/generated.light.png">
 <!-- markdownlint-enable MD033 -->
 
 Three details. The load-balancing policy is not in the old `lb_policy` field
