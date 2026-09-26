@@ -1,0 +1,50 @@
+# The "new version": the same echo app as the stable echo Deployment
+# (_shared/echo-app.yaml, whose echo-src ConfigMap this reuses), under another
+# name - so every answer says which version served it: echo-... or canary-...
+apiVersion: v1
+kind: Service
+metadata:
+  name: canary
+  labels: { app: canary }
+spec:
+  clusterIP: None
+  selector: { app: canary }
+  ports:
+  - { name: http, port: 8080, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: canary
+  labels: { app: canary }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: canary } }
+  template:
+    metadata:
+      labels: { app: canary }
+    spec:
+      containers:
+      - name: echo
+        image: python:3.12-slim
+        command: ["python", "/app/echo.py"]
+        env:
+        - name: POD_NAME
+          valueFrom: { fieldRef: { fieldPath: metadata.name } }
+        ports:
+        - { name: http, containerPort: 8080 }
+        readinessProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        resources:
+          requests: { cpu: "10m",  memory: "32Mi" }
+          limits:   { cpu: "200m", memory: "128Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+        volumeMounts:
+        - { name: src, mountPath: /app }
+      volumes:
+      - name: src
+        configMap: { name: echo-src }

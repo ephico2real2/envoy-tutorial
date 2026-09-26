@@ -1,0 +1,151 @@
+<title>Envoy HTTPRoute Traffic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 13 · HTTPRoute traffic management</div>
+    <h1>Which rule wins, and how a split is built</h1>
+    <p class="lede">Drawn from <code>13-httproute-traffic/manifests/</code>; the orders, localities and counts were measured on CRC in namespace <code>envoy-13</code>.</p>
+  </header>
+
+  <section>
+    <h2>Which rule wins</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 450" role="img" aria-label="An HTTPRoute with three rules written in this order: rule 0, PathPrefix slash to echo; rule 1, PathPrefix /canary to canary; rule 2, PathPrefix slash plus header x-canary yes to canary. Envoy Gateway ranks every match by specificity: exact path, then longest prefix, then method, then most header matches, then most query matches, and on a tie the older route then rule order. Envoy receives the routes sorted: /canary first, then slash with the header, then the catch-all last, and takes the first match. Measured: /canary/x reaches canary, /canaryfoo reaches echo because a prefix matches whole path segments, and x-canary yes reaches canary.">
+  <defs><marker id="p1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="p1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="220" y="12" width="540" height="88" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="234" y="33" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">HTTPRoute main — rules as written</text>
+<text x="234" y="50" font-family="IBM Plex Mono, monospace" font-size="12">rule 0 · PathPrefix / → echo</text>
+<text x="234" y="67" font-family="IBM Plex Mono, monospace" font-size="12">rule 1 · PathPrefix /canary → canary</text>
+<text x="234" y="84" font-family="IBM Plex Mono, monospace" font-size="12">rule 2 · PathPrefix / + header x-canary: yes → canary</text>
+<line x1="490" y1="100" x2="490" y2="126" stroke="currentColor" stroke-width="1.3" marker-end="url(#p1)"/>
+<rect x="20" y="128" width="940" height="54" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="34" y="149" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">ENVOY GATEWAY ranks every match, whatever order it was written in</text>
+<text x="34" y="166">Exact path › longest prefix › method › most header matches › most query matches — on a tie: older route, then rule order</text>
+<line x1="490" y1="182" x2="490" y2="208" stroke="currentColor" stroke-width="1.3" marker-end="url(#p1)"/>
+<rect x="220" y="210" width="540" height="88" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="234" y="231" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">ENVOY — the first match wins, in this order</text>
+<text x="234" y="248" font-family="IBM Plex Mono, monospace" font-size="12">1st · /canary, whole segments only → rule 1</text>
+<text x="234" y="265" font-family="IBM Plex Mono, monospace" font-size="12">2nd · / + x-canary: yes → rule 2</text>
+<text x="234" y="282" font-family="IBM Plex Mono, monospace" font-size="12">3rd · / → rule 0, the catch-all</text>
+<line x1="330" y1="298" x2="170" y2="326" stroke="currentColor" stroke-width="1.3" marker-end="url(#p1)"/>
+<line x1="490" y1="298" x2="490" y2="326" stroke="currentColor" stroke-width="1.3" marker-end="url(#p1)"/>
+<line x1="650" y1="298" x2="810" y2="326" stroke="currentColor" stroke-width="1.3" marker-end="url(#p1)"/>
+<rect x="20" y="328" width="300" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="34" y="349" font-weight="600">/canary/x → canary</text>
+<text x="34" y="366" fill="var(--muted)">rule 1 is matched first</text>
+<rect x="340" y="328" width="300" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="354" y="349" font-weight="600">/canaryfoo → echo</text>
+<text x="354" y="366" fill="var(--muted)">a prefix matches whole path segments</text>
+<rect x="660" y="328" width="300" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="674" y="349" font-weight="600">x-canary: yes → canary</text>
+<text x="674" y="366" fill="var(--muted)">rule 2 outranks the catch-all</text>
+<text x="20" y="418" font-weight="600">The Gateway API ranks by specificity; Envoy still takes the first match — so the controller sorts before handing routes over.</text>
+<text x="20" y="438" fill="var(--muted)">Measured on CRC in envoy-13, steps 2 and 3. The order is the generated Envoy&#x27;s own route table, read with eg-admin.sh.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>Envoy takes the first match, so Envoy Gateway hands it the routes already ranked by the Gateway API&#x27;s specificity rules.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>A weighted split is two localities</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 474" role="img" aria-label="An HTTPRoute rule with two backendRefs, echo with weight 90 and canary with weight 10. Envoy gets one route to one cluster, httproute/envoy-13/split/rule/0, in which each backendRef is a locality: backend/0 with weight 90 holds the two echo pods, backend/1 with weight 10 holds the canary pod. Envoy picks a locality with a weighted round-robin schedule, then a pod inside it with least_request. Measured: 180 answers from echo and 20 from the canary out of 200 requests.">
+  <defs><marker id="p2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="p2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="250" y="12" width="480" height="70" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="264" y="33" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">HTTPRoute split — PathPrefix /split</text>
+<text x="264" y="50" font-family="IBM Plex Mono, monospace" font-size="12">echo weight 90 · canary weight 10</text>
+<text x="264" y="67" fill="var(--muted)">one rule, two backendRefs</text>
+<line x1="490" y1="82" x2="490" y2="108" stroke="currentColor" stroke-width="1.3" marker-end="url(#p2)"/>
+<rect x="170" y="110" width="640" height="54" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="184" y="131" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">ENVOY — route /split → ONE cluster, httproute/envoy-13/split/rule/0</text>
+<text x="184" y="148">each backendRef became a locality inside it — a weighted group of endpoints</text>
+<line x1="330" y1="164" x2="250" y2="200" stroke="currentColor" stroke-width="1.3" marker-end="url(#p2)"/>
+<line x1="650" y1="164" x2="730" y2="200" stroke="currentColor" stroke-width="1.3" marker-end="url(#p2)"/>
+<rect x="20" y="202" width="460" height="100" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="34" y="223" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">locality backend/0 · weight 90</text>
+<text x="34" y="240">the echo Service&#x27;s two pods</text>
+<rect x="40" y="254" width="200" height="30" rx="6" fill="var(--none-wash)" stroke="var(--none)"/>
+<text x="140.0" y="274" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">10.217.0.196</text>
+<rect x="260" y="254" width="200" height="30" rx="6" fill="var(--none-wash)" stroke="var(--none)"/>
+<text x="360.0" y="274" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">10.217.0.197</text>
+<rect x="500" y="202" width="460" height="100" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="514" y="223" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">locality backend/1 · weight 10</text>
+<text x="514" y="240">the canary Service&#x27;s pod</text>
+<rect x="520" y="254" width="200" height="30" rx="6" fill="var(--none-wash)" stroke="var(--none)"/>
+<text x="620.0" y="274" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">10.217.0.198</text>
+<text x="20" y="336" font-weight="600">① pick a locality — a weighted round-robin schedule, 90 : 10</text>
+<text x="20" y="356" font-weight="600">② pick a pod inside it — the cluster&#x27;s load balancer, least_request</text>
+<rect x="20" y="372" width="940" height="36" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="34" y="395" fill="var(--remote)" font-weight="600">measured: 180 answers from echo, 20 from the canary, of 200 requests (step 4)</text>
+<text x="20" y="442" font-weight="600">A split is a schedule between groups of pods, not a coin toss per request — which is why it lands so close to the weights.</text>
+<text x="20" y="462" fill="var(--muted)">Localities read from Envoy&#x27;s EDS with eg-admin.sh. Envoy docs: &quot;the locality is picked using a weighted round-robin schedule&quot;.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>Each backendRef becomes a weighted locality in one cluster: a schedule picks the group, least_request picks the pod.</figcaption>
+    </figure>
+  </section>
+</div>

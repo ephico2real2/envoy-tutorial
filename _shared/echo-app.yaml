@@ -1,4 +1,4 @@
-# The echo app used by modules 01-06.
+# The echo app, used across the tutorial.
 #
 # Deliberately trivial: it answers every request with a description of that
 # request. No database, no framework, no build. Source lives in a ConfigMap on
