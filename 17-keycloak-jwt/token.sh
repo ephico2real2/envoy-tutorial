@@ -5,11 +5,11 @@
 #   bob              realm tutorial, client shop-cli, password grant   (roles reader, admin)
 #   orders-service   realm tutorial, client credentials                (a service)
 #   alice-admin-cli  realm tutorial, Keycloak's built-in admin-cli client - no shop-api audience
-#   master-admin     realm master, the operator's temporary admin      - another issuer
+#   master-admin     realm master, the lab's admin (module 16, step 7) - another issuer
 #
 # It asks from the client pod in the keycloak namespace, which trusts only the
 # enterprise CA (module 16, step 6). The passwords and the secret are module
-# 16's LAB values; master-admin's is read from its Secret and never printed.
+# 16's LAB values, published there - master-admin's too (Secret keycloak-admin).
 #
 # Every form goes to curl on its standard input, never as an argument: `oc exec`
 # sends its arguments in the request URL, and the API server's audit log records
@@ -33,7 +33,7 @@ ask() {
 }
 # urlencode - stdin to stdout, encoded for a form value (a generated password may hold & + = %).
 urlencode() { python3 -c 'import sys, urllib.parse; sys.stdout.write(urllib.parse.quote(sys.stdin.read(), safe=""))'; }
-secret() { $KUBE get secret keycloak-initial-admin -n keycloak -o jsonpath="{.data.$1}" | base64 -d; }
+secret() { $KUBE get secret keycloak-admin -n keycloak -o jsonpath="{.data.$1}" | base64 -d; }
 
 case "${1:-}" in
   alice|bob)       printf 'grant_type=password&client_id=shop-cli&username=%s&password=%s-lab-password' "$1" "$1" | ask tutorial ;;

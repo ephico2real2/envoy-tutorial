@@ -85,7 +85,7 @@ operatorgroup.operators.coreos.com/keycloak created
 subscription.operators.coreos.com/rhbk-operator created
 $ sleep 30; oc get installplan -n keycloak -o custom-columns=NAME:.metadata.name,CSV:.spec.clusterServiceVersionNames,APPROVED:.spec.approved
 NAME            CSV                             APPROVED
-install-nsls6   [rhbk-operator.v26.6.7-opr.1]   false
+install-txlqv   [rhbk-operator.v26.6.7-opr.1]   false
 ```
 
 **What just happened:** OLM — the Operator Lifecycle Manager — prepared an
@@ -94,12 +94,12 @@ and wait for the operator:
 
 ```console
 $ oc patch installplan "$(oc get subscription rhbk-operator -n keycloak -o jsonpath='{.status.installPlanRef.name}')" -n keycloak --type=merge -p '{"spec":{"approved":true}}'
-installplan.operators.coreos.com/install-nsls6 patched
+installplan.operators.coreos.com/install-txlqv patched
 $ for i in $(seq 1 60); do [ "$(oc get csv "$(oc get subscription rhbk-operator -n keycloak -o jsonpath='{.status.installedCSV}')" -n keycloak -o jsonpath='{.status.phase}' 2>/dev/null)" = Succeeded ] && break; sleep 5; done; oc get subscription rhbk-operator -n keycloak -o jsonpath='{.status.installedCSV}{"\n"}'
 rhbk-operator.v26.6.7-opr.1
 $ oc get pods -n keycloak
 NAME                             READY   STATUS    RESTARTS   AGE
-rhbk-operator-864584d99b-vp6b2   1/1     Running   0          4s
+rhbk-operator-864584d99b-c44qv   1/1     Running   0          14s
 $ oc api-resources --api-group=k8s.keycloak.org
 NAME                   SHORTNAMES   APIVERSION                 NAMESPACED   KIND
 keycloakrealmimports                k8s.keycloak.org/v2beta1   true         KeycloakRealmImport
@@ -129,7 +129,7 @@ Waiting for 1 pods to be ready...
 partitioned roll out complete: 1 new pods have been updated...
 $ oc get pvc -n keycloak
 NAME              STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS                   VOLUMEATTRIBUTESCLASS   AGE
-data-postgres-0   Bound    pvc-f43d69f9-15c6-4ff4-b8dd-7d1c2d88bd57   119Gi      RWO            crc-csi-hostpath-provisioner   <unset>                 10s
+data-postgres-0   Bound    pvc-311fef4e-d4b3-4d22-8657-77591354dcfd   119Gi      RWO            crc-csi-hostpath-provisioner   <unset>                 11s
 ```
 
 The claim asked for 1 GiB, and the capacity shown is 119Gi: CRC's storage
@@ -163,19 +163,20 @@ under half a minute here:
 
 ```console
 $ oc apply -f manifests/40-keycloak.yaml
+secret/keycloak-admin created
 keycloak.k8s.keycloak.org/keycloak created
 $ oc wait keycloak/keycloak -n keycloak --for=condition=Ready --timeout=600s
 keycloak.k8s.keycloak.org/keycloak condition met
 $ oc get pods,svc -n keycloak
 NAME                                 READY   STATUS    RESTARTS   AGE
-pod/keycloak-0                       1/1     Running   0          19s
-pod/postgres-0                       1/1     Running   0          30s
-pod/rhbk-operator-864584d99b-vp6b2   1/1     Running   0          34s
+pod/keycloak-0                       1/1     Running   0          20s
+pod/postgres-0                       1/1     Running   0          31s
+pod/rhbk-operator-864584d99b-c44qv   1/1     Running   0          45s
 
 NAME                         TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)             AGE
 service/keycloak-discovery   ClusterIP   None           <none>        7800/TCP            20s
-service/keycloak-service     ClusterIP   10.217.4.237   <none>        8443/TCP,9000/TCP   20s
-service/postgres             ClusterIP   10.217.5.53    <none>        5432/TCP            30s
+service/keycloak-service     ClusterIP   10.217.5.113   <none>        8443/TCP,9000/TCP   20s
+service/postgres             ClusterIP   10.217.5.188   <none>        5432/TCP            31s
 ```
 
 **What just happened:** the operator created a **StatefulSet** (`keycloak-0`) and
@@ -207,26 +208,36 @@ Keycloak always has — for administering Keycloak itself, not for applications.
 
 ### Step 7 — the admin console
 
-The operator created a temporary administrator. Its user name:
+Keycloak's first administrator comes from the Secret `keycloak-admin`, in
+[`manifests/40-keycloak.yaml`](manifests/40-keycloak.yaml) — the `Keycloak`
+resource names it under `bootstrapAdmin`. Like every credential in this lab, it
+is a **published test value**:
+
+| | |
+|---|---|
+| console | **https://keycloak.apps-crc.testing/admin/** |
+| user name | `admin` |
+| password | `lab-only-admin-password` |
+
+The same two values, read back from the cluster:
 
 ```console
-$ oc get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.username}' | base64 -d; echo
-temp-admin
+$ oc get secret keycloak-admin -n keycloak -o jsonpath='{.data.username}' | base64 -d; echo
+admin
+$ oc get secret keycloak-admin -n keycloak -o jsonpath='{.data.password}' | base64 -d; echo
+lab-only-admin-password
 ```
 
-To open the console, run these yourself — they print a password, so their output
-is not reproduced here — and open **https://keycloak.apps-crc.testing/admin/** in
-a browser. The browser will warn about the certificate: it is signed by the
-enterprise CA, which your laptop does not trust.
+Open the console in a browser and sign in with them. The browser will warn about
+the certificate: it is signed by the enterprise CA, which your laptop does not
+trust. Keycloak reads `bootstrapAdmin` only once, when it first creates its
+database — change the Secret later and the admin's password stays what it was.
+Without `bootstrapAdmin`, the operator makes a random temporary admin instead,
+in the Secret `keycloak-initial-admin`.
 
-<!-- walkthrough: skip -->
-```console
-$ oc get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.password}' | base64 -d; echo
-```
-
-The operator guide's advice for anything beyond a lab: replace this temporary
-administrator and turn on MFA before real use. The rest of this lab does not
-need the console — everything is in files.
+Outside a lab, never publish an admin password: follow the operator guide —
+create a named administrator, remove the bootstrap one, and turn on MFA. The rest
+of this lab does not need the console — everything is in files.
 
 ### Step 8 — the realm
 
@@ -273,8 +284,8 @@ issuer https://keycloak.apps-crc.testing/realms/tutorial
 token_endpoint https://keycloak.apps-crc.testing/realms/tutorial/protocol/openid-connect/token
 jwks_uri https://keycloak.apps-crc.testing/realms/tutorial/protocol/openid-connect/certs
 $ oc exec -n keycloak client -- curl -s --cacert /tmp/ca.crt https://keycloak.apps-crc.testing/realms/tutorial/protocol/openid-connect/certs | python3 -c 'import json,sys; [print(k["kid"], k["kty"], k["alg"], k["use"]) for k in json.load(sys.stdin)["keys"]]'
-HY5l3XzuNadZ2xIchNsYV2EBAgQpIjmu4403ICimT5E RSA RS256 sig
-EZIXcGTQWGX0i4b90eU1CKUE1yErXE1m6lx7wACsSO4 RSA RSA-OAEP enc
+aXTYcJVckrLioYkR7tXcG0mmNlRsqywPuIJCztVYj48 RSA RS256 sig
+IyhgBoC6XINttLqROnF2uITd_16MDLYq3hqK9fXCFQU RSA RSA-OAEP enc
 ```
 
 **What just happened:**
@@ -293,7 +304,7 @@ base64 parts; the second is the **claims**:
 
 ```console
 $ oc exec -n keycloak client -- curl -s --cacert /tmp/ca.crt -d grant_type=password -d client_id=shop-cli -d username=alice -d password=alice-lab-password https://keycloak.apps-crc.testing/realms/tutorial/protocol/openid-connect/token | python3 -c 'import base64,json,sys; t = json.load(sys.stdin)["access_token"]; part = lambda i: json.loads(base64.urlsafe_b64decode(t.split(".")[i] + "==")); h, c = part(0), part(1); print("header:", h["alg"], "kid", h["kid"]); [print(" ", k, c.get(k)) for k in ("iss", "aud", "azp", "preferred_username", "realm_access")]; print("  lives", c["exp"] - c["iat"], "s")'
-header: RS256 kid HY5l3XzuNadZ2xIchNsYV2EBAgQpIjmu4403ICimT5E
+header: RS256 kid aXTYcJVckrLioYkR7tXcG0mmNlRsqywPuIJCztVYj48
   iss https://keycloak.apps-crc.testing/realms/tutorial
   aud shop-api
   azp shop-cli
@@ -363,7 +374,7 @@ all checks passed
 | `instances: 1` | two or more, spread over nodes |
 | users and secrets in a realm file | users from a directory (LDAP, AD) or self-registration; secrets never in git |
 | the password grant (`shop-cli`) | the authorization-code flow with PKCE, through Keycloak's login page |
-| the temporary admin | a named admin, MFA on |
+| a published admin password (`bootstrapAdmin`) | a named admin, MFA on, the bootstrap admin removed |
 | a certificate from a lab CA | the organisation's CA, or a public one for public hostnames |
 
 ## Troubleshooting

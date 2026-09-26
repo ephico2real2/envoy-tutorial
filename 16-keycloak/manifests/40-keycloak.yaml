@@ -1,4 +1,18 @@
 # One Keycloak server, run by the operator.
+#
+# LAB ONLY: the administrator's user name and password are published here, like
+# every other credential in this lab, so the steps can be repeated as written.
+# Keycloak reads them once, when it first creates its database (bootstrapAdmin);
+# without this, the operator generates a random temporary admin instead.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keycloak-admin
+  namespace: keycloak
+stringData:
+  username: admin
+  password: lab-only-admin-password
+---
 apiVersion: k8s.keycloak.org/v2beta1
 kind: Keycloak
 metadata:
@@ -6,6 +20,9 @@ metadata:
   namespace: keycloak
 spec:
   instances: 1
+  bootstrapAdmin:
+    user:
+      secret: keycloak-admin
   db:
     vendor: postgres
     host: postgres
