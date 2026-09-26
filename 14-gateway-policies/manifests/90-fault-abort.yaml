@@ -1,4 +1,4 @@
-# Step 11. Fault injection: the proxy itself answers 30 % of /chaos requests
+# Step 10. Fault injection: the proxy itself answers 30 % of /chaos requests
 # with a 503 - the backend is fine. A way to test how callers cope with
 # failure, on purpose, before production does it by accident.
 apiVersion: gateway.envoyproxy.io/v1alpha1

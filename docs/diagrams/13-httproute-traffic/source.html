@@ -68,7 +68,7 @@ a { color: var(--remote); }
     <h2>Which rule wins</h2>
     <figure>
       <div class="fig-scroll">
-<svg viewBox="0 0 980 450" role="img" aria-label="An HTTPRoute with three rules written in this order: rule 0, PathPrefix slash to echo; rule 1, PathPrefix /canary to canary; rule 2, PathPrefix slash plus header x-canary yes to canary. Envoy Gateway ranks every match by specificity: exact path, then longest prefix, then method, then most header matches, then most query matches, and on a tie the older route then rule order. Envoy receives the routes sorted: /canary first, then slash with the header, then the catch-all last, and takes the first match. Measured: /canary/x reaches canary, /canaryfoo reaches echo because a prefix matches whole path segments, and x-canary yes reaches canary.">
+<svg viewBox="0 0 980 450" role="img" aria-label="An HTTPRoute with three rules written in this order: rule 0, PathPrefix slash to echo; rule 1, PathPrefix /canary to canary; rule 2, PathPrefix slash plus header x-canary yes to canary. Envoy Gateway ranks every match by specificity: exact path, then longest prefix, then most header matches, a method match counting as one, then most query matches, and on a tie the older route, then the route name, then rule order. Envoy receives the routes sorted: /canary first, then slash with the header, then the catch-all last, and takes the first match. Measured: /canary/x reaches canary, /canaryfoo reaches echo because a prefix matches whole path segments, and x-canary yes reaches canary.">
   <defs><marker id="p1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="p1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
   <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
 <rect x="220" y="12" width="540" height="88" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
@@ -79,7 +79,7 @@ a { color: var(--remote); }
 <line x1="490" y1="100" x2="490" y2="126" stroke="currentColor" stroke-width="1.3" marker-end="url(#p1)"/>
 <rect x="20" y="128" width="940" height="54" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
 <text x="34" y="149" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">ENVOY GATEWAY ranks every match, whatever order it was written in</text>
-<text x="34" y="166">Exact path › longest prefix › method › most header matches › most query matches — on a tie: older route, then rule order</text>
+<text x="34" y="166">Exact path › longest prefix › most header matches, a method counting as one › most query matches — tie: older route › name › rule order</text>
 <line x1="490" y1="182" x2="490" y2="208" stroke="currentColor" stroke-width="1.3" marker-end="url(#p1)"/>
 <rect x="220" y="210" width="540" height="88" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
 <text x="234" y="231" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">ENVOY — the first match wins, in this order</text>
@@ -128,14 +128,14 @@ a { color: var(--remote); }
 <text x="34" y="223" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">locality backend/0 · weight 90</text>
 <text x="34" y="240">the echo Service&#x27;s two pods</text>
 <rect x="40" y="254" width="200" height="30" rx="6" fill="var(--none-wash)" stroke="var(--none)"/>
-<text x="140.0" y="274" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">10.217.0.196</text>
+<text x="140.0" y="274" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">10.217.0.224</text>
 <rect x="260" y="254" width="200" height="30" rx="6" fill="var(--none-wash)" stroke="var(--none)"/>
-<text x="360.0" y="274" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">10.217.0.197</text>
+<text x="360.0" y="274" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">10.217.0.226</text>
 <rect x="500" y="202" width="460" height="100" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
 <text x="514" y="223" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">locality backend/1 · weight 10</text>
 <text x="514" y="240">the canary Service&#x27;s pod</text>
 <rect x="520" y="254" width="200" height="30" rx="6" fill="var(--none-wash)" stroke="var(--none)"/>
-<text x="620.0" y="274" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">10.217.0.198</text>
+<text x="620.0" y="274" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">10.217.0.228</text>
 <text x="20" y="336" font-weight="600">① pick a locality — a weighted round-robin schedule, 90 : 10</text>
 <text x="20" y="356" font-weight="600">② pick a pod inside it — the cluster&#x27;s load balancer, least_request</text>
 <rect x="20" y="372" width="940" height="36" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>

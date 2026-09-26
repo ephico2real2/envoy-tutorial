@@ -18,6 +18,20 @@ gw_proxy_sa() {
 
 has_sccs() { $KUBE api-resources --api-group=security.openshift.io 2>/dev/null | grep -q '^securitycontextconstraints'; }
 
+# ns_settle <namespace> - wait while a namespace from an earlier `clean` is still
+# Terminating. Creating the Gateway in it is refused ("unable to create new
+# content in namespace ... because it is being terminated"), and gw_up would
+# then wait a minute for a Deployment that never comes and blame the controller.
+ns_settle() {
+  local phase
+  for _ in $(seq 1 90); do
+    phase=$($KUBE get ns "$1" -o jsonpath='{.status.phase}' 2>/dev/null)
+    [ "$phase" = Terminating ] || return 0
+    sleep 2
+  done
+  bad "namespace $1 is still Terminating after 180 s - oc get ns $1 -o yaml says why"; exit 1
+}
+
 # gw_up <namespace> <gateway> - wait for the generated Envoy and, on OpenShift,
 # let it run: grant nonroot-v2 to its ServiceAccount (module 12, step 4) and
 # restart it, so a pod is created now rather than after the ReplicaSet's
@@ -37,10 +51,17 @@ gw_up() {
 }
 
 # gw_down <namespace> <gateway> - remove the nonroot-v2 grant, before the
-# Gateway (and with it the ServiceAccount the grant names) is deleted.
+# Gateway (and with it the ServiceAccount the grant names) is deleted. If the
+# Gateway is already gone - its namespace deleted by hand - the grant is still
+# there: find it by the name Envoy Gateway gives the ServiceAccount,
+# envoy-<namespace>-<gateway>-<8 hex>, among the subjects of the RoleBinding
+# that `oc adm policy add-scc-to-user` wrote, so it is not left behind.
 gw_down() {
+  has_sccs || return 0
   local sa; sa=$(gw_proxy_sa "$1" "$2")
-  if [ -n "$sa" ] && has_sccs; then
+  [ -n "$sa" ] || sa=$($KUBE get rolebinding system:openshift:scc:nonroot-v2 -n "$GW_SYSTEM_NS" \
+    -o jsonpath='{range .subjects[*]}{.name}{"\n"}{end}' 2>/dev/null | grep -m1 -x "envoy-$1-$2-[0-9a-f]\{8\}")
+  if [ -n "$sa" ]; then
     $KUBE adm policy remove-scc-from-user nonroot-v2 -z "$sa" -n "$GW_SYSTEM_NS" >/dev/null 2>&1
   fi
   return 0

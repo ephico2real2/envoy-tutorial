@@ -20,7 +20,7 @@ module 11, and reads what Envoy got.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/14-gateway-policies/policies.dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/14-gateway-policies/policies.light.png">
-  <img alt="Three plain HTTPRoutes, /pool, /slow and /api, with no retry, limit or authentication in them. Policies attach to them with targetRefs: a BackendTrafficPolicy on pool with a retry on 503 and a passive health check; a BackendTrafficPolicy on slow with a circuit breaker of 2 in flight and 2 waiting; on api, a BackendTrafficPolicy rate limit of 3 a minute and a SecurityPolicy with JWT and CORS. Envoy got: for pool, a route retry_policy with previous_hosts and 5 picks added by Envoy Gateway, and cluster outlier detection that ejected the sick pod; for slow, cluster circuit breakers, 2 served and 8 refused within 0.02 seconds; for api, the filters cors, jwt_authn, local_ratelimit in Envoy Gateway&#x27;s order, 401 without a token, 429 after 3, and the token forwarded to the app." src="../docs/diagrams/14-gateway-policies/policies.light.png">
+  <img alt="Three plain HTTPRoutes, /pool, /slow and /api, with no retry, limit or authentication in them. Policies attach to them with targetRefs: a BackendTrafficPolicy on pool with a retry on 503 and a passive health check; a BackendTrafficPolicy on slow with a circuit breaker of 2 in flight and 2 waiting; on api, a BackendTrafficPolicy rate limit of 3 a minute and a SecurityPolicy with JWT and CORS. Envoy got: for pool, a route retry_policy with previous_hosts and 5 picks added by Envoy Gateway, and cluster outlier detection that ejected the sick pod; for slow, cluster circuit breakers, of 10 at once 2 served, sometimes 3 or more, and the rest refused at once; for api, the filters cors, jwt_authn, local_ratelimit in Envoy Gateway&#x27;s order, 401 without a token, 429 after 3, and the token forwarded to the app." src="../docs/diagrams/14-gateway-policies/policies.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
 
@@ -101,7 +101,6 @@ Waiting for deployment "echo" rollout to finish: 1 of 2 updated replicas are ava
 deployment "echo" successfully rolled out
 deployment "good" successfully rolled out
 deployment "sick" successfully rolled out
-Waiting for deployment "slow" rollout to finish: 0 of 1 updated replicas are available...
 deployment "slow" successfully rolled out
 $ oc wait -n envoy-14 --for=condition=Ready pod/client --timeout=120s
 pod/client condition met
@@ -113,8 +112,8 @@ Ninety requests to `/pool`:
 
 ```console
 $ oc exec -n envoy-14 client -- sh -c "for i in \$(seq 1 90); do curl -s -o /dev/null -w '%{http_code}\n' http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/pool; done" | sort | uniq -c
-  60 200
-  30 503
+  54 200
+  36 503
 ```
 
 **What just happened:** about one request in three failed — the sick pod's
@@ -206,11 +205,11 @@ pods:
 $ oc exec -n envoy-14 client -- sh -c "for i in \$(seq 1 30); do curl -s -o /dev/null -w '%{http_code}\n' http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/pool; done" | sort | uniq -c
   30 200
 $ ../_shared/eg-admin.sh envoy-14/eg clusters | grep '^httproute/envoy-14/pool/.*health_flags'
-httproute/envoy-14/pool/rule/0::10.217.1.227:8080::health_flags::/failed_outlier_check
-httproute/envoy-14/pool/rule/0::10.217.1.226:8080::health_flags::healthy
-httproute/envoy-14/pool/rule/0::10.217.1.225:8080::health_flags::healthy
+httproute/envoy-14/pool/rule/0::10.217.0.232:8080::health_flags::/failed_outlier_check
+httproute/envoy-14/pool/rule/0::10.217.0.230:8080::health_flags::healthy
+httproute/envoy-14/pool/rule/0::10.217.0.229:8080::health_flags::healthy
 $ oc get pod -n envoy-14 -l app=sick -o jsonpath='{.items[0].status.podIP}{"\n"}'
-10.217.1.227
+10.217.0.232
 ```
 
 **What just happened:** the sick pod's IP is marked **`/failed_outlier_check`** —
@@ -227,25 +226,30 @@ change, so wait again. Then ten requests at once:
 $ oc apply -f manifests/60-circuit-breaker.yaml
 backendtrafficpolicy.gateway.envoyproxy.io/slow created
 $ sleep 20; oc exec -n envoy-14 client -- sh -c "seq 1 10 | xargs -P 10 -I{} curl -s -o /dev/null -w '%{http_code} after %{time_total}s\n' http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/slow" | sort
-200 after 1.004895s
-200 after 1.004903s
-503 after 0.000369s
-503 after 0.001474s
-503 after 0.001716s
-503 after 0.001848s
-503 after 0.002422s
-503 after 0.002423s
-503 after 0.002547s
-503 after 0.003185s
+200 after 1.004667s
+200 after 1.004874s
+503 after 0.001176s
+503 after 0.002244s
+503 after 0.002311s
+503 after 0.002365s
+503 after 0.003168s
+503 after 0.003256s
+503 after 0.029517s
+503 after 0.031487s
 $ ../_shared/eg-admin.sh envoy-14/eg 'config_dump?resource=dynamic_active_clusters' | python3 -c 'import json,sys; [print(json.dumps(c["cluster"]["circuit_breakers"])) for c in json.load(sys.stdin)["configs"] if "/slow/" in c["cluster"]["name"]]'
 {"thresholds": [{"max_connections": 1024, "max_pending_requests": 2, "max_requests": 2, "max_retries": 1024}]}
 ```
 
 **What just happened:** module 11, step 7, again: two served after the app's one
-second, the rest refused at once. `maxParallelRequests` and `maxPendingRequests`
-became `max_requests` and `max_pending_requests`; the limits not set stay at
-Envoy's defaults (`max_connections: 1024`) — except `max_retries`, which Envoy
-Gateway raises from Envoy's 3 to 1024.
+second, the rest refused at once. Run it a few times and now and then three —
+once in a while four or five — are served: Envoy's worker threads share the
+limit and can race past it ("races between threads may allow limits to be
+potentially exceeded", Envoy's circuit-breaking docs). Measured over 60 bursts:
+two served 38 times, three 20 times, four once, five once.
+`maxParallelRequests` and `maxPendingRequests` became `max_requests` and
+`max_pending_requests`; the limits not set stay at Envoy's defaults
+(`max_connections: 1024`) — except `max_retries`, which Envoy Gateway raises
+from Envoy's 3 to 1024.
 
 ### Step 6 — a rate limit
 
@@ -306,14 +310,19 @@ $ oc exec -n envoy-14 client -- curl -s -w '  -> %{http_code}\n' -H "authorizati
 Jwt verification fails  -> 401
 ```
 
-No token, and a forged one: both **`401`**, with module 06's reasons. Now a real
-token — after a pause, because step 6's limit still applies to `/api` and its
-bucket is empty:
+No token, and a forged one: both **`401`**, with module 06's reasons — and
+neither spent a token of step 6's limit, because `jwt_authn` runs first (step
+9). Now a real token. Step 6 left `/api`'s bucket empty, and a new token takes
+20 s — yet no pause is needed: applying this `SecurityPolicy` changed `/api`'s
+route, and Envoy builds a route's local rate limiter anew, bucket full,
+whenever the route table changes. A change to another route does it too —
+measured: `/api`'s bucket empty, a change to `/pool`'s retry, and `/api`
+answered three `200`s in a row; with no change, four `429`s.
 
 ```console
-$ sleep 20; oc exec -n envoy-14 client -- curl -s -H "authorization: Bearer $(../06-http-filters/make-jwt.sh alice)" "http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/api" | grep -E '"(served_by|x-user|authorization)"'
-  "served_by": "echo-f8fc6d5c9-sxc29",
-    "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InR1dG9yaWFsIn0.eyJpc3MiOiJlbnZveS10dXRvcmlhbCIsInN1YiI6ImFsaWNlIiwiZXhwIjoxNzkwNDA4MzUzfQ.boKQbktUMJeCE53XjVLNjGjirVGecFqcJRRgDkbppaY",
+$ oc exec -n envoy-14 client -- curl -s -H "authorization: Bearer $(../06-http-filters/make-jwt.sh alice)" "http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/api" | grep -E '"(served_by|x-user|authorization)"'
+  "served_by": "echo-f8fc6d5c9-c8mps",
+    "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InR1dG9yaWFsIn0.eyJpc3MiOiJlbnZveS10dXRvcmlhbCIsInN1YiI6ImFsaWNlIiwiZXhwIjoxNzkwNDEzOTYzfQ.6Adb-njViOzy-9QtimmbpIT75lNeZXQ1RaVRCJBFtAw",
     "x-user": "alice"
 ```
 
@@ -351,8 +360,10 @@ access-control-max-age: 600
 **What just happened:** the allowed origin got
 `access-control-allow-origin: https://shop.example.com`; the other got **no**
 `access-control-allow-origin`, so a browser blocks the call. Neither preflight
-carried a token, yet neither got a `401` — which depends on the order of the
-filters.
+carried a token, yet neither got a `401`: the `cors` filter runs before
+`jwt_authn` (step 9) and answered both itself — the other origin too, because
+Envoy Gateway sets `forward_not_matching_preflights: false` on it. Envoy's
+default, `true`, would pass that preflight on down the chain, to a `401`.
 
 ### Step 9 — the filter order you did not choose
 
@@ -371,8 +382,9 @@ envoy.filters.http.router
 the order module 06 argued for. CORS first, so a preflight is answered before JWT
 could reject it for having no token (step 8). JWT before the rate limit, so a
 caller without a valid token is refused without spending a token of the limit.
-With Envoy Gateway you do not choose the order — the filters it adds each have a
-fixed place.
+Envoy Gateway chooses the order for you: each filter it adds has a default
+place — Part B's `fault` filter goes ahead of all of these — which an
+`EnvoyProxy` can change with `spec.filterOrder`.
 
 ## Part B — more from BackendTrafficPolicy
 
@@ -397,8 +409,8 @@ It is how you test, on purpose, what your callers do when a dependency fails:
 $ oc apply -f manifests/90-fault-abort.yaml
 backendtrafficpolicy.gateway.envoyproxy.io/chaos created
 $ sleep 5; oc exec -n envoy-14 client -- sh -c "for i in \$(seq 1 100); do curl -s -o /dev/null -w '%{http_code}\n' http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/chaos; done" | sort | uniq -c
-  71 200
-  29 503
+  75 200
+  25 503
 $ for i in $(seq 1 30); do oc exec -n envoy-14 client -- curl -s "http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/chaos" | grep 'fault filter abort' && break; done
 fault filter abort
 ```
@@ -418,9 +430,9 @@ policy (same name — it replaces step 10's): no errors, but every request held 
 $ oc apply -f manifests/91-fault-delay.yaml
 backendtrafficpolicy.gateway.envoyproxy.io/chaos configured
 $ sleep 5; oc exec -n envoy-14 client -- sh -c "for i in 1 2 3; do curl -s -o /dev/null -w '%{http_code} after %{time_total}s\n' http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/chaos; done"
-200 after 1.997668s
-200 after 1.995999s
-200 after 1.997996s
+200 after 2.006581s
+200 after 1.995907s
+200 after 1.996968s
 $ ../_shared/eg-admin.sh envoy-14/eg 'config_dump?resource=dynamic_route_configs' | python3 -c 'import json,sys; [print(json.dumps(r["typed_per_filter_config"]["envoy.filters.http.fault"])) for rc in json.load(sys.stdin)["configs"] for vh in rc["route_config"]["virtual_hosts"] for r in vh["routes"] if "/chaos/" in r["route"].get("cluster", "")]'
 {"@type": "type.googleapis.com/envoy.extensions.filters.http.fault.v3.HTTPFault", "delay": {"fixed_delay": "2s", "percentage": {"numerator": 1000000, "denominator": "MILLION"}}}
 ```
@@ -440,10 +452,10 @@ pod — module 05's `RING_HASH`, step 10:
 $ oc apply -f manifests/95-consistent-hash.yaml
 backendtrafficpolicy.gateway.envoyproxy.io/sticky created
 $ sleep 20; for u in alice bob carol dave; do printf '%-6s' "$u"; oc exec -n envoy-14 client -- sh -c "for i in \$(seq 1 10); do curl -s -H 'x-user: $u' http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/sticky | grep -o 'echo-[a-z0-9]*-[a-z0-9]*'; done" | sort | uniq -c | tr -s ' \n' ' '; echo; done
-alice  10 echo-f8fc6d5c9-f6pnp 
-bob    10 echo-f8fc6d5c9-sxc29 
-carol  10 echo-f8fc6d5c9-sxc29 
-dave   10 echo-f8fc6d5c9-sxc29 
+alice  10 echo-f8fc6d5c9-95zrj 
+bob    10 echo-f8fc6d5c9-c8mps 
+carol  10 echo-f8fc6d5c9-95zrj 
+dave   10 echo-f8fc6d5c9-95zrj 
 $ ../_shared/eg-admin.sh envoy-14/eg 'config_dump?resource=dynamic_active_clusters' | python3 -c 'import json,sys; [print(p["typed_extension_config"]["name"], p["typed_extension_config"]["typed_config"].get("table_size")) for c in json.load(sys.stdin)["configs"] if "/sticky/" in c["cluster"]["name"] for p in c["cluster"]["load_balancing_policy"]["policies"]]'
 envoy.load_balancing_policies.maglev 65537
 ```
@@ -473,9 +485,10 @@ $ ./run.sh verify
   ✓ the sick pod is ejected
 
 3. circuit breaker on /slow (2 in flight, 2 waiting)
-  10 at once: 3 answered, 7 refused
-  ✓ 2 to 4 answered
+  10 at once: 2 answered, 8 refused
+  ✓ 2 to 6 answered
   ✓ the other requests were refused with 503
+  ✓ ...each one counted by Envoy as a circuit-breaker overflow
   ✓ every refusal came back at once
 
 4. JWT on /api
@@ -485,7 +498,7 @@ $ ./run.sh verify
   ✓ the app is told the verified subject
 
 5. rate limit on /api (3 a minute)
-  5 requests at once: 200 200 429 429 429 
+  5 requests in a row: 200 200 429 429 429 
   ✓ at least 2 of 5 refused with 429
   ✓ a 429 says the limit
 
@@ -494,7 +507,7 @@ $ ./run.sh verify
   ✓ another origin is not allowed
 
 7. fault injection on /chaos
-  abort 30 %: 12 of 50 aborted
+  abort 30 %: 16 of 50 aborted
   ✓ the proxy aborted some, saying 'fault filter abort'
   ✓ with the delay, a request takes about 2 s
 
@@ -517,7 +530,7 @@ all checks passed
 | `circuitBreaker.maxParallelRequests` / `maxPendingRequests` | `2`, `2` | `circuit_breakers.thresholds` |
 | `rateLimit.local.rules[].limit` | 3 per minute | `local_ratelimit`: a bucket of 3, 3 tokens per 60 s, enabled and enforced |
 | `faultInjection.abort` / `.delay` | 30 % → 503; 2 s for all (Part B) | the `fault` filter, per route |
-| `loadBalancer.type` | `ConsistentHash` on `x-user` (Part B); otherwise not set | `hash_policy` + Maglev; unset, `least_request`. Also `RoundRobin`, `Random` |
+| `loadBalancer.type` | `ConsistentHash` on `x-user` (Part B); otherwise not set | `hash_policy` + Maglev; unset, `least_request`. Also `LeastRequest`, `RoundRobin`, `Random`, `BackendUtilization`, `DynamicModule` |
 
 **`SecurityPolicy`**
 
@@ -536,6 +549,7 @@ all checks passed
 | `Accepted=False`, reason `Conflicted`: *Unable to target HTTPRoute pool, another BackendTrafficPolicy has already attached to it* | a second `BackendTrafficPolicy` on the same route; the first one keeps working | put the settings in one policy, as step 4 does |
 | a browser's preflight gets `401` and `www-authenticate: Bearer` | a `SecurityPolicy` with `jwt` but no `cors` — measured | add `cors` to the same `SecurityPolicy` (step 8) |
 | `429` for everybody | a local rate limit is per Envoy, not per caller | add `clientSelectors`, or use Envoy Gateway's global rate limit |
+| a local rate limit lets requests through before its time | a change to a route on the same Gateway — even another route — gives the local rate limiter a full bucket again, measured (step 7) | expected for a local limit; Envoy Gateway's global rate limit keeps its counts in the rate-limit service, outside Envoy |
 | the app receives the bearer token | Envoy Gateway forwards it | expected (step 7) |
 
 ## Clean up

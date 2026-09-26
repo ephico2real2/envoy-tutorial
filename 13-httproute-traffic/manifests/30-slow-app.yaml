@@ -1,5 +1,5 @@
 # The slow app from module 04: it waits 1 s before answering, so a route
-# timeout shorter than that fires (step 8).
+# timeout shorter than that fires (step 7).
 #
 # /healthz answers immediately so readiness does not have to wait out the delay.
 apiVersion: v1

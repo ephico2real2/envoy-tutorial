@@ -12,7 +12,8 @@ deploy() {
   # Module 12's GatewayClass and EnvoyProxy - the cluster operator's part.
   $KUBE apply -f ../12-gateway-api/manifests/20-envoyproxy.yaml -f ../12-gateway-api/manifests/10-gatewayclass.yaml >/dev/null
   $KUBE wait gatewayclass/eg --for=condition=Accepted --timeout=60s >/dev/null
-  $KUBE apply -f manifests/10-gateway.yaml >/dev/null
+  ns_settle "$NS"
+  $KUBE apply -f manifests/10-gateway.yaml >/dev/null || { bad "could not create the Gateway in $NS"; exit 1; }
   gw_up "$NS" eg
   $KUBE apply -n "$NS" -f ../_shared/client.yaml -f ../_shared/echo-app.yaml \
     -f manifests/20-canary.yaml -f manifests/30-slow-app.yaml >/dev/null
@@ -57,13 +58,17 @@ print(routes[-1]["route"]["cluster"])')
   say "3. a weighted split, 90/10"
   CANARY=$(incluster_sh "for i in \$(seq 1 200); do curl -s http://$ADDR/split; done" | grep -c '"served_by": "canary-')
   echo "  canary answered $CANARY of 200"
-  # 200 requests at 10 %: 20 expected, standard deviation 4.2. 5 to 40 is
-  # more than 3.5 deviations either way.
+  # Not a coin toss: each of Envoy's worker threads runs its own schedule, so
+  # 20 runs of 200 gave the canary 18 to 23 (step 4). The wide band still fails
+  # a split that ignores the weights - the canary is one pod in three, about 67
+  # of 200 - or that sends everything one way.
   assert "the canary got about 10 % (5 to 40 of 200)" "yes" \
     "$([ "$CANARY" -ge 5 ] && [ "$CANARY" -le 40 ] && echo yes || echo no)"
 
   say "4. rewrite and redirect"
-  assert_contains "/v2/hello reaches the canary as /hello" '"path": "/hello"' "$(incluster_curl "http://$ADDR/v2/hello")"
+  R=$(incluster_curl "http://$ADDR/v2/hello")
+  assert "/v2/hello reaches the canary as /hello" "canary /hello" \
+    "$(printf '%s' "$R" | sed -n 's/.*"served_by": "\([a-z]*\)-.*/\1/p') $(printf '%s' "$R" | sed -n 's/.*"path": "\([^"]*\)".*/\1/p')"
   R=$(incluster_curl -o /dev/null -D - "http://$ADDR/old/page")
   assert_contains "/old/page -> 301"              "301"            "$R"
   assert_contains "...pointing at /new/page"      "/new/page"      "$R"

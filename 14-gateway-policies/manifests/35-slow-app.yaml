@@ -8,7 +8,7 @@ metadata:
   name: slow-src
 data:
   slow.py: |
-    """Answers slowly, so a route timeout can be demonstrated."""
+    """Answers slowly, so concurrent requests pile up - what a circuit breaker is for."""
     import os, time
     # Threading, not the plain HTTPServer: with one thread, a request that
     # Envoy has already timed out still holds the server for the full delay,

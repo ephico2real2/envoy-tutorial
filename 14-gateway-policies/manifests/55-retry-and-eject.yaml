@@ -1,5 +1,5 @@
 # Step 4. The same policy (same name - applying it replaces step 3's), plus
-# module 11's outlier detection, which the Gateway API calls a passive health
+# module 11's outlier detection, which Envoy Gateway calls a passive health
 # check: two 5xx in a row and a pod is ejected for 30 s.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: BackendTrafficPolicy

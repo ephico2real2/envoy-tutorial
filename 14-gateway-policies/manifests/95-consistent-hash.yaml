@@ -1,4 +1,4 @@
-# Step 13. Consistent hashing, module 05's RING_HASH: the pod is chosen from a
+# Step 12. Consistent hashing, module 05's RING_HASH: the pod is chosen from a
 # hash of the x-user header, so one user keeps landing on one pod - useful when
 # a pod caches per user.
 apiVersion: gateway.envoyproxy.io/v1alpha1
