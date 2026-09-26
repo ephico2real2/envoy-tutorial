@@ -36,9 +36,13 @@ echo "  (module 07's pods also pip-install grpcio at start: egress to pypi.org)"
 
 say "optional, per module"
 have() { $KUBE get crd "$1" >/dev/null 2>&1 && ok "$2" || printf '  · %s — not installed (only module %s needs it)\n' "$2" "$3"; }
-have certificates.cert-manager.io "cert-manager"           "08, 09"
-have gateways.gateway.networking.k8s.io "Gateway API CRDs" "12"
-have ipaddresspools.metallb.io "MetalLB"                   "12"
+have certificates.cert-manager.io "cert-manager"           "08, 09, 15, 16"
+# The CA the TLS modules sign with. It is this cluster's own issuer, not one the
+# tutorial creates: on another cluster, change issuerRef.name in their manifests.
+$KUBE get clusterissuer enterprise-ca >/dev/null 2>&1 \
+  && ok "ClusterIssuer enterprise-ca" || printf '  · %s — not found (only module %s needs it)\n' "ClusterIssuer enterprise-ca" "08, 09, 15, 16"
+have gateways.gateway.networking.k8s.io "Gateway API CRDs" "12-15, 17"
+have ipaddresspools.metallb.io "MetalLB"                   "12-15, 17"
 $KUBE get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1 \
   && ok "Prometheus Operator CRDs" || printf '  · %s — not installed (only module %s needs it)\n' "Prometheus Operator CRDs" "10"
 # On OpenShift the CRDs are always there; what decides whether YOUR namespaces

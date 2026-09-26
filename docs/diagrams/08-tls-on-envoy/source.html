@@ -82,12 +82,13 @@ a { color: var(--remote); }
 <line x1="460" y1="55" x2="518" y2="55" stroke="currentColor" stroke-width="1.3" marker-end="url(#t1)"/>
 <text x="464" y="46" fill="var(--muted)">asks</text>
 <line x1="250" y1="98" x2="250" y2="142" stroke="currentColor" stroke-width="1.3" marker-end="url(#t1)"/>
-<line x1="730" y1="98" x2="290" y2="142" stroke="currentColor" stroke-width="1.3" marker-end="url(#t1)"/>
-<text x="262" y="124" fill="var(--muted)">cert-manager signs and stores</text>
+<line x1="730" y1="98" x2="730" y2="142" stroke="currentColor" stroke-width="1.3" marker-end="url(#t1)"/>
+<text x="262" y="124" fill="var(--muted)">cert-manager makes the key, stores all three</text>
+<text x="742" y="124" fill="var(--muted)">the signed certificate</text>
 <rect x="40" y="144" width="900" height="72" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
 <text x="54" y="165" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">Secret shop-tls</text>
-<text x="54" y="182">tls.crt — the certificate (90 days, renewed before expiry)   tls.key — its private key</text>
-<text x="54" y="199">ca.crt — the CA that signed it</text>
+<text x="54" y="182">tls.crt — the certificate (90 days, renewed before expiry)</text>
+<text x="54" y="199">tls.key — its private key · ca.crt — the CA that signed it</text>
 <line x1="250" y1="216" x2="250" y2="262" stroke="currentColor" stroke-width="1.3" marker-end="url(#t1)"/>
 <line x1="730" y1="216" x2="730" y2="262" stroke="currentColor" stroke-width="1.3" marker-end="url(#t1)"/>
 <text x="262" y="244" fill="var(--muted)">mounted as files</text>

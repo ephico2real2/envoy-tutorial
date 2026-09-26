@@ -113,30 +113,30 @@ a { color: var(--remote); }
     <h2>Two API groups, one controller</h2>
     <figure>
       <div class="fig-scroll">
-<svg viewBox="0 0 800 410" role="img" aria-label="What you write falls into two API groups that the same Gateway controller, Envoy Gateway here, implements: Gateway, HTTPRoute and GRPCRoute in the standard gateway.networking.k8s.io API, portable across vendors; and EnvoyProxy, SecurityPolicy and the rest in the vendor extension group gateway.envoyproxy.io, Envoy Gateway only.">
+<svg viewBox="0 0 800 306" role="img" aria-label="What you write falls into two API groups that the same Gateway controller, Envoy Gateway here, implements: Gateway, HTTPRoute and GRPCRoute in the standard gateway.networking.k8s.io API, portable across vendors; and EnvoyProxy, SecurityPolicy and the rest in the vendor extension group gateway.envoyproxy.io, Envoy Gateway only.">
   <defs><marker id="c2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="c2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
   <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
 <text x="20" y="30" font-weight="600">what YOU write</text>
-<text x="540" y="30" font-weight="600">who implements it</text>
-<rect x="20" y="44" width="300" height="80" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<rect x="20" y="44" width="370" height="80" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
 <text x="34" y="65" font-weight="600">Gateway</text>
 <text x="34" y="82">HTTPRoute  /  GRPCRoute</text>
 <text x="34" y="99" font-family="IBM Plex Mono, monospace" font-size="12">gateway.networking.k8s.io</text>
-<path d="M320,84 H500 V186" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#c2)"/>
-<text x="516" y="104" font-weight="600" fill="var(--remote)">the STANDARD api</text>
-<text x="516" y="121" font-family="IBM Plex Mono, monospace" font-size="12">gateway.networking.k8s.io</text>
-<text x="516" y="138" fill="var(--muted)">portable across vendors</text>
-<rect x="380" y="188" width="240" height="60" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
-<text x="394" y="209" font-weight="600">a Gateway controller</text>
-<text x="394" y="226" fill="var(--muted)">(Envoy Gateway here)</text>
-<rect x="20" y="312" width="300" height="80" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
-<text x="34" y="333" font-weight="600">EnvoyProxy</text>
-<text x="34" y="350">SecurityPolicy   etc.</text>
-<text x="34" y="367" font-family="IBM Plex Mono, monospace" font-size="12">gateway.envoyproxy.io</text>
-<path d="M320,352 H500 V250" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#c2)"/>
-<text x="516" y="300" fill="var(--host)" font-weight="600">VENDOR extensions</text>
-<text x="516" y="317" font-family="IBM Plex Mono, monospace" font-size="12">gateway.envoyproxy.io</text>
-<text x="516" y="334" fill="var(--muted)">Envoy Gateway only</text>
+<rect x="410" y="44" width="370" height="80" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="424" y="65" font-weight="600">EnvoyProxy</text>
+<text x="424" y="82">SecurityPolicy   etc.</text>
+<text x="424" y="99" font-family="IBM Plex Mono, monospace" font-size="12">gateway.envoyproxy.io</text>
+<line x1="205" y1="124" x2="205" y2="226" stroke="currentColor" stroke-width="1.3" marker-end="url(#c2)"/>
+<text x="217" y="156" font-weight="600" fill="var(--remote)">the STANDARD api</text>
+<text x="217" y="173" font-family="IBM Plex Mono, monospace" font-size="12">gateway.networking.k8s.io</text>
+<text x="217" y="190" fill="var(--muted)">portable across vendors</text>
+<line x1="595" y1="124" x2="595" y2="226" stroke="currentColor" stroke-width="1.3" marker-end="url(#c2)"/>
+<text x="607" y="156" font-weight="600" fill="var(--host)">VENDOR extensions</text>
+<text x="607" y="173" font-family="IBM Plex Mono, monospace" font-size="12">gateway.envoyproxy.io</text>
+<text x="607" y="190" fill="var(--muted)">Envoy Gateway only</text>
+<text x="20" y="250" font-weight="600">who implements it</text>
+<rect x="150" y="228" width="500" height="60" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="400" y="253" text-anchor="middle" font-weight="600">a Gateway controller</text>
+<text x="400" y="270" text-anchor="middle" fill="var(--muted)">(Envoy Gateway here)</text>
   </g>
 </svg>
       </div>

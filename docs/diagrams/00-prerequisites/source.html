@@ -68,7 +68,7 @@ a { color: var(--remote); }
     <h2>The map</h2>
     <figure>
       <div class="fig-scroll">
-<svg viewBox="0 0 980 570" role="img" aria-label="Your laptop runs oc against the cluster. Modules 01 to 04 each create their own namespace, envoy-NN, holding a client pod that runs curl, Envoy, and the echo app, from public images. Beside it are the platform pieces only some modules need: cert-manager, Gateway API CRDs, MetalLB, Prometheus Operator CRDs and, on OpenShift, user-workload monitoring.">
+<svg viewBox="0 0 980 624" role="img" aria-label="Your laptop runs oc against the cluster. Each module creates its own namespace, envoy-NN for most, holding a client pod that runs curl, Envoy, and the echo app, from public images; module 12 uses gwapi-demo and module 16 keycloak, and in modules 12 to 15 and 17 Envoy Gateway generates the Envoy in envoy-gateway-system. Beside it are the platform pieces only some modules need: cert-manager and the enterprise-ca ClusterIssuer for 08, 09, 15 and 16; Gateway API CRDs and MetalLB for 12 to 15 and 17; Prometheus Operator CRDs and, on OpenShift, user-workload monitoring for 10.">
   <defs><marker id="p1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="p1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
   <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
 <rect x="150" y="16" width="360" height="56" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
@@ -76,10 +76,10 @@ a { color: var(--remote); }
 <text x="164" y="54">oc (or kubectl), pointed at the cluster by KUBECONFIG</text>
 <line x1="330" y1="72" x2="330" y2="118" stroke="currentColor" stroke-width="1.3" marker-end="url(#p1)"/>
 <text x="342" y="92" font-family="IBM Plex Mono, monospace" font-size="12">oc apply · oc exec · ./check.sh · ./run.sh</text>
-<rect x="20" y="120" width="940" height="400" rx="10" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<rect x="20" y="120" width="940" height="454" rx="10" fill="none" stroke="currentColor" stroke-width="1.3"/>
 <text x="40" y="146" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">YOUR CLUSTER</text>
-<rect x="40" y="160" width="580" height="340" rx="8" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
-<text x="58" y="184" font-weight="600">namespace envoy-NN — one per module, 01 to 04, so they never collide</text>
+<rect x="40" y="160" width="580" height="394" rx="8" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="58" y="184" font-weight="600">namespace envoy-NN — one per module, so they never collide</text>
 <rect x="210" y="200" width="240" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
 <text x="224" y="221" font-weight="600">client pod</text>
 <text x="224" y="238" font-family="IBM Plex Mono, monospace" font-size="12">curlimages/curl:8.11.1</text>
@@ -94,28 +94,33 @@ a { color: var(--remote); }
 <text x="224" y="422" font-family="IBM Plex Mono, monospace" font-size="12">python:3.12-slim</text>
 <text x="58" y="470" fill="var(--muted)">Public images only — check.sh lists them all. Nothing is built or pushed:</text>
 <text x="58" y="487" fill="var(--muted)">each app&#x27;s source is a ConfigMap.</text>
+<text x="58" y="515" fill="var(--muted)">Modules 12 and 16 name theirs gwapi-demo and keycloak. In 12–15 and 17,</text>
+<text x="58" y="532" fill="var(--muted)">Envoy Gateway generates the Envoy, in envoy-gateway-system.</text>
 <text x="646" y="184" font-weight="600">platform pieces — only some</text>
 <text x="646" y="201" font-weight="600">modules need them</text>
 <rect x="646" y="214" width="294" height="44" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
 <text x="660" y="232" font-weight="600">cert-manager</text>
-<text x="660" y="249" fill="var(--muted)">module 08, 09</text>
+<text x="660" y="249" fill="var(--muted)">module 08, 09, 15, 16</text>
 <rect x="646" y="268" width="294" height="44" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
-<text x="660" y="286" font-weight="600">Gateway API CRDs</text>
-<text x="660" y="303" fill="var(--muted)">module 12</text>
+<text x="660" y="286" font-weight="600">ClusterIssuer enterprise-ca</text>
+<text x="660" y="303" fill="var(--muted)">module 08, 09, 15, 16 — your cluster&#x27;s CA</text>
 <rect x="646" y="322" width="294" height="44" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
-<text x="660" y="340" font-weight="600">MetalLB (a LoadBalancer)</text>
-<text x="660" y="357" fill="var(--muted)">module 12</text>
+<text x="660" y="340" font-weight="600">Gateway API CRDs</text>
+<text x="660" y="357" fill="var(--muted)">module 12–15, 17</text>
 <rect x="646" y="376" width="294" height="44" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
-<text x="660" y="394" font-weight="600">Prometheus Operator CRDs</text>
-<text x="660" y="411" fill="var(--muted)">module 10</text>
+<text x="660" y="394" font-weight="600">MetalLB (a LoadBalancer)</text>
+<text x="660" y="411" fill="var(--muted)">module 12–15, 17</text>
 <rect x="646" y="430" width="294" height="44" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
-<text x="660" y="448" font-weight="600">user-workload monitoring</text>
-<text x="660" y="465" fill="var(--muted)">module 10 (OpenShift)</text>
-<text x="20" y="552" font-weight="600">./check.sh checks each of these, from the laptop down to a pod actually running in the cluster.</text>
+<text x="660" y="448" font-weight="600">Prometheus Operator CRDs</text>
+<text x="660" y="465" fill="var(--muted)">module 10</text>
+<rect x="646" y="484" width="294" height="44" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="660" y="502" font-weight="600">user-workload monitoring</text>
+<text x="660" y="519" fill="var(--muted)">module 10 (OpenShift)</text>
+<text x="20" y="606" font-weight="600">./check.sh checks each of these, from the laptop down to a pod actually running in the cluster.</text>
   </g>
 </svg>
       </div>
-      <figcaption>Modules 01 to 04 each get their own namespace with a client pod, Envoy and the echo app; a few platform pieces are needed only by the modules named.</figcaption>
+      <figcaption>Each module gets its own namespace with a client pod, Envoy and the echo app; a few platform pieces are needed only by the modules named.</figcaption>
     </figure>
   </section>
 </div>
