@@ -59,10 +59,16 @@ verify() {
   say "3. mutual TLS between Envoy and the service"
   assert_contains "the service logged Envoy's identity" "caller=spiffe://envoy-tutorial/ns/envoy-09/envoy" \
     "$($KUBE logs -n "$NS" deploy/catalog -c catalog --tail=5)"
-  assert_contains "without a client certificate, the service refuses" "Failed to dial" \
-    "$(grpc -connect-timeout 5 "catalog.$NS.svc:50051" list)"
-  S=$(incluster_curl "http://envoy.$NS.svc:9901/stats?filter=^cluster\.catalog\.ssl\.(handshake|fail_verify_san)$")
-  assert_contains "Envoy's upstream handshakes succeeded" "ssl.fail_verify_san: 0" "$S"
+  # grpcurl only says "Failed to dial" - so does a stopped service or a DNS miss.
+  # The service's own log names why it refused: no client certificate.
+  grpc -connect-timeout 5 "catalog.$NS.svc:50051" list >/dev/null
+  assert_contains "without a client certificate, the service refuses" "PEER_DID_NOT_RETURN_A_CERTIFICATE" \
+    "$($KUBE logs -n "$NS" deploy/catalog -c catalog --since=30s 2>&1)"
+  # No failures is not success: an Envoy that never reached the service counts 0 failures too.
+  S=$(incluster_curl "http://envoy.$NS.svc:9901/stats?filter=^cluster\.catalog\.ssl\.(handshake|connection_error|fail_verify_san)$")
+  assert "Envoy's upstream handshakes succeeded" "handshakes > 0, failures 0" \
+    "$(echo "$S" | awk -F': ' '/ssl\.handshake:/ { h = $2 } /ssl\.(connection_error|fail_verify_san):/ { f += $2 }
+                               END { printf "handshakes %s, failures %d", (h > 0 ? "> 0" : "= " h + 0), f }')"
 
   if has_routes; then
     say "4. from outside, through the passthrough Route"
@@ -70,7 +76,10 @@ verify() {
   fi
 
   say "5. rotation: cert-manager replaces envoy-edge while Envoy runs"
-  OLD=$(serial 8443)
+  # Each listener's own serial before the rotation. They differ after an earlier
+  # verify: its rotation left :8444 one certificate behind :8443, so comparing
+  # :8444 with :8443's old serial failed every verify after the first.
+  OLD=$(serial 8443); OLD_STATIC=$(serial 8444)
   $KUBE delete secret envoy-edge -n "$NS" >/dev/null
   NEW=$OLD
   for _ in $(seq 1 60); do
@@ -78,7 +87,7 @@ verify() {
   done
   assert "SDS listener :8443 now presents the new certificate" "changed" \
     "$([ -n "$NEW" ] && [ "$NEW" != "$OLD" ] && echo changed || echo unchanged)"
-  assert "static listener :8444 still presents the old one" "$OLD" "$(serial 8444)"
+  assert "static listener :8444 still presents the old one" "${OLD_STATIC:-no serial read}" "$(serial 8444)"
   summary
 }
 

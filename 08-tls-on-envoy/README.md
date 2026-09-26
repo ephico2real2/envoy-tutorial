@@ -74,11 +74,11 @@ Look inside the certificate it made:
 $ oc get secret shop-tls -n envoy-08 -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -subject -issuer -dates -text | grep -E 'subject=|issuer=|notBefore|notAfter|DNS:'
 subject=
 issuer=O=Enterprise POC, CN=Enterprise Root CA
-notBefore=Sep 26 04:24:01 2026 GMT
-notAfter=Dec 25 04:24:01 2026 GMT
+notBefore=Sep 26 05:23:04 2026 GMT
+notAfter=Dec 25 05:23:04 2026 GMT
                 DNS:shop.apps-crc.testing, DNS:shop-reencrypt.apps-crc.testing, DNS:envoy.envoy-08.svc
 $ oc get certificate shop-tls -n envoy-08 -o jsonpath='{.status.renewalTime}{"\n"}'
-2026-11-25T04:24:01Z
+2026-11-25T05:23:04Z
 ```
 
 **What just happened:** cert-manager made a private key, had the `enterprise-ca`
@@ -194,7 +194,8 @@ shop-reencrypt   shop-reencrypt.apps-crc.testing   reencrypt     https
 - **`edge`** → Envoy's plain `http` port. The router terminates TLS itself.
 - **`reencrypt`** → Envoy's `https` port. The router terminates TLS, then opens a
   **new** TLS connection to Envoy — checking Envoy's certificate against the CA
-  file you gave it with `--dest-ca-cert`.
+  file you gave it with `--dest-ca-cert`, and only that: measured, it accepts a
+  certificate from that CA that names neither the Route's host nor the Service.
 
 ### Step 7 — which certificate does each Route present?
 
@@ -267,11 +268,11 @@ x-envoy-listener: tls-8443
 $ oc exec -n envoy-08 client -- curl -sk -i https://shop-edge.apps-crc.testing/ | grep -E '^x-envoy-listener|"x-forwarded-(proto|for)"'
 x-envoy-listener: plain-8080
     "x-forwarded-proto": "https",
-    "x-forwarded-for": "10.217.0.254",
+    "x-forwarded-for": "10.217.0.156",
 $ oc exec -n envoy-08 client -- curl -sk -i https://shop-reencrypt.apps-crc.testing/ | grep -E '^x-envoy-listener|"x-forwarded-(proto|for)"'
 x-envoy-listener: tls-8443
     "x-forwarded-proto": "https",
-    "x-forwarded-for": "10.217.0.254",
+    "x-forwarded-for": "10.217.0.156",
 ```
 
 And, for comparison, straight to Envoy's plain port with no router in front:
@@ -284,8 +285,10 @@ $ oc exec -n envoy-08 client -- curl -s http://envoy:8080/ | grep -E '"x-forward
 **What just happened:**
 
 - **edge** reached Envoy's **plain** `:8080` listener — and the app was still told
-  `x-forwarded-proto: https`. The router added that header; Envoy only sets it
-  when it is missing, which is why the direct request says `http`.
+  `x-forwarded-proto: https`. The router added that header; Envoy, configured as
+  here, only sets it when it is missing, which is why the direct request says
+  `http`. (With `use_remote_address: true` and no trusted hops, Envoy
+  overwrites it — measured.)
 - **edge** and **reencrypt** carry an `x-forwarded-for`: the router could read the
   request, so it added one. **passthrough** has none — the router never saw inside
   the TLS.
@@ -306,7 +309,9 @@ On macOS, do the same trust test against `edge` and it **passes** — even with
 `--cacert`. Measured while writing this: CRC installs its router CA into the macOS
 System keychain, and the curl that ships with macOS consults the keychain even
 when `--cacert` is given. That is why the trust tests in this module run inside
-the cluster, where curl trusts exactly the file it is given.
+the cluster, where curl trusts exactly the file it is given. On the laptop,
+`OPENSSL_X509_TEA_DISABLE=1` turns that keychain fallback off (measured: the
+`edge` test then fails with exit 60, as it does in the cluster).
 
 ### Step 10 — check yourself
 
@@ -373,7 +378,7 @@ all checks passed
 | `unable to get local issuer certificate` (exit 60) | the client does not trust the CA | `--cacert ca.crt` (step 3) — not `-k` |
 | `no alternative certificate subject name matches` (exit 60) | the name you dialled is not in `dnsNames` | add it to the `Certificate`; cert-manager reissues |
 | `certificate/shop-tls` never Ready | the issuer is missing or not Ready | `oc get clusterissuer`; `oc describe certificate shop-tls -n envoy-08` |
-| the laptop trusts `edge` with `--cacert ca.crt` | macOS curl also trusts the keychain, where CRC put the router CA | test trust from the `client` pod |
+| the laptop trusts `edge` with `--cacert ca.crt` | macOS curl also trusts the keychain, where CRC put the router CA | test trust from the `client` pod, or prefix the laptop curl with `OPENSSL_X509_TEA_DISABLE=1` |
 | a reencrypt Route returns `503` | the router cannot verify Envoy's certificate | pass `--dest-ca-cert` with the CA that signed Envoy's certificate |
 
 ## Clean up

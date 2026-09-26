@@ -1,4 +1,4 @@
-# Two of the three OpenShift Route types (step 7 creates the third, reencrypt,
+# Two of the three OpenShift Route types (step 6 creates the third, reencrypt,
 # because it needs the CA file). Where TLS ends differs for each:
 #
 #   passthrough   the router forwards the TLS bytes untouched; ENVOY terminates

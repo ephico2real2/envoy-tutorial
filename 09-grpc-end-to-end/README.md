@@ -99,7 +99,7 @@ $ oc rollout status -n envoy-09 deploy/catalog --timeout=300s
 Waiting for deployment "catalog" rollout to finish: 0 of 1 updated replicas are available...
 deployment "catalog" successfully rolled out
 $ oc logs -n envoy-09 deploy/catalog -c catalog
-catalog (gRPC over mutual TLS) listening on :50051 as catalog-7f576b9874-jjmp5
+catalog (gRPC over mutual TLS) listening on :50051 as catalog-7f576b9874-zwc2n
 ```
 
 ### Step 4 — the service refuses strangers
@@ -161,8 +161,8 @@ $ oc exec -n envoy-09 grpc-client -- grpcurl -cacert /tmp/ca.crt -d '{"sku":"wid
   "on_hand": 10
 }
 $ oc logs -n envoy-09 deploy/catalog -c catalog --tail=2
-I0926 04:34:03.166118       8 ssl_transport_security.cc:2530] Handshake failed with error SSL_ERROR_SSL: error:100000c0:SSL routines:OPENSSL_internal:PEER_DID_NOT_RETURN_A_CERTIFICATE: Invalid certificate verification context
-catalog-7f576b9874-jjmp5 GetItem sku=widget caller=spiffe://envoy-tutorial/ns/envoy-09/envoy
+I0926 05:23:16.392609       6 ssl_transport_security.cc:2530] Handshake failed with error SSL_ERROR_SSL: error:100000c0:SSL routines:OPENSSL_internal:PEER_DID_NOT_RETURN_A_CERTIFICATE: Invalid certificate verification context
+catalog-7f576b9874-zwc2n GetItem sku=widget caller=spiffe://envoy-tutorial/ns/envoy-09/envoy
 ```
 
 **What just happened:** two TLS connections. `grpcurl` checked **Envoy's**
@@ -170,7 +170,12 @@ certificate against the CA. Envoy then connected to the service, showed its
 **client** certificate, and checked the **service's**. The service's log names
 the caller — `spiffe://envoy-tutorial/ns/envoy-09/envoy` — read from Envoy's
 certificate. That identity, not an IP address, is what the service can base
-decisions on.
+decisions on — but only as far as the issuer vouches for it. `enterprise-ca` is
+a `ClusterIssuer` and signs whatever URI a `Certificate` asks for: measured, a
+`Certificate` in another namespace was issued this namespace's SPIFFE ID, and
+the service accepted it. Before authorising on the ID, limit who can obtain it:
+have the service trust a CA that only this namespace's own `Issuer` signs with,
+or restrict what the `ClusterIssuer` will sign (cert-manager's approver-policy).
 
 The other log line is the service's record of step 4: `Handshake failed …
 PEER_DID_NOT_RETURN_A_CERTIFICATE`. The precise reason the clients never got is
@@ -191,10 +196,12 @@ vague `Unavailable`: a connection error, and **`fail_verify_san`** — the
 service's certificate is signed by the CA but does not name
 `catalog.envoy-09.svc`. The "Try this" at the end makes that one happen.
 
-### Step 8 — from outside the cluster
+### Step 8 — through the Route, the way outside clients come in
 
 A passthrough Route (`manifests/50-route.yaml`), so the TLS — and the ALPN `h2`
-that tells a gRPC client the server speaks HTTP/2 — reach Envoy untouched:
+that tells a gRPC client the server speaks HTTP/2 — reach Envoy untouched. The
+call still runs in the `grpc-client` pod, but it dials the Route's hostname, so it
+reaches Envoy through the router, as a client outside the cluster would:
 
 ```console
 $ oc apply -n envoy-09 -f manifests/50-route.yaml
@@ -226,9 +233,9 @@ serial number each one presents:
 
 ```console
 $ oc exec -n envoy-09 client -- curl -sk -o /dev/null -w '%{certs}' https://envoy.envoy-09.svc:8443/ | grep -m1 -i serial
-Serial Number:18e9d5d3184725199f7da9f81105f3125d9e44a0
+Serial Number:378120e1d38bd4b1d28b9e5565772fa02a5b9dbd
 $ oc exec -n envoy-09 client -- curl -sk -o /dev/null -w '%{certs}' https://envoy.envoy-09.svc:8444/ | grep -m1 -i serial
-Serial Number:18e9d5d3184725199f7da9f81105f3125d9e44a0
+Serial Number:378120e1d38bd4b1d28b9e5565772fa02a5b9dbd
 ```
 
 Delete the Secret — cert-manager issues a new certificate at once, just as it
@@ -237,18 +244,22 @@ does when `renewalTime` arrives — and wait for `:8443` to change:
 ```console
 $ oc delete secret envoy-edge -n envoy-09
 secret "envoy-edge" deleted from envoy-09 namespace
-$ old=$(oc exec -n envoy-09 client -- curl -sk -o /dev/null -w '%{certs}' https://envoy.envoy-09.svc:8444/ | grep -m1 -i serial); start=$SECONDS; for i in $(seq 1 60); do new=$(oc exec -n envoy-09 client -- curl -sk -o /dev/null -w '%{certs}' https://envoy.envoy-09.svc:8443/ | grep -m1 -i serial); [ "$new" != "$old" ] && break; sleep 3; done; echo ":8443 changed after about $((SECONDS - start)) s"
-:8443 changed after about 61 s
+$ old=$(oc exec -n envoy-09 client -- curl -sk -o /dev/null -w '%{certs}' https://envoy.envoy-09.svc:8444/ | grep -m1 -i serial); start=$SECONDS; for i in $(seq 1 60); do new=$(oc exec -n envoy-09 client -- curl -sk -o /dev/null -w '%{certs}' https://envoy.envoy-09.svc:8443/ | grep -m1 -i serial); [ -n "$new" ] && [ "$new" != "$old" ] && break; sleep 3; done; echo ":8443 changed after about $((SECONDS - start)) s"
+:8443 changed after about 74 s
 $ oc exec -n envoy-09 client -- curl -sk -o /dev/null -w '%{certs}' https://envoy.envoy-09.svc:8443/ | grep -m1 -i serial
-Serial Number:de5637a4fe19da754a7de0c2fa145523a097aa
+Serial Number:3f99f5f6549bd34c568cdf61d06f28cd737a9081
 $ oc exec -n envoy-09 client -- curl -sk -o /dev/null -w '%{certs}' https://envoy.envoy-09.svc:8444/ | grep -m1 -i serial
-Serial Number:18e9d5d3184725199f7da9f81105f3125d9e44a0
+Serial Number:378120e1d38bd4b1d28b9e5565772fa02a5b9dbd
 ```
 
 **What just happened:** cert-manager put a new certificate in the Secret within
-seconds; the kubelet updated the files in the Envoy pod about a minute later.
-`:8443` saw the change — `watched_directory` in its SDS file — and switched with
-no restart. `:8444` read its files once, when Envoy started, and **is still
+seconds; the kubelet updated the files in the Envoy pod about a minute later, by
+swapping a symlink in `/etc/tls-edge`. `:8443` loads its certificate through
+**SDS**, and Envoy watches the directory of an SDS certificate's files: it saw
+the swap, re-read the files and switched with no restart. (`watched_directory`
+in the SDS file names that directory explicitly; without it Envoy watches the
+files' own directory — here the same one — and, measured, switches just the
+same.) `:8444` read its files once, when Envoy started, and **is still
 presenting the old certificate**, although the new one is on disk.
 
 That is the rotation hazard. With 90-day certificates renewed a month early, the
@@ -264,7 +275,7 @@ Waiting for deployment "envoy" rollout to finish: 1 old replicas are pending ter
 Waiting for deployment "envoy" rollout to finish: 1 old replicas are pending termination...
 deployment "envoy" successfully rolled out
 $ oc exec -n envoy-09 client -- curl -sk -o /dev/null -w '%{certs}' https://envoy.envoy-09.svc:8444/ | grep -m1 -i serial
-Serial Number:de5637a4fe19da754a7de0c2fa145523a097aa
+Serial Number:3f99f5f6549bd34c568cdf61d06f28cd737a9081
 ```
 
 — and the next renewal starts the clock again. Envoy's **client** certificate for
@@ -334,7 +345,7 @@ when you are done.
 
 | Field | Here | What it does |
 |---|---|---|
-| `sni` | `catalog.envoy-09.svc` | the name Envoy asks for in the handshake |
+| `sni` | `catalog.envoy-09.svc` | the name Envoy asks for in the handshake — it does not check it; the matcher below does |
 | `common_tls_context.tls_certificate_sds_secret_configs` | `client` | Envoy's own client certificate, for mutual TLS |
 | `validation_context.trusted_ca` | the enterprise CA | which CA may have signed the service's certificate |
 | `validation_context.match_typed_subject_alt_names` | `DNS: catalog.envoy-09.svc` | which name the service's certificate must carry |
@@ -344,7 +355,7 @@ when you are done.
 | Field | What it does |
 |---|---|
 | `tls_certificate.certificate_chain` / `private_key` | where the files are |
-| `tls_certificate.watched_directory` | re-read them when this directory changes — the fix for the rotation hazard |
+| `tls_certificate.watched_directory` | re-read them when this directory changes; without it Envoy watches the files' own directory — here the same one. SDS itself is the fix for the rotation hazard |
 
 **The certificates** (cert-manager)
 
@@ -360,7 +371,7 @@ when you are done.
 | `Failed to dial … context deadline exceeded` / `SSL_ERROR_SYSCALL`, straight to the service | the service requires a client certificate you did not present | go through Envoy, or present a client certificate |
 | `Unavailable … remote connection failure` through Envoy | the upstream handshake failed | check `cluster.catalog.ssl.*` — `fail_verify_san` means the name did not match |
 | `missing selected ALPN property` | the listener does not offer `h2` | add `h2` to `alpn_protocols` |
-| a renewed certificate never shows up | loaded with `tls_certificates` filenames, or mounted with `subPath` | SDS with `watched_directory`, mounted as a directory |
+| a renewed certificate never shows up | loaded with `tls_certificates` filenames, or mounted with `subPath` | load it through SDS (`tls_certificate_sds_secret_configs`), with the Secret mounted as a directory |
 | the pod is stuck in `Init` | the service's init container could not reach PyPI | `oc logs -n envoy-09 <pod> -c codegen` |
 
 ## Clean up

@@ -165,7 +165,7 @@ a { color: var(--remote); }
 <text x="684" y="297" font-weight="600">client sees: the router&#x27;s certificate</text>
 <text x="684" y="314">issuer ingress-operator@…</text>
 <text x="684" y="331" fill="var(--gap)" font-weight="600">trusting only the CA: exit 60</text>
-<text x="20" y="380" font-weight="600">Whoever terminates TLS presents the certificate — and is the only one that can read the request.</text>
+<text x="20" y="380" font-weight="600">Whoever terminates TLS presents the certificate. Behind it the request is readable: edge sends it to Envoy as plain HTTP.</text>
 <text x="20" y="400" fill="var(--muted)">Measured in-cluster, trusting only the enterprise CA. Through all three the app saw x-forwarded-proto: https.</text>
   </g>
 </svg>

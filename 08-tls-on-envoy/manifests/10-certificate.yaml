@@ -13,7 +13,8 @@ spec:
   # certificate error for whoever uses it - step 5 shows one.
   dnsNames:
   - shop.apps-crc.testing                 # the OpenShift passthrough Route
-  - shop-reencrypt.apps-crc.testing       # the reencrypt Route
+  - shop-reencrypt.apps-crc.testing       # the reencrypt Route - not required: its
+                                          # router checks only the CA (step 6)
   - envoy.envoy-08.svc                    # in-cluster clients
   issuerRef:
     name: enterprise-ca

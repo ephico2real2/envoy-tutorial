@@ -110,8 +110,10 @@ data:
           name: envoy.transport_sockets.tls
           typed_config:
             "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
-            # The name Envoy asks for in the handshake, and expects in the
-            # service's certificate.
+            # The name Envoy asks for in the handshake (SNI). It does not make
+            # Envoy check the service's certificate: measured, with `sni` and
+            # no matcher Envoy accepts any certificate the CA signed. The name
+            # is enforced by match_typed_subject_alt_names below.
             sni: catalog.envoy-09.svc
             common_tls_context:
               alpn_protocols: ["h2"]
