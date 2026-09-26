@@ -10,11 +10,12 @@ metadata:
   name: keycloak
   labels:
     # The estate's namespace metadata: the app mnemonic and its environment.
-    # Together they select NamespaceConfig baseline-prod-rbac, which binds
-    # ClusterRole view to the group app-ocp-rbac-ocp-ns-audit here (read-only).
-    # Keycloak's own admins (app-ocp-rbac-ocp-keycloak-admin) get nothing from it.
+    # Together they select NamespaceConfig baseline-nonprod-rbac, which binds
+    # ClusterRole edit to app-ocp-rbac-ocp-ns-developer and view to
+    # app-ocp-rbac-ocp-ns-audit here. Keycloak's own admins
+    # (app-ocp-rbac-ocp-keycloak-admin) get nothing from it.
     company.net/mnemonic: ocp
-    company.net/app-environment: prod
+    company.net/app-environment: rnd
 ---
 # An OperatorGroup says which namespaces the operator may manage: only this one.
 apiVersion: operators.coreos.com/v1
