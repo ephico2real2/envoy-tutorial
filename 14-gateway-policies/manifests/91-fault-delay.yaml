@@ -1,0 +1,15 @@
+# Step 12. The same policy (same name, replaces step 11's): no errors, but every
+# /chaos request is held for 2 s before it goes on - a slow dependency, on
+# demand.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: chaos
+  namespace: envoy-14
+spec:
+  targetRefs:
+  - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: chaos }
+  faultInjection:
+    delay:
+      fixedDelay: 2s
+      percentage: 100

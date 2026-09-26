@@ -15,7 +15,8 @@ deploy() {
   $KUBE apply -n "$NS" -f ../_shared/client.yaml -f ../_shared/echo-app.yaml -f manifests/20-pool.yaml \
     -f manifests/30-sick-app.yaml -f manifests/35-slow-app.yaml -f manifests/40-routes.yaml >/dev/null
   $KUBE apply -f manifests/55-retry-and-eject.yaml -f manifests/60-circuit-breaker.yaml \
-    -f manifests/70-rate-limit.yaml -f manifests/80-jwt-cors.yaml >/dev/null
+    -f manifests/70-rate-limit.yaml -f manifests/80-jwt-cors.yaml \
+    -f manifests/85-routes-part-b.yaml -f manifests/91-fault-delay.yaml -f manifests/95-consistent-hash.yaml >/dev/null
   wait_ready echo; wait_ready good; wait_ready sick; wait_ready slow
   ok "Gateway eg programmed at $(gw_address "$NS" eg)"
 }
@@ -44,7 +45,8 @@ verify() {
   TOKEN=$(../06-http-filters/make-jwt.sh alice)
 
   say "1. the policies"
-  for p in backendtrafficpolicy/pool backendtrafficpolicy/slow backendtrafficpolicy/api securitypolicy/api; do
+  for p in backendtrafficpolicy/pool backendtrafficpolicy/slow backendtrafficpolicy/api securitypolicy/api \
+           backendtrafficpolicy/chaos backendtrafficpolicy/sticky; do
     assert "$p accepted" "True" "$(accepted "$p")"
   done
 
@@ -90,6 +92,31 @@ verify() {
     "$(incluster_sh "curl -s -o /dev/null -D - $PRE -H 'origin: https://shop.example.com' http://$ADDR/api")"
   assert "another origin is not allowed" "0" \
     "$(incluster_sh "curl -s -o /dev/null -D - $PRE -H 'origin: https://evil.example.com' http://$ADDR/api" | grep -ci '^access-control-allow-origin')"
+
+  say "7. fault injection on /chaos"
+  # Abort first (a route change: seconds), then back to the delay deploy left.
+  $KUBE apply -f manifests/90-fault-abort.yaml >/dev/null
+  ABORTS=0
+  for _ in $(seq 1 20); do
+    ABORTS=$(incluster_sh "for i in \$(seq 1 50); do curl -s http://$ADDR/chaos; echo; done" | grep -c 'fault filter abort')
+    [ "$ABORTS" -gt 0 ] && break; sleep 2
+  done
+  echo "  abort 30 %: $ABORTS of 50 aborted"
+  # 50 requests at 30 %: 15 expected; none at all is 0.7^50, about 2 in 100 million.
+  assert "the proxy aborted some, saying 'fault filter abort'" "yes" "$([ "$ABORTS" -gt 0 ] && echo yes || echo no)"
+  $KUBE apply -f manifests/91-fault-delay.yaml >/dev/null
+  T=0
+  for _ in $(seq 1 20); do
+    T=$(incluster_curl -o /dev/null -w '%{time_total}' "http://$ADDR/chaos")
+    awk -v t="$T" 'BEGIN { exit !(t >= 1.9) }' && break; sleep 2
+  done
+  assert "with the delay, a request takes about 2 s" "yes" "$(awk -v t="$T" 'BEGIN { print (t >= 1.9 && t < 3) ? "yes" : "no" }')"
+
+  say "8. consistent hashing on /sticky"
+  for u in alice bob carol; do
+    assert "$u: 10 requests, one pod" "1" \
+      "$(incluster_sh "for i in \$(seq 1 10); do curl -s -H 'x-user: $u' http://$ADDR/sticky | grep -o 'echo-[a-z0-9]*-[a-z0-9]*'; done" | sort -u | grep -c .)"
+  done
   summary
 }
 

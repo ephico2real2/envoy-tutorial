@@ -101,6 +101,7 @@ Waiting for deployment "echo" rollout to finish: 1 of 2 updated replicas are ava
 deployment "echo" successfully rolled out
 deployment "good" successfully rolled out
 deployment "sick" successfully rolled out
+Waiting for deployment "slow" rollout to finish: 0 of 1 updated replicas are available...
 deployment "slow" successfully rolled out
 $ oc wait -n envoy-14 --for=condition=Ready pod/client --timeout=120s
 pod/client condition met
@@ -112,8 +113,8 @@ Ninety requests to `/pool`:
 
 ```console
 $ oc exec -n envoy-14 client -- sh -c "for i in \$(seq 1 90); do curl -s -o /dev/null -w '%{http_code}\n' http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/pool; done" | sort | uniq -c
-  55 200
-  35 503
+  60 200
+  30 503
 ```
 
 **What just happened:** about one request in three failed — the sick pod's
@@ -205,11 +206,11 @@ pods:
 $ oc exec -n envoy-14 client -- sh -c "for i in \$(seq 1 30); do curl -s -o /dev/null -w '%{http_code}\n' http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/pool; done" | sort | uniq -c
   30 200
 $ ../_shared/eg-admin.sh envoy-14/eg clusters | grep '^httproute/envoy-14/pool/.*health_flags'
-httproute/envoy-14/pool/rule/0::10.217.0.252:8080::health_flags::healthy
-httproute/envoy-14/pool/rule/0::10.217.0.251:8080::health_flags::healthy
-httproute/envoy-14/pool/rule/0::10.217.0.253:8080::health_flags::/failed_outlier_check
+httproute/envoy-14/pool/rule/0::10.217.1.227:8080::health_flags::/failed_outlier_check
+httproute/envoy-14/pool/rule/0::10.217.1.226:8080::health_flags::healthy
+httproute/envoy-14/pool/rule/0::10.217.1.225:8080::health_flags::healthy
 $ oc get pod -n envoy-14 -l app=sick -o jsonpath='{.items[0].status.podIP}{"\n"}'
-10.217.0.253
+10.217.1.227
 ```
 
 **What just happened:** the sick pod's IP is marked **`/failed_outlier_check`** —
@@ -226,16 +227,16 @@ change, so wait again. Then ten requests at once:
 $ oc apply -f manifests/60-circuit-breaker.yaml
 backendtrafficpolicy.gateway.envoyproxy.io/slow created
 $ sleep 20; oc exec -n envoy-14 client -- sh -c "seq 1 10 | xargs -P 10 -I{} curl -s -o /dev/null -w '%{http_code} after %{time_total}s\n' http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/slow" | sort
-200 after 1.003958s
-200 after 1.004723s
-503 after 0.000316s
-503 after 0.002538s
-503 after 0.003492s
-503 after 0.003615s
-503 after 0.014001s
-503 after 0.014385s
-503 after 0.014712s
-503 after 0.015795s
+200 after 1.004895s
+200 after 1.004903s
+503 after 0.000369s
+503 after 0.001474s
+503 after 0.001716s
+503 after 0.001848s
+503 after 0.002422s
+503 after 0.002423s
+503 after 0.002547s
+503 after 0.003185s
 $ ../_shared/eg-admin.sh envoy-14/eg 'config_dump?resource=dynamic_active_clusters' | python3 -c 'import json,sys; [print(json.dumps(c["cluster"]["circuit_breakers"])) for c in json.load(sys.stdin)["configs"] if "/slow/" in c["cluster"]["name"]]'
 {"thresholds": [{"max_connections": 1024, "max_pending_requests": 2, "max_requests": 2, "max_retries": 1024}]}
 ```
@@ -311,8 +312,8 @@ bucket is empty:
 
 ```console
 $ sleep 20; oc exec -n envoy-14 client -- curl -s -H "authorization: Bearer $(../06-http-filters/make-jwt.sh alice)" "http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/api" | grep -E '"(served_by|x-user|authorization)"'
-  "served_by": "echo-f8fc6d5c9-sk4n2",
-    "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InR1dG9yaWFsIn0.eyJpc3MiOiJlbnZveS10dXRvcmlhbCIsInN1YiI6ImFsaWNlIiwiZXhwIjoxNzkwNDA1Nzc4fQ.j1GpiluDJl4kadNdzr9kthx203OjfT3XQiL3Vpo0G_0",
+  "served_by": "echo-f8fc6d5c9-sxc29",
+    "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InR1dG9yaWFsIn0.eyJpc3MiOiJlbnZveS10dXRvcmlhbCIsInN1YiI6ImFsaWNlIiwiZXhwIjoxNzkwNDA4MzUzfQ.boKQbktUMJeCE53XjVLNjGjirVGecFqcJRRgDkbppaY",
     "x-user": "alice"
 ```
 
@@ -322,6 +323,11 @@ first. One difference from module 06: the app also received the
 **`authorization`** header. Plain Envoy removes the token once verified (`forward`
 defaults to `false`); Envoy Gateway sets `forward: true`, so the token travels on.
 If the app should not see it, that is a setting to know about.
+
+This step's key is module 06's shared secret — printed in this repository, fine
+for seeing the mechanics and nothing else. Modules [`16`](../16-keycloak/README.md)
+and [`17`](../17-keycloak-jwt/README.md) do it properly: Keycloak signs with a
+private key, and the Gateway checks with the public one.
 
 ### Step 8 — CORS
 
@@ -368,7 +374,87 @@ caller without a valid token is refused without spending a token of the limit.
 With Envoy Gateway you do not choose the order — the filters it adds each have a
 fixed place.
 
-### Step 10 — check yourself
+## Part B — more from BackendTrafficPolicy
+
+Two more things the same policy does — each on a route of its own, because a
+route takes one `BackendTrafficPolicy` (troubleshooting, below).
+[`manifests/85-routes-part-b.yaml`](manifests/85-routes-part-b.yaml) adds
+`/chaos` and `/sticky`, both to the echo app:
+
+```console
+$ oc apply -f manifests/85-routes-part-b.yaml
+httproute.gateway.networking.k8s.io/chaos created
+httproute.gateway.networking.k8s.io/sticky created
+```
+
+### Step 10 — fault injection: fail on purpose
+
+[`manifests/90-fault-abort.yaml`](manifests/90-fault-abort.yaml) makes the
+**proxy** answer 30 % of `/chaos` requests with a `503` — the echo app is fine.
+It is how you test, on purpose, what your callers do when a dependency fails:
+
+```console
+$ oc apply -f manifests/90-fault-abort.yaml
+backendtrafficpolicy.gateway.envoyproxy.io/chaos created
+$ sleep 5; oc exec -n envoy-14 client -- sh -c "for i in \$(seq 1 100); do curl -s -o /dev/null -w '%{http_code}\n' http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/chaos; done" | sort | uniq -c
+  71 200
+  29 503
+$ for i in $(seq 1 30); do oc exec -n envoy-14 client -- curl -s "http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/chaos" | grep 'fault filter abort' && break; done
+fault filter abort
+```
+
+**What just happened:** about 30 in 100 failed — **about**: each request draws
+its own chance, unlike module 13's weighted split, which follows a schedule. The
+failed ones say `fault filter abort`: Envoy's **fault** filter answered, and no
+request reached the app.
+
+### Step 11 — fault injection: slow on purpose
+
+[`manifests/91-fault-delay.yaml`](manifests/91-fault-delay.yaml) is the same
+policy (same name — it replaces step 10's): no errors, but every request held for
+**2 s**. A slow dependency, on demand — the way to find the timeouts you forgot:
+
+```console
+$ oc apply -f manifests/91-fault-delay.yaml
+backendtrafficpolicy.gateway.envoyproxy.io/chaos configured
+$ sleep 5; oc exec -n envoy-14 client -- sh -c "for i in 1 2 3; do curl -s -o /dev/null -w '%{http_code} after %{time_total}s\n' http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/chaos; done"
+200 after 1.997668s
+200 after 1.995999s
+200 after 1.997996s
+$ ../_shared/eg-admin.sh envoy-14/eg 'config_dump?resource=dynamic_route_configs' | python3 -c 'import json,sys; [print(json.dumps(r["typed_per_filter_config"]["envoy.filters.http.fault"])) for rc in json.load(sys.stdin)["configs"] for vh in rc["route_config"]["virtual_hosts"] for r in vh["routes"] if "/chaos/" in r["route"].get("cluster", "")]'
+{"@type": "type.googleapis.com/envoy.extensions.filters.http.fault.v3.HTTPFault", "delay": {"fixed_delay": "2s", "percentage": {"numerator": 1000000, "denominator": "MILLION"}}}
+```
+
+**What just happened:** each request took two seconds and then succeeded. Envoy
+got the **fault** filter, configured per route. A fault is a **route** change, so
+it arrives in seconds — not the 15 s of a cluster change.
+
+### Step 12 — consistent hashing: one user, one pod
+
+[`manifests/95-consistent-hash.yaml`](manifests/95-consistent-hash.yaml) sets
+`/sticky`'s load balancer to **`ConsistentHash`** on the header `x-user`: the pod
+is chosen from a hash of the header, so the same user keeps landing on the same
+pod — module 05's `RING_HASH`, step 10:
+
+```console
+$ oc apply -f manifests/95-consistent-hash.yaml
+backendtrafficpolicy.gateway.envoyproxy.io/sticky created
+$ sleep 20; for u in alice bob carol dave; do printf '%-6s' "$u"; oc exec -n envoy-14 client -- sh -c "for i in \$(seq 1 10); do curl -s -H 'x-user: $u' http://$(oc get gateway eg -n envoy-14 -o jsonpath='{.status.addresses[0].value}')/sticky | grep -o 'echo-[a-z0-9]*-[a-z0-9]*'; done" | sort | uniq -c | tr -s ' \n' ' '; echo; done
+alice  10 echo-f8fc6d5c9-f6pnp 
+bob    10 echo-f8fc6d5c9-sxc29 
+carol  10 echo-f8fc6d5c9-sxc29 
+dave   10 echo-f8fc6d5c9-sxc29 
+$ ../_shared/eg-admin.sh envoy-14/eg 'config_dump?resource=dynamic_active_clusters' | python3 -c 'import json,sys; [print(p["typed_extension_config"]["name"], p["typed_extension_config"]["typed_config"].get("table_size")) for c in json.load(sys.stdin)["configs"] if "/sticky/" in c["cluster"]["name"] for p in c["cluster"]["load_balancing_policy"]["policies"]]'
+envoy.load_balancing_policies.maglev 65537
+```
+
+**What just happened:** ten requests per user, one pod per user. Envoy got a
+`hash_policy` on the header, and — where module 05 used a ring hash — the
+**Maglev** load balancer, another consistent-hash algorithm, with a table of
+65 537 entries. The load balancer is part of the **cluster**, so this change took
+the cluster's 15 s — hence the `sleep 20`.
+
+### Step 13 — check yourself
 
 ```console
 $ ./run.sh verify
@@ -378,6 +464,8 @@ $ ./run.sh verify
   ✓ backendtrafficpolicy/slow accepted
   ✓ backendtrafficpolicy/api accepted
   ✓ securitypolicy/api accepted
+  ✓ backendtrafficpolicy/chaos accepted
+  ✓ backendtrafficpolicy/sticky accepted
 
 2. retry and passive health check on /pool (two good pods, one sick)
   ✓ 90 requests, 90 succeed
@@ -385,7 +473,7 @@ $ ./run.sh verify
   ✓ the sick pod is ejected
 
 3. circuit breaker on /slow (2 in flight, 2 waiting)
-  10 at once: 2 answered, 8 refused
+  10 at once: 3 answered, 7 refused
   ✓ 2 to 4 answered
   ✓ the other requests were refused with 503
   ✓ every refusal came back at once
@@ -397,13 +485,23 @@ $ ./run.sh verify
   ✓ the app is told the verified subject
 
 5. rate limit on /api (3 a minute)
-  5 requests at once: 200 429 429 429 429 
+  5 requests at once: 200 200 429 429 429 
   ✓ at least 2 of 5 refused with 429
   ✓ a 429 says the limit
 
 6. CORS on /api
   ✓ shop.example.com may call it
   ✓ another origin is not allowed
+
+7. fault injection on /chaos
+  abort 30 %: 12 of 50 aborted
+  ✓ the proxy aborted some, saying 'fault filter abort'
+  ✓ with the delay, a request takes about 2 s
+
+8. consistent hashing on /sticky
+  ✓ alice: 10 requests, one pod
+  ✓ bob: 10 requests, one pod
+  ✓ carol: 10 requests, one pod
 
 all checks passed
 ```
@@ -418,7 +516,8 @@ all checks passed
 | `healthCheck.passive` | 2 × 5xx, 1 s, 30 s, 50 % | the cluster's `outlier_detection` |
 | `circuitBreaker.maxParallelRequests` / `maxPendingRequests` | `2`, `2` | `circuit_breakers.thresholds` |
 | `rateLimit.local.rules[].limit` | 3 per minute | `local_ratelimit`: a bucket of 3, 3 tokens per 60 s, enabled and enforced |
-| `loadBalancer.type` | — (not set) | `least_request` by default; also `RoundRobin`, `Random`, `ConsistentHash` |
+| `faultInjection.abort` / `.delay` | 30 % → 503; 2 s for all (Part B) | the `fault` filter, per route |
+| `loadBalancer.type` | `ConsistentHash` on `x-user` (Part B); otherwise not set | `hash_policy` + Maglev; unset, `least_request`. Also `RoundRobin`, `Random` |
 
 **`SecurityPolicy`**
 
@@ -454,8 +553,9 @@ removes it.
 
 ## The shortcut
 
-`./run.sh deploy` does steps 1 to 8 (with step 4's policy in place of step 3's);
-`./run.sh verify` is step 10; `./run.sh clean` is the clean-up.
+`./run.sh deploy` does steps 1 to 12 (with step 4's policy in place of step 3's,
+and step 11's in place of step 10's); `./run.sh verify` is step 13;
+`./run.sh clean` is the clean-up.
 
 ## References
 
