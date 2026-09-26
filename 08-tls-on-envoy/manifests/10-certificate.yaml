@@ -1,0 +1,21 @@
+# Ask cert-manager for a certificate, signed by the cluster's enterprise CA.
+#
+# cert-manager does the work: it makes a private key, has the issuer sign a
+# certificate for these names, and stores both - plus the CA that signed it -
+# in the Secret `shop-tls`. It renews the certificate before it expires, too.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: shop-tls
+spec:
+  secretName: shop-tls
+  # Every name a client may use to reach Envoy. A name missing here is a
+  # certificate error for whoever uses it - step 5 shows one.
+  dnsNames:
+  - shop.apps-crc.testing                 # the OpenShift passthrough Route
+  - shop-reencrypt.apps-crc.testing       # the reencrypt Route
+  - envoy.envoy-08.svc                    # in-cluster clients
+  issuerRef:
+    name: enterprise-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
