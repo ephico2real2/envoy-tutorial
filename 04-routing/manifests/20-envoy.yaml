@@ -1,0 +1,47 @@
+# The proxy. Simpler than module 03's: routing needs no certificates, so there
+# is no cert-generating initContainer and one plaintext port instead of two.
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy
+  labels: { app: envoy }
+spec:
+  selector: { app: envoy }
+  ports:
+  - { name: http,  port: 8080, targetPort: 8080 }
+  - { name: admin, port: 9901, targetPort: 9901 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy
+  labels: { app: envoy }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: envoy } }
+  template:
+    metadata:
+      labels: { app: envoy }
+    spec:
+      containers:
+      - name: envoy
+        image: envoyproxy/envoy:v1.39-latest
+        args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+        ports:
+        - { name: http,  containerPort: 8080 }
+        - { name: admin, containerPort: 9901 }
+        readinessProbe:
+          httpGet: { path: /ready, port: 9901 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        volumeMounts:
+        - { name: config, mountPath: /etc/envoy/envoy.yaml, subPath: envoy.yaml }
+        resources:
+          requests: { cpu: "50m",  memory: "64Mi" }
+          limits:   { cpu: "500m", memory: "256Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+      volumes:
+      - name: config
+        configMap: { name: envoy-config }

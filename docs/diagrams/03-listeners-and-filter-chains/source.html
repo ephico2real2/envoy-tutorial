@@ -1,0 +1,106 @@
+<title>Chain Versus Vhost</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 03 · listeners and filter chains</div>
+    <h1>Two ways to route by name, and when each can see the name</h1>
+    <p class="lede">The diagram from <code>03-listeners-and-filter-chains/README.md</code>, rendered — the path a connection takes through this module's TLS listener on port 8443.</p>
+  </header>
+
+  <section>
+    <h2>Five stages, in order</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 960 486" role="img" aria-label="A TCP connection passes five stages in order: listener filters run, where tls_inspector reads SNI; filter_chain_match picks one chain, where SNI is available and the Host header is not; transport_socket terminates TLS with the chain&#x27;s own certificate; http_connection_manager, where there is now HTTP; and virtual_hosts match domains, where the Host header is available.">
+  <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="a3g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="20" y="16" width="920" height="420" rx="10" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="40" y="42" font-weight="600">TCP connection arrives</text>
+<rect x="60" y="60" width="380" height="54" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="74" y="92" font-family="IBM Plex Mono, monospace" font-size="12">1. listener_filters run</text>
+<text x="480" y="82">tls_inspector peeks at the</text>
+<text x="480" y="99">ClientHello and reads SNI</text>
+<line x1="250" y1="114" x2="250" y2="132" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+<rect x="60" y="134" width="380" height="54" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="74" y="156" font-family="IBM Plex Mono, monospace" font-size="12">2. filter_chain_match</text>
+<text x="74" y="173">picks ONE chain</text>
+<text x="480" y="156" fill="var(--remote)" font-weight="600">← SNI available here</text>
+<text x="480" y="173" fill="var(--gap)" font-weight="600">Host header is NOT</text>
+<line x1="250" y1="188" x2="250" y2="206" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+<rect x="60" y="208" width="380" height="54" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="74" y="230" font-family="IBM Plex Mono, monospace" font-size="12">3. transport_socket</text>
+<text x="74" y="247">terminates TLS</text>
+<text x="480" y="239">the chain&#x27;s own certificate</text>
+<line x1="250" y1="262" x2="250" y2="280" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+<rect x="60" y="282" width="380" height="54" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="74" y="314" font-family="IBM Plex Mono, monospace" font-size="12">4. http_connection_manager</text>
+<text x="480" y="313" fill="var(--host)" font-weight="600">now there is HTTP</text>
+<line x1="250" y1="336" x2="250" y2="354" stroke="currentColor" stroke-width="1.3" marker-end="url(#a3)"/>
+<rect x="60" y="356" width="380" height="54" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="74" y="388" font-family="IBM Plex Mono, monospace" font-size="12">5. virtual_hosts match domains</text>
+<text x="480" y="387" fill="var(--host)" font-weight="600">← Host header available here</text>
+<text x="20" y="468" font-weight="600">A filter chain is chosen before a single byte of HTTP has been parsed. A virtual host is chosen after.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>A filter chain is chosen at stage 2, where SNI is available and the Host header is not; a virtual host at stage 5, once there is HTTP.</figcaption>
+    </figure>
+  </section>
+</div>

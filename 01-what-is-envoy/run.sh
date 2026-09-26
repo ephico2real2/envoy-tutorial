@@ -10,10 +10,12 @@ deploy() {
   $KUBE apply -n "$NS" -f ../_shared/echo-app.yaml >/dev/null
   $KUBE apply -n "$NS" -f manifests/ >/dev/null
   wait_ready echo; wait_ready envoy
+  wait_upstream echo_service
   ok "echo and envoy are up"
 }
 
 verify() {
+  client_ready
   say "1. the backend is reachable directly (no Envoy involved)"
   DIRECT=$(incluster_curl "http://echo.$NS.svc:8080/direct")
   assert_contains "echo answers on its own" '"served_by"' "$DIRECT"
@@ -38,10 +40,9 @@ verify() {
   done
 
   say "4. Envoy is load balancing, not just forwarding"
-  # The helper passes its arguments to curl, so a shell loop needs its own pod.
-  SEEN=$($KUBE run lb-$RANDOM -n "$NS" --rm -i --restart=Never --quiet \
-           --image=curlimages/curl:8.11.1 --command -- \
-           sh -c "for i in \$(seq 1 12); do curl -s http://envoy.$NS.svc:8080/; done" 2>/dev/null \
+  # Twelve requests over two pods: if Envoy were only forwarding, one pod
+  # would answer them all. (How evenly they split is module 05's subject.)
+  SEEN=$(for _ in $(seq 1 12); do incluster_curl "http://envoy.$NS.svc:8080/"; done \
          | grep served_by | sort -u | wc -l | tr -d ' ')
   [ "${SEEN:-0}" -ge 2 ] && ok "reached $SEEN distinct backend pods over 12 requests" \
                          || { bad "only ${SEEN:-0} pod(s) answered — expected 2"; FAILED=$((FAILED+1)); }

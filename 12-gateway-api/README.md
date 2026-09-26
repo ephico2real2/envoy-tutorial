@@ -19,24 +19,13 @@ That last row is the point. A single `envoy.yaml` is a contention point — ever
 team that wants a route edits the same file. The Gateway API splits it along
 the line the org already has.
 
-```text
-  cluster operator                      application team
-  ┌────────────────────┐                ┌────────────────────┐
-  │ GatewayClass       │                │ HTTPRoute          │
-  │  which controller  │                │  paths, backends   │
-  ├────────────────────┤                │  in THEIR namespace│
-  │ Gateway            │◀── attaches ───┤                    │
-  │  ports, TLS, who   │   (allowedRoutes) └──────────────────┘
-  │  may attach        │
-  └─────────┬──────────┘
-            │ controller generates
-            ▼
-  ┌────────────────────┐        ┌────────────────────┐
-  │ Envoy Deployment   │───────▶│ your Service       │
-  │ + LoadBalancer Svc │        └────────────────────┘
-  │ (you do not edit)  │
-  └────────────────────┘
-```
+<!-- markdownlint-disable MD033 -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/12-gateway-api/ownership.dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/12-gateway-api/ownership.light.png">
+  <img alt="The cluster operator owns the GatewayClass, which names the controller, and the Gateway: ports, TLS, and who may attach. The application team's HTTPRoute holds paths and backends and attaches to the Gateway, subject to allowedRoutes. The controller generates an Envoy Deployment and LoadBalancer Service, which you do not edit, and which sends traffic to your Service." src="../docs/diagrams/12-gateway-api/ownership.light.png">
+</picture>
+<!-- markdownlint-enable MD033 -->
 
 ## Setup
 
@@ -122,3 +111,9 @@ Both are in [`setup/openshift.md`](setup/openshift.md) with the real output.
 - [Envoy Gateway](https://gateway.envoyproxy.io/)
 - [`EnvoyProxy` API](https://gateway.envoyproxy.io/docs/api/extension_types/#envoyproxy)
 - [MetalLB — IPAddressPool](https://metallb.universe.tf/configuration/)
+
+## Diagram sources
+
+The figures are rendered from [`docs/diagrams/12-gateway-api/source.html`](../docs/diagrams/12-gateway-api/source.html)
+(inline SVG, light and dark). Change the page and re-render the PNGs together,
+with the `/visual` skill's `render.py`.

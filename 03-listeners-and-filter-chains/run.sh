@@ -8,13 +8,16 @@ deploy() {
   say "deploying into $NS"
   ns_ensure
   $KUBE apply -n "$NS" -f ../_shared/echo-app.yaml >/dev/null
-  $KUBE apply -n "$NS" -f manifests/ >/dev/null
+  $KUBE apply -n "$NS" -f manifests/10-envoy-config.yaml -f manifests/20-envoy.yaml >/dev/null
+  # Routes are OpenShift-only; elsewhere the README skips step 8.
+  if has_routes; then $KUBE apply -n "$NS" -f manifests/30-routes.yaml >/dev/null; fi
   wait_ready echo; wait_ready envoy
   wait_upstream echo_service
   ok "echo and envoy are up"
 }
 
 verify() {
+  client_ready
   say "1. virtual hosts pick on the Host header (after HTTP is parsed)"
   for h in shop admin; do
     R=$(incluster_curl -i -H "Host: $h.apps-crc.testing" "http://envoy.$NS.svc:8080/")
@@ -27,37 +30,41 @@ verify() {
   for h in shop admin; do
     # --resolve maps the SNI name to the Service IP, so the TLS handshake
     # carries the right server_name without needing real DNS.
-    R=$($KUBE run sni-$RANDOM -n "$NS" --rm -i --restart=Never --quiet \
-        --image=curlimages/curl:8.11.1 -- \
-        -sS -i -k --max-time 10 --resolve "$h.apps-crc.testing:8443:$(svc_ip)" \
-        "https://$h.apps-crc.testing:8443/" 2>/dev/null)
+    R=$(incluster_curl -i -k --resolve "$h.apps-crc.testing:8443:$(svc_ip)" \
+        "https://$h.apps-crc.testing:8443/")
     assert_contains "SNI $h.apps-crc.testing -> chain sni-$h" "x-matched-chain: sni-$h" "$R"
   done
 
   say "3. each chain serves its own certificate"
   for h in shop admin; do
-    # s_client needs something on stdin or it prints DONE and exits before
-    # the handshake output appears. `echo Q |` is the usual incantation.
-    CN=$($KUBE run tls-$RANDOM -n "$NS" --rm -i --restart=Never --quiet \
-         --image=alpine/openssl:3.3.2 --command -- sh -c \
-         "echo Q | openssl s_client -connect $(svc_ip):8443 -servername $h.apps-crc.testing 2>/dev/null | grep -m1 subject=" \
-         2>/dev/null | tr -d ' ')
+    # curl's %{certs} write-out prints the certificate the server presented,
+    # so the same client pod reads it - no separate openssl image needed.
+    CN=$(incluster_curl -k -o /dev/null --resolve "$h.apps-crc.testing:8443:$(svc_ip)" \
+         -w '%{certs}' "https://$h.apps-crc.testing:8443/" | grep -m1 -i '^subject:' | tr -d ' ')
     assert_contains "SNI $h.apps-crc.testing is served the $h cert" "CN=$h.apps-crc.testing" "$CN"
   done
 
-  say "4. tls_inspector is in the running listener"
-  CD=$(incluster_curl "http://envoy.$NS.svc:9901/config_dump")
-  assert_contains "tls_inspector is present" "tls_inspector" "$CD"
+  say "4. tls_inspector is declared on the TLS listener"
+  # The listeners only: an unscoped /config_dump mentions tls_inspector even
+  # when no listener declares it (the README's "Try this" measured that), so a
+  # grep of the whole dump could never fail.
+  LD=$(incluster_curl "http://envoy.$NS.svc:9901/config_dump?resource=static_listeners")
+  assert_contains "tls_listener declares tls_inspector" "envoy.filters.listener.tls_inspector" "$LD"
 
-  say "5. the Routes are passthrough (edge would terminate TLS at the router)"
-  for h in shop admin; do
-    assert "route/$h is passthrough" "passthrough" \
-      "$($KUBE get route "$h" -n "$NS" -o jsonpath='{.spec.tls.termination}' 2>/dev/null)"
-  done
+  if has_routes; then
+    say "5. the Routes are passthrough (edge would terminate TLS at the router)"
+    for h in shop admin; do
+      assert "route/$h is passthrough" "passthrough" \
+        "$($KUBE get route "$h" -n "$NS" -o jsonpath='{.spec.tls.termination}' 2>/dev/null)"
+    done
+  else
+    say "5. skipped: this cluster has no OpenShift Routes (README step 8)"
+  fi
   summary
 }
 
 svc_ip() { $KUBE get svc envoy -n "$NS" -o jsonpath='{.spec.clusterIP}'; }
+has_routes() { $KUBE api-resources --api-group=route.openshift.io 2>/dev/null | grep -q '^routes'; }
 
 clean() { $KUBE delete ns "$NS" --wait=false >/dev/null 2>&1; ok "namespace $NS deleting"; }
 

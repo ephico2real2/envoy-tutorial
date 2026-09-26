@@ -1,0 +1,146 @@
+<title>Gateway API Ownership</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 12 · the Gateway API</div>
+    <h1>Who owns which object, and which API each belongs to</h1>
+    <p class="lede">The diagrams from <code>12-gateway-api/README.md</code> and <code>12-gateway-api/setup/README.md</code>, rendered.</p>
+  </header>
+
+  <section>
+    <h2>Who owns what</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 920 468" role="img" aria-label="The cluster operator owns the GatewayClass, which names the controller, and the Gateway: ports, TLS, and who may attach. The application team&#x27;s HTTPRoute holds paths and backends and attaches to the Gateway, subject to allowedRoutes. Below them, the controller generates an Envoy Deployment and LoadBalancer Service, which you do not edit, and traffic flows down from it to your Service.">
+  <defs><marker id="c1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="c1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<text x="20" y="32" fill="var(--host)" font-weight="600">cluster operator</text>
+<text x="560" y="32" fill="var(--remote)" font-weight="600">application team</text>
+<rect x="20" y="44" width="340" height="140" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<line x1="20" y1="114" x2="360" y2="114" stroke="var(--host)" stroke-width="1.3"/>
+<text x="36" y="68" font-weight="600">GatewayClass</text>
+<text x="36" y="85">which controller</text>
+<text x="36" y="138" font-weight="600">Gateway</text>
+<text x="36" y="155">ports, TLS, who may attach</text>
+<rect x="560" y="100" width="340" height="84" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="574" y="121" font-weight="600">HTTPRoute</text>
+<text x="574" y="138">paths, backends</text>
+<text x="574" y="155">in THEIR namespace *</text>
+<line x1="560" y1="150" x2="362" y2="150" stroke="currentColor" stroke-width="1.3" marker-end="url(#c1)"/>
+<text x="460" y="142" text-anchor="middle" fill="var(--muted)">attaches</text>
+<text x="460" y="168" text-anchor="middle" fill="var(--muted)">(allowedRoutes)</text>
+<line x1="190" y1="184" x2="190" y2="254" stroke="currentColor" stroke-width="1.3" marker-end="url(#c1)"/>
+<text x="202" y="224" fill="var(--muted)">controller generates</text>
+<rect x="20" y="256" width="340" height="80" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="34" y="277" font-weight="600">Envoy Deployment</text>
+<text x="34" y="294">+ LoadBalancer Svc</text>
+<text x="34" y="311" fill="var(--muted)">(you do not edit)</text>
+<line x1="190" y1="336" x2="190" y2="398" stroke="currentColor" stroke-width="1.3" marker-end="url(#c1)"/>
+<text x="202" y="372" fill="var(--muted)">traffic</text>
+<rect x="20" y="400" width="340" height="48" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="34" y="429" font-weight="600">your Service</text>
+<text x="560" y="226" fill="var(--muted)">* only where the Gateway&#x27;s allowedRoutes</text>
+<text x="560" y="244" fill="var(--muted)">admits it. This module&#x27;s Gateway says</text>
+<text x="560" y="262" fill="var(--muted)">from: Same, so its HTTPRoute sits beside it</text>
+<text x="560" y="280" fill="var(--muted)">in gwapi-demo; a route from another</text>
+<text x="560" y="298" fill="var(--muted)">namespace was measured Accepted=False,</text>
+<text x="560" y="316" fill="var(--muted)">NotAllowedByListeners.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>The cluster operator owns the GatewayClass and the Gateway; the application team&#x27;s HTTPRoute attaches to it, subject to allowedRoutes; the controller generates the Envoy Deployment and LoadBalancer Service.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Two API groups, one controller</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 800 410" role="img" aria-label="What you write falls into two API groups that the same Gateway controller, Envoy Gateway here, implements: Gateway, HTTPRoute and GRPCRoute in the standard gateway.networking.k8s.io API, portable across vendors; and EnvoyProxy, SecurityPolicy and the rest in the vendor extension group gateway.envoyproxy.io, Envoy Gateway only.">
+  <defs><marker id="c2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="c2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<text x="20" y="30" font-weight="600">what YOU write</text>
+<text x="540" y="30" font-weight="600">who implements it</text>
+<rect x="20" y="44" width="300" height="80" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="34" y="65" font-weight="600">Gateway</text>
+<text x="34" y="82">HTTPRoute  /  GRPCRoute</text>
+<text x="34" y="99" font-family="IBM Plex Mono, monospace" font-size="12">gateway.networking.k8s.io</text>
+<path d="M320,84 H500 V186" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#c2)"/>
+<text x="516" y="104" font-weight="600" fill="var(--remote)">the STANDARD api</text>
+<text x="516" y="121" font-family="IBM Plex Mono, monospace" font-size="12">gateway.networking.k8s.io</text>
+<text x="516" y="138" fill="var(--muted)">portable across vendors</text>
+<rect x="380" y="188" width="240" height="60" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="394" y="209" font-weight="600">a Gateway controller</text>
+<text x="394" y="226" fill="var(--muted)">(Envoy Gateway here)</text>
+<rect x="20" y="312" width="300" height="80" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="34" y="333" font-weight="600">EnvoyProxy</text>
+<text x="34" y="350">SecurityPolicy   etc.</text>
+<text x="34" y="367" font-family="IBM Plex Mono, monospace" font-size="12">gateway.envoyproxy.io</text>
+<path d="M320,352 H500 V250" fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#c2)"/>
+<text x="516" y="300" fill="var(--host)" font-weight="600">VENDOR extensions</text>
+<text x="516" y="317" font-family="IBM Plex Mono, monospace" font-size="12">gateway.envoyproxy.io</text>
+<text x="516" y="334" fill="var(--muted)">Envoy Gateway only</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>The standard gateway.networking.k8s.io API is portable across vendors; the gateway.envoyproxy.io extensions are Envoy Gateway only. One controller implements both.</figcaption>
+    </figure>
+  </section>
+</div>

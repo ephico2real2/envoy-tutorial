@@ -1,0 +1,202 @@
+# Module 04 — one listener, one virtual host, thirteen routes (numbered 1-11;
+# 8b and 8c are variations on 8).
+#
+# The rule this file exists to demonstrate: routes are tried IN ORDER and the
+# FIRST match wins. That is the opposite of filter chains in module 03, where
+# Envoy picks the most specific match regardless of the order written. Moving
+# the catch-all at the bottom to the top makes every other route unreachable,
+# and Envoy will not warn you — it is a legal config that routes everything to
+# one place.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-config
+data:
+  envoy.yaml: |
+    admin:
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+    static_resources:
+      listeners:
+      - name: http_listener
+        address:
+          socket_address: { address: 0.0.0.0, port_value: 8080 }
+        filter_chains:
+        - filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: http
+              # Without this there is no x-forwarded-for. It defaults to false,
+              # which surprises everyone once.
+              use_remote_address: true
+              route_config:
+                name: routing
+                virtual_hosts:
+                - name: routing
+                  domains: ["*"]
+                  routes:
+
+                  # 1. EXACT path. Placed first deliberately: any `prefix: "/"`
+                  #    route above this line would shadow it completely.
+                  - match: { path: "/exact" }
+                    route: { cluster: echo_service }
+                    response_headers_to_add:
+                    - header: { key: x-matched-route, value: exact-path }
+
+                  # 2. REGEX (RE2). The pattern must match the WHOLE :path, so
+                  #    no ^ or $ is needed — and a pattern written to match only
+                  #    part of the path silently never matches at all.
+                  - match:
+                      safe_regex: { regex: "/order/[0-9]+" }
+                    route: { cluster: echo_service }
+                    response_headers_to_add:
+                    - header: { key: x-matched-route, value: regex }
+
+                  # 3. HEADER match. The prefix is "/" so the header is the only
+                  #    discriminator. Its position matters: a canary request to
+                  #    /api/v1/thing lands HERE, not on the rewrite route below,
+                  #    because this line comes first.
+                  - match:
+                      prefix: "/"
+                      headers:
+                      - name: x-canary
+                        string_match: { exact: "yes" }
+                    route: { cluster: echo_service }
+                    response_headers_to_add:
+                    - header: { key: x-matched-route, value: header-canary }
+
+                  # 4. QUERY PARAMETER match. Same shape as the header matcher.
+                  - match:
+                      prefix: "/"
+                      query_parameters:
+                      - name: debug
+                        string_match: { exact: "1" }
+                    route: { cluster: echo_service }
+                    response_headers_to_add:
+                    - header: { key: x-matched-route, value: query-debug }
+
+                  # 5. PREFIX REWRITE. The upstream is sent the path with the
+                  #    matched prefix replaced. The echo app returns the path it
+                  #    received, so the rewrite is visible in the response body
+                  #    rather than having to be taken on trust.
+                  - match: { prefix: "/api/v1/" }
+                    route:
+                      cluster: echo_service
+                      prefix_rewrite: "/"
+                    response_headers_to_add:
+                    - header: { key: x-matched-route, value: prefix-rewrite }
+
+                  # 6. REGEX REWRITE with a capture group. Single-quoted so the
+                  #    backslash reaches Envoy literally; in double quotes \1 is
+                  #    an invalid YAML escape and Envoy refuses the file.
+                  - match:
+                      safe_regex: { regex: "/user/[0-9]+/profile" }
+                    route:
+                      cluster: echo_service
+                      regex_rewrite:
+                        pattern: { regex: '/user/([0-9]+)/profile' }
+                        substitution: '/profile/\1'
+                    response_headers_to_add:
+                    - header: { key: x-matched-route, value: regex-rewrite }
+
+                  # 7. HOST REWRITE. Changes the Host header sent upstream. The
+                  #    echo app echoes its headers back, so the new value shows.
+                  #    This is what a virtual-hosted upstream needs; without it
+                  #    the upstream sees the client's original Host.
+                  - match: { prefix: "/rewrite-host" }
+                    route:
+                      cluster: echo_service
+                      host_rewrite_literal: "upstream.internal"
+                    response_headers_to_add:
+                    - header: { key: x-matched-route, value: host-rewrite }
+
+                  # 8. TIMEOUT shorter than the upstream's 1s delay -> 504.
+                  #    Envoy also forwards the budget as
+                  #    x-envoy-expected-rq-timeout-ms so the upstream can give
+                  #    up too. NOTE: add a retry policy and that header carries
+                  #    per_try_timeout instead of this value (module 11).
+                  - match: { prefix: "/slow" }
+                    route:
+                      cluster: slow_service
+                      timeout: 0.25s
+                    response_headers_to_add:
+                    - header: { key: x-matched-route, value: timeout-250ms }
+
+                  # 8b. The same slow upstream with room to finish, for contrast.
+                  #     Also a different MATCHER than 8: `prefix: "/slow"` is
+                  #     plain string comparison, so it matches /slowpoke too.
+                  #     path_separated_prefix matches /patient and /patient/...
+                  #     but not /patients - it respects path segments.
+                  - match: { path_separated_prefix: "/patient" }
+                    route:
+                      cluster: slow_service
+                      timeout: 5s
+                    response_headers_to_add:
+                    - header: { key: x-matched-route, value: timeout-5s }
+
+                  # 8c. A timeout against the FAST upstream, so the budget
+                  #     Envoy forwards is visible: the echo app returns the
+                  #     headers it received, and x-envoy-expected-rq-timeout-ms
+                  #     is one of them. That is how a timeout can be observed
+                  #     without having to make it fire.
+                  - match: { prefix: "/budget" }
+                    route:
+                      cluster: echo_service
+                      timeout: 1.234s
+                    response_headers_to_add:
+                    - header: { key: x-matched-route, value: timeout-budget }
+
+                  # 9. REDIRECT. No cluster is named — Envoy answers this itself
+                  #    and never contacts an upstream.
+                  - match: { path: "/old" }
+                    redirect:
+                      path_redirect: "/exact"
+                      response_code: MOVED_PERMANENTLY
+
+                  # 10. DIRECT RESPONSE. Also answered by Envoy alone. Useful for
+                  #     health endpoints that must survive every upstream being
+                  #     down, which a route to a cluster would not.
+                  - match: { path: "/healthz" }
+                    direct_response:
+                      status: 200
+                      body: { inline_string: "ok\n" }
+
+                  # 11. CATCH-ALL, and it must be LAST. First match wins, so
+                  #     moved to the top it makes all twelve routes above it
+                  #     dead config. `./run.sh shadow` measures exactly that.
+                  - match: { prefix: "/" }
+                    route: { cluster: echo_service }
+                    response_headers_to_add:
+                    - header: { key: x-matched-route, value: catch-all }
+
+              http_filters:
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      clusters:
+      - name: echo_service
+        type: STRICT_DNS
+        lb_policy: ROUND_ROBIN
+        connect_timeout: 2s
+        load_assignment:
+          cluster_name: echo_service
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address: { address: echo, port_value: 8080 }
+
+      - name: slow_service
+        type: STRICT_DNS
+        lb_policy: ROUND_ROBIN
+        connect_timeout: 2s
+        load_assignment:
+          cluster_name: slow_service
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address: { address: slow, port_value: 8080 }

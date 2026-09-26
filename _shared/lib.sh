@@ -6,9 +6,17 @@
 # NS defaults to the module's own namespace so modules never collide and any
 # one of them can be run on its own.
 set -uo pipefail
-: "${KUBECONFIG:=$HOME/.crc/machines/crc/kubeconfig}"
-export KUBECONFIG
 KUBE=$(command -v oc >/dev/null 2>&1 && echo oc || echo kubectl)
+
+# Use the same cluster and identity as the reader's own `oc`: their KUBECONFIG,
+# or ~/.kube/config. Only when that has no current context fall back to CRC's
+# machine kubeconfig. An earlier version always forced the CRC file, which ran
+# the scripts as system:admin while the reader's `oc` was kubeadmin, and broke
+# every script on a machine without CRC.
+if ! $KUBE config current-context >/dev/null 2>&1 \
+   && [ -f "$HOME/.crc/machines/crc/kubeconfig" ]; then
+  export KUBECONFIG="$HOME/.crc/machines/crc/kubeconfig"
+fi
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
@@ -59,6 +67,7 @@ wait_ready() {
 # not - so wait for the cluster to actually have a member before asserting.
 wait_upstream() {
   cluster=$1; svc=${2:-envoy}; tries=${3:-30}
+  client_ready
   for _ in $(seq 1 "$tries"); do
     if incluster_curl "http://$svc.$NS.svc:9901/clusters" 2>/dev/null \
          | grep -q "^${cluster}::[0-9].*::cx_total"; then
@@ -69,9 +78,37 @@ wait_upstream() {
   bad "upstream $cluster never got an endpoint"; exit 1
 }
 
-# Run a curl from inside the cluster. Nothing in these modules requires an
-# Ingress or a Route, so they work the same on kind as on OpenShift.
+# The long-lived in-cluster client from _shared/client.yaml - the same pod the
+# walkthroughs tell the reader to start. Idempotent; fatal if it never becomes
+# ready, because every check after it would fail for a reason that has nothing
+# to do with Envoy.
+client_ensure() {
+  $KUBE get pod client -n "$NS" >/dev/null 2>&1 \
+    || $KUBE apply -n "$NS" -f "$(dirname "${BASH_SOURCE[0]}")/client.yaml" >/dev/null
+  if ! $KUBE wait -n "$NS" --for=condition=Ready pod/client --timeout=120s >/dev/null 2>&1; then
+    bad "pod/client never became ready in $NS"
+    exit 1
+  fi
+}
+
+# Ensure the client once, in the script's own shell. It has to be called there:
+# nearly every incluster_curl runs inside $(...) or a pipeline, where both
+# client_ensure's `exit 1` and CLIENT_READY=1 end with the subshell - so a
+# client that never starts was retried (120s each) on every call, its error was
+# swallowed, and checks that pass on empty output passed. Every verify and
+# wait_upstream calls this first; subshells then inherit CLIENT_READY=1.
+CLIENT_READY=
+client_ready() {
+  [ -n "$CLIENT_READY" ] && return 0
+  client_ensure
+  CLIENT_READY=1
+}
+
+# Run a curl from inside the cluster, through the client pod. Nothing in these
+# modules requires an Ingress or a Route, so they work the same on kind as on
+# OpenShift. An earlier version used a throwaway `oc run --rm -i` per call; that
+# dropped the first line of output now and then and left Completed pods behind.
 incluster_curl() {
-  $KUBE run "curl-$RANDOM" -n "$NS" --rm -i --restart=Never --quiet \
-    --image=curlimages/curl:8.11.1 -- -sS --max-time 10 "$@" 2>/dev/null
+  [ -n "$CLIENT_READY" ] || client_ensure
+  $KUBE exec -n "$NS" client -- curl -sS --max-time 10 "$@" 2>/dev/null
 }

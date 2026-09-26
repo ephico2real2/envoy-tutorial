@@ -37,6 +37,7 @@ verify() {
   ok "address $ADDR"
 
   say "checking traffic actually flows"
+  client_ready
   BODY=$(incluster_curl "http://$ADDR/hello")
   assert_contains "backend answered"        '"served_by"'   "$BODY"
   assert_contains "path reached the backend" '"/hello"'     "$BODY"
@@ -51,6 +52,9 @@ clean() {
   $KUBE delete -n "$NS" -f ../_shared/echo-app.yaml --ignore-not-found >/dev/null 2>&1
   $KUBE delete -f manifests/30-gateway.yaml --ignore-not-found >/dev/null 2>&1
   $KUBE delete -f manifests/10-gatewayclass.yaml -f manifests/20-envoyproxy.yaml --ignore-not-found >/dev/null 2>&1
+  # verify's incluster_curl starts _shared/client.yaml here; this clean is not a
+  # namespace delete, so remove the pod by name.
+  $KUBE delete pod client -n "$NS" --ignore-not-found --wait=false >/dev/null 2>&1
   ok "removed (the Envoy Gateway install itself is left alone — see setup/)"
 }
 

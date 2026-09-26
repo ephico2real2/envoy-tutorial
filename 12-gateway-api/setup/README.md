@@ -28,25 +28,13 @@ whether Envoy Gateway, Istio, NGINX or Cilium implements it. The
 API has no vocabulary for — retry budgets, the proxy's own pod spec, WASM
 extensions.
 
-```text
-       what YOU write                      who implements it
-  ┌──────────────────────────┐
-  │ Gateway                  │ ─────────┐
-  │ HTTPRoute  /  GRPCRoute  │          │   the STANDARD api
-  │ gateway.networking.k8s.io│          │   gateway.networking.k8s.io
-  └──────────────────────────┘          │   portable across vendors
-                                        ▼
-                             ┌─────────────────────────┐
-                             │  a Gateway controller   │
-                             │  (Envoy Gateway here)   │
-                             └─────────────────────────┘
-                                        ▲
-  ┌──────────────────────────┐          │   VENDOR extensions
-  │ EnvoyProxy               │ ─────────┘   gateway.envoyproxy.io
-  │ SecurityPolicy   etc.    │              Envoy Gateway only
-  │ gateway.envoyproxy.io    │
-  └──────────────────────────┘
-```
+<!-- markdownlint-disable MD033 -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../docs/diagrams/12-gateway-api/api-groups.dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="../../docs/diagrams/12-gateway-api/api-groups.light.png">
+  <img alt="What you write falls into two API groups that the same Gateway controller, Envoy Gateway here, implements: Gateway, HTTPRoute and GRPCRoute in the standard gateway.networking.k8s.io API, portable across vendors; and EnvoyProxy, SecurityPolicy and the rest in the vendor extension group gateway.envoyproxy.io, Envoy Gateway only." src="../../docs/diagrams/12-gateway-api/api-groups.light.png">
+</picture>
+<!-- markdownlint-enable MD033 -->
 
 ## Why the platforms differ
 
@@ -65,7 +53,9 @@ already there.
 |---|---|---|
 | Who installs `gateway.networking.k8s.io` CRDs | **you** (the Helm chart) | **the platform** (Ingress Operator) |
 | Who installs `gateway.envoyproxy.io` CRDs | you | you |
-| `crds.gatewayAPI.enabled` | `true` (default) | **`false`** |
+| `gateway-helm` `crds.enabled` | `true` (default) — installs both CRD sets | **`false`** |
+| `gateway-crds-helm` `crds.gatewayAPI.enabled` | not used by the one-command install | `false` (also its default) |
+| `gateway-crds-helm` `crds.envoyGateway.enabled` | not used by the one-command install | **`true`** (default `false`) |
 | Extra work for pod security | none | an `EnvoyProxy` resource for the SCC |
 
 ## What you must NOT do on OpenShift 4.19+
@@ -140,3 +130,9 @@ different control plane.
 - [Gateway API — API specification](https://gateway-api.sigs.k8s.io/reference/spec/)
 - [OpenShift 4.22 — Configuring Gateway API](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/ingress_and_load_balancing/configuring-gateway-api)
 - [OpenShift — Managing security context constraints](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/authentication_and_authorization/managing-pod-security-policies)
+
+## Diagram sources
+
+The figures are rendered from [`docs/diagrams/12-gateway-api/source.html`](../../docs/diagrams/12-gateway-api/source.html)
+(inline SVG, light and dark). Change the page and re-render the PNGs together,
+with the `/visual` skill's `render.py`.

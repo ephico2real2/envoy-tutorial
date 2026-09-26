@@ -1,0 +1,277 @@
+<title>Envoy Routing Figures</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 04 · routing</div>
+    <h1>Routes: first match wins, and not every route reaches an upstream</h1>
+    <p class="lede">Every result drawn here was measured on the running proxy in namespace <code>envoy-04</code> by the README's steps 7–11 and <code>./run.sh verify</code> / <code>shadow</code>, against <code>04-routing/manifests/10-envoy-config.yaml</code>.</p>
+  </header>
+
+  <section>
+    <h2>First match wins</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 496" role="img" aria-label="Routes are tried in order and the first match wins. With the catch-all last, thirteen probes give thirteen different results. With the catch-all moved first, every probe returns catch-all and the twelve routes below it are never reached. Envoy accepts both configs, and nothing it logs mentions the order.">
+  <defs><marker id="ah1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+  <g font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600">
+    <rect x="30" y="14" width="440" height="30" rx="6" fill="var(--remote-wash)" stroke="var(--remote)"/>
+    <text x="250" y="34" text-anchor="middle" fill="var(--remote)">COMMITTED ORDER · catch-all last</text>
+    <rect x="510" y="14" width="440" height="30" rx="6" fill="var(--gap-wash)" stroke="var(--gap)"/>
+    <text x="730" y="34" text-anchor="middle" fill="var(--gap)">CATCH-ALL FIRST · ./run.sh shadow</text>
+  </g>
+  <line x1="490" y1="14" x2="490" y2="422" stroke="var(--rule)" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+    <g fill="var(--muted)" font-size="11.5">
+      <text x="68" y="72">match — tried top to bottom</text><text x="460" y="72" text-anchor="end">measured result</text>
+      <text x="548" y="72">match — tried top to bottom</text><text x="940" y="72" text-anchor="end">measured result</text>
+    </g>
+    <line x1="16" y1="84" x2="16" y2="418" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#ah1)"/>
+<rect x="30" y="84" width="440" height="22" rx="4" fill="none" stroke="var(--rule)"/>
+<text x="48" y="99" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">1</text>
+<text x="68" y="99" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">path /exact</text>
+<text x="460" y="99" text-anchor="end" fill="var(--remote)">exact-path</text>
+<rect x="30" y="110" width="440" height="22" rx="4" fill="none" stroke="var(--rule)"/>
+<text x="48" y="125" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">2</text>
+<text x="68" y="125" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">safe_regex /order/[0-9]+</text>
+<text x="460" y="125" text-anchor="end" fill="var(--remote)">regex</text>
+<rect x="30" y="136" width="440" height="22" rx="4" fill="none" stroke="var(--rule)"/>
+<text x="48" y="151" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">3</text>
+<text x="68" y="151" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">prefix / + header x-canary: yes</text>
+<text x="460" y="151" text-anchor="end" fill="var(--remote)">header-canary</text>
+<rect x="30" y="162" width="440" height="22" rx="4" fill="none" stroke="var(--rule)"/>
+<text x="48" y="177" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">4</text>
+<text x="68" y="177" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">prefix / + query debug=1</text>
+<text x="460" y="177" text-anchor="end" fill="var(--remote)">query-debug</text>
+<rect x="30" y="188" width="440" height="22" rx="4" fill="none" stroke="var(--rule)"/>
+<text x="48" y="203" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">5</text>
+<text x="68" y="203" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">prefix /api/v1/</text>
+<text x="460" y="203" text-anchor="end" fill="var(--remote)">prefix-rewrite</text>
+<rect x="30" y="214" width="440" height="22" rx="4" fill="none" stroke="var(--rule)"/>
+<text x="48" y="229" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">6</text>
+<text x="68" y="229" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">safe_regex /user/[0-9]+/profile</text>
+<text x="460" y="229" text-anchor="end" fill="var(--remote)">regex-rewrite</text>
+<rect x="30" y="240" width="440" height="22" rx="4" fill="none" stroke="var(--rule)"/>
+<text x="48" y="255" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">7</text>
+<text x="68" y="255" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">prefix /rewrite-host</text>
+<text x="460" y="255" text-anchor="end" fill="var(--remote)">host-rewrite</text>
+<rect x="30" y="266" width="440" height="22" rx="4" fill="none" stroke="var(--rule)"/>
+<text x="48" y="281" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">8</text>
+<text x="68" y="281" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">prefix /slow</text>
+<text x="460" y="281" text-anchor="end" fill="var(--remote)">504 after 0.25 s</text>
+<rect x="30" y="292" width="440" height="22" rx="4" fill="none" stroke="var(--rule)"/>
+<text x="48" y="307" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">8b</text>
+<text x="68" y="307" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">path_separated_prefix /patient</text>
+<text x="460" y="307" text-anchor="end" fill="var(--remote)">200 after 1.0 s</text>
+<rect x="30" y="318" width="440" height="22" rx="4" fill="none" stroke="var(--rule)"/>
+<text x="48" y="333" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">8c</text>
+<text x="68" y="333" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">prefix /budget</text>
+<text x="460" y="333" text-anchor="end" fill="var(--remote)">budget header 1234</text>
+<rect x="30" y="344" width="440" height="22" rx="4" fill="none" stroke="var(--rule)"/>
+<text x="48" y="359" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">9</text>
+<text x="68" y="359" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">path /old</text>
+<text x="460" y="359" text-anchor="end" fill="var(--remote)">301 · no upstream</text>
+<rect x="30" y="370" width="440" height="22" rx="4" fill="none" stroke="var(--rule)"/>
+<text x="48" y="385" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">10</text>
+<text x="68" y="385" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">path /healthz</text>
+<text x="460" y="385" text-anchor="end" fill="var(--remote)">200 · no upstream</text>
+<rect x="30" y="396" width="440" height="22" rx="4" fill="var(--remote-wash)" stroke="var(--remote)"/>
+<text x="48" y="411" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">11</text>
+<text x="68" y="411" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">prefix /</text>
+<text x="460" y="411" text-anchor="end" fill="var(--remote)" font-weight="600">catch-all</text>
+<rect x="510" y="84" width="440" height="22" rx="4" fill="var(--gap-wash)" stroke="var(--gap)"/>
+<text x="528" y="99" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">11</text>
+<text x="548" y="99" font-family="IBM Plex Mono, monospace" font-size="12" fill="currentColor">prefix /</text>
+<text x="940" y="99" text-anchor="end" fill="var(--gap)" font-weight="600">catch-all · every probe</text>
+<rect x="510" y="110" width="440" height="22" rx="4" fill="var(--none-wash)" stroke="var(--rule)"/>
+<text x="528" y="125" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">1</text>
+<text x="548" y="125" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">path /exact</text>
+<text x="940" y="125" text-anchor="end" fill="var(--none)">never reached</text>
+<rect x="510" y="136" width="440" height="22" rx="4" fill="var(--none-wash)" stroke="var(--rule)"/>
+<text x="528" y="151" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">2</text>
+<text x="548" y="151" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">safe_regex /order/[0-9]+</text>
+<text x="940" y="151" text-anchor="end" fill="var(--none)">never reached</text>
+<rect x="510" y="162" width="440" height="22" rx="4" fill="var(--none-wash)" stroke="var(--rule)"/>
+<text x="528" y="177" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">3</text>
+<text x="548" y="177" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">prefix / + header x-canary: yes</text>
+<text x="940" y="177" text-anchor="end" fill="var(--none)">never reached</text>
+<rect x="510" y="188" width="440" height="22" rx="4" fill="var(--none-wash)" stroke="var(--rule)"/>
+<text x="528" y="203" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">4</text>
+<text x="548" y="203" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">prefix / + query debug=1</text>
+<text x="940" y="203" text-anchor="end" fill="var(--none)">never reached</text>
+<rect x="510" y="214" width="440" height="22" rx="4" fill="var(--none-wash)" stroke="var(--rule)"/>
+<text x="528" y="229" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">5</text>
+<text x="548" y="229" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">prefix /api/v1/</text>
+<text x="940" y="229" text-anchor="end" fill="var(--none)">never reached</text>
+<rect x="510" y="240" width="440" height="22" rx="4" fill="var(--none-wash)" stroke="var(--rule)"/>
+<text x="528" y="255" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">6</text>
+<text x="548" y="255" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">safe_regex /user/[0-9]+/profile</text>
+<text x="940" y="255" text-anchor="end" fill="var(--none)">never reached</text>
+<rect x="510" y="266" width="440" height="22" rx="4" fill="var(--none-wash)" stroke="var(--rule)"/>
+<text x="528" y="281" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">7</text>
+<text x="548" y="281" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">prefix /rewrite-host</text>
+<text x="940" y="281" text-anchor="end" fill="var(--none)">never reached</text>
+<rect x="510" y="292" width="440" height="22" rx="4" fill="var(--none-wash)" stroke="var(--rule)"/>
+<text x="528" y="307" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">8</text>
+<text x="548" y="307" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">prefix /slow</text>
+<text x="940" y="307" text-anchor="end" fill="var(--none)">never reached</text>
+<rect x="510" y="318" width="440" height="22" rx="4" fill="var(--none-wash)" stroke="var(--rule)"/>
+<text x="528" y="333" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">8b</text>
+<text x="548" y="333" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">path_separated_prefix /patient</text>
+<text x="940" y="333" text-anchor="end" fill="var(--none)">never reached</text>
+<rect x="510" y="344" width="440" height="22" rx="4" fill="var(--none-wash)" stroke="var(--rule)"/>
+<text x="528" y="359" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">8c</text>
+<text x="548" y="359" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">prefix /budget</text>
+<text x="940" y="359" text-anchor="end" fill="var(--none)">never reached</text>
+<rect x="510" y="370" width="440" height="22" rx="4" fill="var(--none-wash)" stroke="var(--rule)"/>
+<text x="528" y="385" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">9</text>
+<text x="548" y="385" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">path /old</text>
+<text x="940" y="385" text-anchor="end" fill="var(--none)">never reached</text>
+<rect x="510" y="396" width="440" height="22" rx="4" fill="var(--none-wash)" stroke="var(--rule)"/>
+<text x="528" y="411" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">10</text>
+<text x="548" y="411" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--none)">path /healthz</text>
+<text x="940" y="411" text-anchor="end" fill="var(--none)">never reached</text>
+
+    <text x="30" y="452" fill="var(--muted)">One probe per route. Left: 13 different results. Right: every probe returned x-matched-route: catch-all.</text>
+    <text x="30" y="474" font-weight="600">Envoy accepted the reordered config, and nothing it logged mentions the order: the order is the config.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>Routes are tried in order and the first match wins. With the catch-all last, thirteen probes give thirteen results; moved first, it answers every probe and the twelve routes below it are never reached. Envoy accepts both configs, and nothing it logs mentions the order.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Who answers</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 454" role="img" aria-label="Traffic flows down from the client to Envoy and, for a route to a cluster, on to the upstream. A route to a cluster is answered by the upstream. A route whose timeout expires is answered by Envoy with a 504 after 0.25 seconds. A redirect and a direct_response are answered by Envoy alone, and the upstream request counters do not move.">
+  <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="ah2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<text x="20" y="73" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--none)">CLIENT</text>
+<text x="20" y="197" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--remote)">ENVOY</text>
+<text x="20" y="337" font-family="IBM Plex Mono, monospace" font-size="13" font-weight="600" fill="var(--host)">UPSTREAM</text>
+<line x1="20" y1="123" x2="960" y2="123" stroke="var(--rule)" stroke-width="1.3" stroke-dasharray="6 5"/>
+<line x1="20" y1="263" x2="960" y2="263" stroke="var(--rule)" stroke-width="1.3" stroke-dasharray="6 5"/>
+<rect x="120" y="40" width="200" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="134" y="61" font-family="IBM Plex Mono, monospace" font-size="12">GET /exact</text>
+<text x="134" y="78" fill="var(--remote)" font-weight="600">← 200 from echo</text>
+<rect x="120" y="150" width="200" height="84" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="134" y="171" font-weight="600">route: cluster</text>
+<text x="134" y="188" font-family="IBM Plex Mono, monospace" font-size="12">echo_service</text>
+<text x="134" y="205" fill="var(--muted)">match: path /exact</text>
+<text x="134" y="222" fill="var(--muted)">reply + upstream-service-time</text>
+<rect x="120" y="290" width="200" height="84" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="134" y="311" font-weight="600">echo pod (1 of 2)</text>
+<text x="134" y="328">answers 200</text>
+<text x="134" y="345" fill="var(--muted)">10 × /exact:</text>
+<text x="134" y="362" fill="var(--muted)">upstream_rq_total +10</text>
+<line x1="190" y1="96" x2="190" y2="148" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<line x1="250" y1="150" x2="250" y2="98" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<line x1="190" y1="234" x2="190" y2="288" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<line x1="250" y1="290" x2="250" y2="236" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<rect x="330" y="40" width="200" height="56" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="344" y="61" font-family="IBM Plex Mono, monospace" font-size="12">GET /slow</text>
+<text x="344" y="78" fill="var(--gap)" font-weight="600">← 504 at 0.25 s</text>
+<rect x="330" y="150" width="200" height="84" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="344" y="171" font-weight="600">route: cluster</text>
+<text x="344" y="188" font-family="IBM Plex Mono, monospace" font-size="12">slow_service</text>
+<text x="344" y="205" font-family="IBM Plex Mono, monospace" font-size="12">timeout: 0.25s</text>
+<text x="344" y="222">then answers 504 itself</text>
+<rect x="330" y="290" width="200" height="84" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="344" y="311" font-weight="600">slow pod</text>
+<text x="344" y="328">sleeps 1 s</text>
+<text x="344" y="345" fill="var(--muted)">its answer is</text>
+<text x="344" y="362" fill="var(--muted)">not waited for</text>
+<line x1="400" y1="96" x2="400" y2="148" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<line x1="460" y1="150" x2="460" y2="98" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#ah2g)"/>
+<line x1="400" y1="234" x2="400" y2="288" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<rect x="540" y="40" width="200" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="554" y="61" font-family="IBM Plex Mono, monospace" font-size="12">GET /old</text>
+<text x="554" y="78" fill="var(--remote)" font-weight="600">← 301</text>
+<rect x="540" y="150" width="200" height="84" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="554" y="171" font-weight="600">redirect</text>
+<text x="554" y="188" font-family="IBM Plex Mono, monospace" font-size="12">path_redirect /exact</text>
+<text x="554" y="205" fill="var(--muted)">Location built from the</text>
+<text x="554" y="222" fill="var(--muted)">request&#x27;s Host</text>
+<line x1="610" y1="96" x2="610" y2="148" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<line x1="670" y1="150" x2="670" y2="98" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<rect x="750" y="40" width="200" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="764" y="61" font-family="IBM Plex Mono, monospace" font-size="12">GET /healthz</text>
+<text x="764" y="78" fill="var(--remote)" font-weight="600">← 200 ok</text>
+<rect x="750" y="150" width="200" height="84" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="764" y="171" font-weight="600">direct_response</text>
+<text x="764" y="188" font-family="IBM Plex Mono, monospace" font-size="12">200, body ok</text>
+<text x="764" y="205" fill="var(--muted)">answered from the</text>
+<text x="764" y="222" fill="var(--muted)">config alone</text>
+<line x1="820" y1="96" x2="820" y2="148" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<line x1="880" y1="150" x2="880" y2="98" stroke="currentColor" stroke-width="1.3" marker-end="url(#ah2)"/>
+<rect x="540" y="290" width="410" height="84" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="554" y="311" font-weight="600">not contacted</text>
+<text x="554" y="328">20 requests to /old and /healthz:</text>
+<text x="554" y="345" fill="var(--muted)">upstream_rq_total does not move</text>
+<text x="20" y="408" fill="var(--muted)">Counters are the proxy&#x27;s own cluster.*.upstream_rq_total; the timings are curl&#x27;s time_total from inside the cluster.</text>
+<text x="20" y="430" font-weight="600">With echo and slow scaled to zero: /healthz 200, /old 301, /exact 503 no healthy upstream.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>A route to a cluster is answered by the upstream, unless its timeout expires first and Envoy answers 504. A redirect and a direct_response are answered by Envoy alone; the upstream request counters do not move.</figcaption>
+    </figure>
+  </section>
+</div>

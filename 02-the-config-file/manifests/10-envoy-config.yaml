@@ -34,19 +34,25 @@ data:
               stat_prefix: ingress_http
               use_remote_address: true
 
-              # How Envoy names itself in the Server response header and in
-              # via. Default is to pass the upstream's through; OVERWRITE hides
-              # what the backend is, which is a small, free hardening win.
+              # What happens to the upstream's Server response header. The
+              # default, OVERWRITE, replaces it with server_name, which defaults
+              # to "envoy" (measured on module 01: the app sends
+              # "BaseHTTP/0.6 Python/3.12.14", the client sees "envoy").
+              # Written out here to make the choice visible; server_name stops
+              # the response advertising Envoy at all.
               server_header_transformation: OVERWRITE
               server_name: tutorial-gateway
 
-              # Adds x-envoy-* headers the backend can read. Off by default
-              # for internal requests; module 01 showed what appears.
+              # Mint an x-request-id when the client did not send one. On by
+              # default - module 01 shows the header without this line. Written
+              # out so turning it off is a visible decision.
               generate_request_id: true
 
-              # A request that is still open after this is reset. The DEFAULT
-              # IS 15 SECONDS and it is per-route, which surprises people who
-              # assume "no timeout". Set it deliberately.
+              # How long Envoy waits to RECEIVE the whole request from the
+              # client; disarmed once the request is sent upstream or the
+              # response starts. Unset, there is no limit (API reference), so a
+              # slow client can hold a request open indefinitely. Not the same
+              # timer as the route's `timeout` below, which does default to 15s.
               request_timeout: 10s
 
               # How long a downstream connection may sit idle before Envoy
@@ -85,15 +91,18 @@ data:
                   - match: { prefix: "/" }
                     route:
                       cluster: echo_service
-                      # Per-route timeout. Overrides request_timeout above for
-                      # this route. 0s would mean "no timeout" - which is a
-                      # decision, not a default to drift into.
+                      # The upstream deadline: from the request being sent on
+                      # to the response being fully received. Default 15s
+                      # (module 01 measures 15000 ms). 0s means no timeout -
+                      # a decision, not a default to drift into.
                       timeout: 5s
                       retry_policy:
-                        # Retries are OFF by default. This retries only on
-                        # conditions that are safe to repeat: a connection that
-                        # never established, or a 5xx from a request Envoy
-                        # knows was not delivered.
+                        # Retries are OFF unless a retry_policy is set.
+                        # connect-failure: the connection never established.
+                        # refused-stream: the upstream refused the stream before
+                        #   processing it - Envoy's docs call it safe to retry.
+                        # unavailable: the gRPC status 14. gRPC itself warns this
+                        #   "is not always safe to retry" for non-idempotent calls.
                         retry_on: "connect-failure,refused-stream,unavailable"
                         num_retries: 2
                         per_try_timeout: 2s
@@ -111,9 +120,10 @@ data:
         # How often STRICT_DNS re-resolves. Default 5s. Shorter means faster
         # reaction when pods are replaced, at the cost of more DNS queries.
         dns_refresh_rate: 5s
-        # Caps on what Envoy will do to this upstream. Unset, these default to
-        # 1024 each - generous enough that a struggling backend gets buried
-        # rather than shielded.
+        # Caps on what Envoy will do to this upstream. Unset, max_connections,
+        # max_pending_requests and max_requests default to 1024 and max_retries
+        # to 3 (measured on module 01's /clusters) - generous enough that a
+        # struggling backend gets buried rather than shielded.
         circuit_breakers:
           thresholds:
           - priority: DEFAULT

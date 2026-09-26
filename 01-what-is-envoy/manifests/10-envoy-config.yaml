@@ -44,7 +44,7 @@ data:
               # appears at all and the backend cannot see the client.
               #
               # Measured both ways on this exact config:
-              #   false (default)  ->  x-request-id, x-envoy-expected-rq-timeout-ms
+              #   false (default)  ->  x-forwarded-proto, x-request-id, x-envoy-expected-rq-timeout-ms
               #   true             ->  ... plus x-forwarded-for and
               #                        x-envoy-external-address
               #
