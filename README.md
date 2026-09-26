@@ -28,7 +28,8 @@ Every command runs as written from your laptop.
 | [`07-modernising-grpc`](07-modernising-grpc/README.md) | REST + JSON in front of a gRPC-only service: `grpc_json_transcoder`, the `.proto` contract, one port for REST and gRPC | **done** |
 | [`08-tls-on-envoy`](08-tls-on-envoy/README.md) | a cert-manager certificate on Envoy; trust and SAN errors; passthrough vs edge vs reencrypt Routes | **done** |
 | [`09-grpc-end-to-end`](09-grpc-end-to-end/README.md) | gRPC over TLS, mutual TLS to the service, ALPN `h2`, and certificate rotation with SDS | **done** |
-| `10`–`11` | observability, resilience | to come |
+| [`10-observability`](10-observability/README.md) | response flags in the access log, Envoy metrics in OpenShift's monitoring with PromQL, traces in Zipkin | **done** |
+| `11` | resilience | to come |
 | [`12-gateway-api`](12-gateway-api/README.md) | Envoy Gateway, `Gateway`, `HTTPRoute`, and the two OpenShift traps that block them | **done** |
 
 Module 12 was written first because it was the immediate need. The numbering is

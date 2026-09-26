@@ -1,0 +1,13 @@
+# Ask OpenShift's user-workload monitoring to scrape Envoy's metrics: the
+# Service labelled app=envoy, port `admin`, path /stats/prometheus, every 15 s.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: envoy
+spec:
+  selector:
+    matchLabels: { app: envoy }
+  endpoints:
+  - port: admin
+    path: /stats/prometheus
+    interval: 15s

@@ -1,0 +1,27 @@
+# A Service with no pods behind it - the /down route's cluster. Zero replicas,
+# so headless DNS returns no address and Envoy has no endpoint to send to.
+apiVersion: v1
+kind: Service
+metadata:
+  name: down
+spec:
+  clusterIP: None
+  selector: { app: down }
+  ports:
+  - { name: http, port: 8080, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: down
+spec:
+  replicas: 0
+  selector: { matchLabels: { app: down } }
+  template:
+    metadata:
+      labels: { app: down }
+    spec:
+      containers:
+      - name: none
+        image: python:3.12-slim
+        command: ["sleep", "infinity"]
