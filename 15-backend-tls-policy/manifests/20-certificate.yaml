@@ -1,0 +1,17 @@
+# The backend's certificate, from cert-manager and the cluster's enterprise CA
+# (module 08). The names are the ones the Gateway will use to reach the
+# backend - its Service's DNS names. The Secret also carries ca.crt, which
+# step 2 copies into the ConfigMap the BackendTLSPolicy trusts.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: secure-echo-tls
+spec:
+  secretName: secure-echo-tls
+  dnsNames:
+  - secure-echo.envoy-15.svc
+  - secure-echo.envoy-15.svc.cluster.local
+  issuerRef:
+    name: enterprise-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

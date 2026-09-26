@@ -33,6 +33,7 @@ Every command runs as written from your laptop.
 | [`12-gateway-api`](12-gateway-api/README.md) | Envoy Gateway: `GatewayClass`, `Gateway`, `HTTPRoute`, the two OpenShift traps, and the Envoy config the controller generates | **done** |
 | [`13-httproute-traffic`](13-httproute-traffic/README.md) | `HTTPRoute` only: match precedence, header match, weighted split, rewrite, redirect, mirror, timeout — and what Envoy gets for each | **done** |
 | [`14-gateway-policies`](14-gateway-policies/README.md) | `BackendTrafficPolicy` and `SecurityPolicy`: modules 06 and 11 as policies — retry, ejection, circuit breaker, rate limit, JWT, CORS — and what Envoy got | **done** |
+| [`15-backend-tls-policy`](15-backend-tls-policy/README.md) | `BackendTLSPolicy`: TLS from the Gateway to a TLS-only backend — SNI, SAN check and CA, the wrong-name and wrong-CA failures, and what Envoy got | **done** |
 
 Module 12 was written first because it was the immediate need. The numbering is
 the reading order, not the build order.

@@ -1,0 +1,22 @@
+# The standard Gateway API way to say: to reach this Service's https port, use
+# TLS; trust only certificates signed by this CA; and expect this name.
+#
+# hostname does two jobs: it is the SNI the Gateway sends, and the name the
+# backend's certificate must carry (unless subjectAltNames lists others).
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: secure-echo
+  namespace: envoy-15
+spec:
+  targetRefs:
+  - group: ""
+    kind: Service
+    name: secure-echo
+    sectionName: https
+  validation:
+    caCertificateRefs:
+    # The CA bundle must be under the key ca.crt - the Gateway API spec calls a
+    # ConfigMap without it invalid (module README, Troubleshooting).
+    - { group: "", kind: ConfigMap, name: enterprise-ca }
+    hostname: secure-echo.envoy-15.svc
