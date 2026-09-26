@@ -22,7 +22,8 @@ done
 say "images the modules pull"
 for i in "python:3.12-slim        the echo app" \
          "envoyproxy/envoy:v1.39-latest  the proxy" \
-         "curlimages/curl:8.11.1  the in-cluster client"; do
+         "curlimages/curl:8.11.1  the in-cluster client" \
+         "alpine/openssl:3.3.2    module 03's test certificates"; do
   printf '  · %s\n' "$i"
 done
 echo "  (all public; nothing is built or pushed by this tutorial)"

@@ -24,7 +24,7 @@ run what the tutorial needs. One script checks all of it.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/00-prerequisites/cluster-map.dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/00-prerequisites/cluster-map.light.png">
-  <img alt="Your laptop runs oc against the cluster. Each module creates its own namespace, envoy-NN, holding a client pod that runs curl, Envoy, and the echo app, from three public images. Beside it are the platform pieces only some modules need: cert-manager, Gateway API CRDs, MetalLB, Prometheus Operator CRDs and, on OpenShift, user-workload monitoring." src="../docs/diagrams/00-prerequisites/cluster-map.light.png">
+  <img alt="Your laptop runs oc against the cluster. Each module creates its own namespace, envoy-NN, holding a client pod that runs curl, Envoy, and the echo app, from public images. Beside it are the platform pieces only some modules need: cert-manager, Gateway API CRDs, MetalLB, Prometheus Operator CRDs and, on OpenShift, user-workload monitoring." src="../docs/diagrams/00-prerequisites/cluster-map.light.png">
 </picture>
 <!-- markdownlint-enable MD033 -->
 
@@ -100,6 +100,7 @@ $ ./check.sh
   · python:3.12-slim        the echo app
   · envoyproxy/envoy:v1.39-latest  the proxy
   · curlimages/curl:8.11.1  the in-cluster client
+  · alpine/openssl:3.3.2    module 03's test certificates
   (all public; nothing is built or pushed by this tutorial)
 
 [1moptional, per module[0m
@@ -121,7 +122,7 @@ $ ./check.sh
 |---|---|
 | cluster | the API server answers, which client is in use, and whether this is OpenShift |
 | permissions | you can create the four kinds of object every module creates |
-| images the modules pull | the three public images — listed, not pulled yet |
+| images the modules pull | the public images modules 01–04 use — listed, not pulled yet |
 | optional, per module | platform pieces only some modules need; a missing one is not a failure |
 | a real write, end to end | it created a namespace and started the same `client` pod every module uses, and waited for it to be Ready |
 
