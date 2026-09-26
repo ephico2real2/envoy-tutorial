@@ -1,0 +1,280 @@
+<title>Envoy Clusters</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 05 · clusters and load balancing</div>
+    <h1>How Envoy finds endpoints, and how it chooses between them</h1>
+    <p class="lede">Drawn from <code>05-clusters-and-load-balancing/manifests/</code>; every number was measured on CRC in namespace <code>envoy-05</code>.</p>
+  </header>
+
+  <section>
+    <h2>How Envoy finds endpoints</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 446" role="img" aria-label="Five cluster types, the same three echo pods. STATIC holds the sidecar at 127.0.0.1:8081. STRICT_DNS on the headless Service holds three endpoints, one per pod, and Envoy chooses between them. STRICT_DNS on a ClusterIP Service holds one virtual IP, so the Service chooses the pod per connection. LOGICAL_DNS holds only the first address, so all requests go to one pod. EDS holds the three endpoints written to a file by write-eds.sh, picked up 3 to 77 seconds after the edit, with no restart.">
+  <defs><marker id="d1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="d1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="20" y="14" width="940" height="40" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="34" y="39" font-weight="600">ENVOY — one route per cluster, an echo server behind each</text>
+<text x="120.0" y="84" fill="var(--muted)">the cluster type</text>
+<rect x="20" y="92" width="176" height="66" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="34" y="113" font-weight="600" fill="var(--remote)">STATIC</text>
+<text x="34" y="130" font-family="IBM Plex Mono, monospace" font-size="12">static_sidecar</text>
+<text x="34" y="147" fill="var(--muted)">address in the config</text>
+<line x1="108.0" y1="54" x2="108.0" y2="76" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<rect x="211" y="92" width="176" height="66" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="225" y="113" font-weight="600" fill="var(--remote)">STRICT_DNS</text>
+<text x="225" y="130" font-family="IBM Plex Mono, monospace" font-size="12">headless</text>
+<text x="225" y="147" fill="var(--muted)">DNS: every address</text>
+<line x1="299.0" y1="54" x2="299.0" y2="76" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<rect x="402" y="92" width="176" height="66" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="416" y="113" font-weight="600" fill="var(--remote)">STRICT_DNS</text>
+<text x="416" y="130" font-family="IBM Plex Mono, monospace" font-size="12">vip</text>
+<text x="416" y="147" fill="var(--muted)">DNS: one virtual IP</text>
+<line x1="490.0" y1="54" x2="490.0" y2="76" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<rect x="593" y="92" width="176" height="66" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="607" y="113" font-weight="600" fill="var(--remote)">LOGICAL_DNS</text>
+<text x="607" y="130" font-family="IBM Plex Mono, monospace" font-size="12">logical</text>
+<text x="607" y="147" fill="var(--muted)">DNS: first address only</text>
+<line x1="681.0" y1="54" x2="681.0" y2="76" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<rect x="784" y="92" width="176" height="66" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="798" y="113" font-weight="600" fill="var(--remote)">EDS</text>
+<text x="798" y="130" font-family="IBM Plex Mono, monospace" font-size="12">eds</text>
+<text x="798" y="147" fill="var(--muted)">the list, from a file</text>
+<line x1="872.0" y1="54" x2="872.0" y2="76" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<text x="120.0" y="202" fill="var(--muted)">what Envoy holds — /clusters</text>
+<rect x="20" y="210" width="176" height="52" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="34" y="231" font-weight="600">1 endpoint</text>
+<text x="34" y="248" font-family="IBM Plex Mono, monospace" font-size="12">127.0.0.1:8081</text>
+<line x1="108.0" y1="158" x2="108.0" y2="194" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<rect x="211" y="210" width="176" height="52" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="225" y="231" font-weight="600">3 endpoints</text>
+<text x="225" y="248">one per pod</text>
+<line x1="299.0" y1="158" x2="299.0" y2="194" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<rect x="402" y="210" width="176" height="52" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="416" y="231" font-weight="600">1 endpoint</text>
+<text x="416" y="248">the Service&#x27;s VIP</text>
+<line x1="490.0" y1="158" x2="490.0" y2="194" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<rect x="593" y="210" width="176" height="52" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="607" y="231" font-weight="600">1 endpoint</text>
+<text x="607" y="248">one pod&#x27;s IP</text>
+<line x1="681.0" y1="158" x2="681.0" y2="194" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<rect x="784" y="210" width="176" height="52" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="798" y="231" font-weight="600">3 endpoints</text>
+<text x="798" y="248">from write-eds.sh</text>
+<line x1="872.0" y1="158" x2="872.0" y2="194" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<text x="120.0" y="306" fill="var(--muted)">where the requests went</text>
+<rect x="20" y="314" width="176" height="66" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="34" y="335" font-weight="600">the sidecar</text>
+<text x="34" y="352">in Envoy&#x27;s own pod</text>
+<text x="34" y="369" fill="var(--muted)">the sidecar pattern</text>
+<line x1="108.0" y1="262" x2="108.0" y2="298" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<rect x="211" y="314" width="176" height="66" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="225" y="335" font-weight="600">3 pods</text>
+<text x="225" y="352">Envoy chooses</text>
+<text x="225" y="369" fill="var(--muted)">20/20/20, one worker</text>
+<line x1="299.0" y1="262" x2="299.0" y2="298" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<rect x="402" y="314" width="176" height="66" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="416" y="335" font-weight="600">3 pods</text>
+<text x="416" y="352">the Service chooses</text>
+<text x="416" y="369" fill="var(--muted)">per connection, unevenly</text>
+<line x1="490.0" y1="262" x2="490.0" y2="298" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<rect x="593" y="314" width="176" height="66" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="607" y="335" font-weight="600">1 pod</text>
+<text x="607" y="352">all 60 requests</text>
+<text x="607" y="369" fill="var(--muted)">the others idle</text>
+<line x1="681.0" y1="262" x2="681.0" y2="298" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<rect x="784" y="314" width="176" height="66" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="798" y="335" font-weight="600">3 pods</text>
+<text x="798" y="352">3–77 s after the edit</text>
+<text x="798" y="369" fill="var(--muted)">no restart</text>
+<line x1="872.0" y1="262" x2="872.0" y2="298" stroke="currentColor" stroke-width="1.3" marker-end="url(#d1)"/>
+<text x="20" y="412" font-weight="600">Envoy can only balance across endpoints it holds: every pod via a headless Service or EDS; one VIP via a</text>
+<text x="20" y="432" fill="var(--muted)">ClusterIP Service, where the Service picks the pod instead. Measured on CRC: 60 requests per route (30 for EDS), 3 echo pods.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>Five cluster types over the same three pods. Envoy can only balance across the endpoints it holds: every pod through a headless Service or EDS, one virtual IP through a ClusterIP Service.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Round robin is per worker thread</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 430" role="img" aria-label="Sixty requests, each on a new connection, to two Envoys with the same config. With one worker thread, round robin gave an exact 20, 20, 20 across three pods in ten runs out of ten. With ten worker threads, each keeping its own round-robin position, the split was uneven in 28 runs out of 30; down one connection it was 20, 20, 20 in ten runs out of ten.">
+  <defs><marker id="d2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="d2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="250" y="14" width="480" height="44" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="264" y="41" font-weight="600">client — 60 requests, each on a new connection</text>
+<line x1="370" y1="58" x2="250" y2="104" stroke="currentColor" stroke-width="1.3" marker-end="url(#d2)"/>
+<line x1="610" y1="58" x2="730" y2="104" stroke="currentColor" stroke-width="1.3" marker-end="url(#d2)"/>
+<text x="490" y="90" text-anchor="middle" fill="var(--muted)">the kernel hands each new connection to one worker thread</text>
+<rect x="20" y="106" width="450" height="150" rx="8" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="38" y="130" font-weight="600">envoy-single · --concurrency 1</text>
+<text x="38" y="147">one worker thread, so one round-robin position</text>
+<rect x="170" y="170" width="150" height="34" rx="6" fill="none" stroke="currentColor" stroke-width="1.2"/>
+<text x="245" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12">worker 1</text>
+<text x="38" y="236" fill="var(--muted)">every request steps the same pointer</text>
+<rect x="510" y="106" width="450" height="150" rx="8" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="528" y="130" font-weight="600">envoy · default, 10 on this cluster</text>
+<text x="528" y="147">10 worker threads, each with its own position</text>
+<rect x="528" y="170" width="36" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="1.1"/>
+<text x="546" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12">1</text>
+<rect x="570" y="170" width="36" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="1.1"/>
+<text x="588" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12">2</text>
+<rect x="612" y="170" width="36" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="1.1"/>
+<text x="630" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12">3</text>
+<rect x="654" y="170" width="36" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="1.1"/>
+<text x="672" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12">4</text>
+<rect x="696" y="170" width="36" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="1.1"/>
+<text x="714" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12">5</text>
+<rect x="738" y="170" width="36" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="1.1"/>
+<text x="756" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12">6</text>
+<rect x="780" y="170" width="36" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="1.1"/>
+<text x="798" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12">7</text>
+<rect x="822" y="170" width="36" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="1.1"/>
+<text x="840" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12">8</text>
+<rect x="864" y="170" width="36" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="1.1"/>
+<text x="882" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12">9</text>
+<rect x="906" y="170" width="36" height="34" rx="5" fill="none" stroke="currentColor" stroke-width="1.1"/>
+<text x="924" y="192" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12">10</text>
+<text x="528" y="236" fill="var(--muted)">a connection stays on the worker that accepted it</text>
+<line x1="245" y1="256" x2="245" y2="294" stroke="currentColor" stroke-width="1.3" marker-end="url(#d2)"/>
+<line x1="735" y1="256" x2="735" y2="294" stroke="currentColor" stroke-width="1.3" marker-end="url(#d2)"/>
+<rect x="20" y="296" width="450" height="70" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="34" y="317" fill="var(--remote)" font-weight="600">20 / 20 / 20</text>
+<text x="34" y="334">in 10 runs out of 10</text>
+<text x="34" y="351" fill="var(--muted)">an exact rotation across the 3 pods</text>
+<rect x="510" y="296" width="450" height="70" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="524" y="317" font-weight="600">usually uneven — 20/20/20 in 2 runs of 30</text>
+<text x="524" y="334">sent down one connection instead: 20/20/20 in 10 of 10</text>
+<text x="524" y="351" fill="var(--muted)">ten rotations, interleaved by the kernel</text>
+<text x="20" y="400" font-weight="600">Round robin is exact per worker thread, not across the whole proxy. Measured on CRC, 60 requests to 3 pods per run.</text>
+<text x="20" y="420" fill="var(--muted)">Envoy docs: a connection &quot;is bound to a single worker thread for its entire lifetime&quot;; state is thread-local.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>One worker thread gives an exact rotation; ten give ten interleaved rotations, and chance decides the total.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Health checks</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 438" role="img" aria-label="Two clusters with the same four endpoints: three echo pods and one sick pod that Kubernetes considers Ready because its TCP probe passes, but which answers every request with 503. Without a health check, 14 to 17 of 60 requests failed in three runs. With Envoy asking each endpoint GET /healthz, the sick pod is marked failed_active_hc, gets no traffic, and 60 of 60 succeed.">
+  <defs><marker id="d3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="d3g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="330" y="14" width="320" height="40" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="344" y="39" font-weight="600">client — 60 requests to each route</text>
+<line x1="420" y1="54" x2="245" y2="94" stroke="currentColor" stroke-width="1.3" marker-end="url(#d3)"/>
+<line x1="560" y1="54" x2="735" y2="94" stroke="currentColor" stroke-width="1.3" marker-end="url(#d3)"/>
+<rect x="20" y="96" width="450" height="84" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="34" y="117" font-weight="600">cluster unchecked</text>
+<text x="34" y="134">no health check: all 4 endpoints get traffic</text>
+<text x="34" y="151" fill="var(--gap)" font-weight="600">about 1 in 4 fail: 14–17 × 503 of 60</text>
+<rect x="510" y="96" width="450" height="84" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="524" y="117" font-weight="600">cluster checked</text>
+<text x="524" y="134">GET /healthz every 2 s — every 60 s before any traffic</text>
+<text x="524" y="151" fill="var(--remote)" font-weight="600">60 × 200</text>
+<rect x="20" y="262" width="104" height="52" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="34" y="283" font-weight="600">echo</text>
+<text x="34" y="300">200</text>
+<line x1="245" y1="180" x2="72" y2="260" stroke="currentColor" stroke-width="1.3" marker-end="url(#d3)"/>
+<rect x="132" y="262" width="104" height="52" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="146" y="283" font-weight="600">echo</text>
+<text x="146" y="300">200</text>
+<line x1="245" y1="180" x2="184" y2="260" stroke="currentColor" stroke-width="1.3" marker-end="url(#d3)"/>
+<rect x="244" y="262" width="104" height="52" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="258" y="283" font-weight="600">echo</text>
+<text x="258" y="300">200</text>
+<line x1="245" y1="180" x2="296" y2="260" stroke="currentColor" stroke-width="1.3" marker-end="url(#d3)"/>
+<rect x="356" y="262" width="104" height="52" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="370" y="283" fill="var(--gap)" font-weight="600">sick</text>
+<text x="370" y="300" fill="var(--gap)" font-weight="600">503</text>
+<line x1="245" y1="180" x2="408" y2="260" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#d3g)"/>
+<rect x="510" y="262" width="104" height="52" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="524" y="283" font-weight="600">echo</text>
+<text x="524" y="300">200</text>
+<line x1="735" y1="180" x2="562" y2="260" stroke="currentColor" stroke-width="1.3" marker-end="url(#d3)"/>
+<rect x="622" y="262" width="104" height="52" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="636" y="283" font-weight="600">echo</text>
+<text x="636" y="300">200</text>
+<line x1="735" y1="180" x2="674" y2="260" stroke="currentColor" stroke-width="1.3" marker-end="url(#d3)"/>
+<rect x="734" y="262" width="104" height="52" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="748" y="283" font-weight="600">echo</text>
+<text x="748" y="300">200</text>
+<line x1="735" y1="180" x2="786" y2="260" stroke="currentColor" stroke-width="1.3" marker-end="url(#d3)"/>
+<rect x="846" y="262" width="104" height="52" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="860" y="283" font-weight="600">sick</text>
+<text x="860" y="300">503</text>
+<text x="20" y="342" fill="var(--muted)">the same 4 endpoints behind both clusters</text>
+<text x="510" y="342" fill="var(--muted)">sick: Kubernetes says Ready — its TCP probe passes</text>
+<text x="510" y="360" fill="var(--gap)" font-weight="600">Envoy: failed_active_hc, sent no traffic</text>
+<text x="20" y="408" font-weight="600">&quot;The port is open&quot; is not &quot;the app works&quot;. Kubernetes&#x27; TCP probe passed; Envoy&#x27;s HTTP check did not.</text>
+<text x="20" y="428" fill="var(--muted)">Measured on CRC: 3 echo pods and 1 sick pod behind both clusters.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>A pod Kubernetes calls Ready can still fail every request; Envoy&#x27;s HTTP health check removes it.</figcaption>
+    </figure>
+  </section>
+</div>

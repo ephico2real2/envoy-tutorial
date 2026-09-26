@@ -1,0 +1,24 @@
+# Two of the three OpenShift Route types (step 6 creates the third, reencrypt,
+# because it needs the CA file). Where TLS ends differs for each:
+#
+#   passthrough   the router forwards the TLS bytes untouched; ENVOY terminates
+#   edge          the ROUTER terminates, and sends plain HTTP to Envoy's :8080
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: shop
+spec:
+  host: shop.apps-crc.testing
+  to: { kind: Service, name: envoy }
+  port: { targetPort: https }
+  tls: { termination: passthrough }
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: shop-edge
+spec:
+  host: shop-edge.apps-crc.testing
+  to: { kind: Service, name: envoy }
+  port: { targetPort: http }
+  tls: { termination: edge }

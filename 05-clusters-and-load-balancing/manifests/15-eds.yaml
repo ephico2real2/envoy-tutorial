@@ -1,0 +1,20 @@
+# The endpoint list for the `eds` cluster - the thing a control plane would
+# normally send Envoy over the network. Here it is a file.
+#
+# It starts EMPTY on purpose: the walkthrough shows Envoy answering
+# "no healthy upstream" for /eds, then writes the echo pods' IPs into this
+# ConfigMap and watches Envoy pick them up without a restart.
+#
+# Mounted as a directory at /etc/eds (see 20-envoy.yaml). Kubernetes updates a
+# directory-mounted ConfigMap by swapping a symlink inside it - a move, which is
+# what Envoy's watched_directory reacts to.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eds
+data:
+  eds.yaml: |
+    resources:
+    - "@type": type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment
+      cluster_name: eds
+      endpoints: []

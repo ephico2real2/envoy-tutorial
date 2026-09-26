@@ -4,3 +4,5 @@ __pycache__/
 .venv/
 /results/
 PLAN.md
+# written by module 08 - a copy of the CA from a Secret, not a tutorial file
+*/ca.crt

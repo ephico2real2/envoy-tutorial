@@ -1,0 +1,34 @@
+# What the Gateway needs to fetch Keycloak's public keys from INSIDE the
+# cluster - straight from its Service, not through the router. All three
+# live in Keycloak's namespace, next to the Service they concern.
+#
+# 1. A ReferenceGrant: a resource in one namespace may not point at a Service
+#    in another unless that namespace says so. Here: SecurityPolicies in
+#    envoy-17 may reference Services in keycloak.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: envoy-17-fetches-jwks
+  namespace: keycloak
+spec:
+  from:
+  - { group: gateway.envoyproxy.io, kind: SecurityPolicy, namespace: envoy-17 }
+  to:
+  - { group: "", kind: Service, name: keycloak-service }
+---
+# 2. The CA that signed Keycloak's certificate (module 16, step 4), under the
+#    key ca.crt. step 3 fills it in from the keycloak-tls Secret.
+# 3. A BackendTLSPolicy (module 15): reach keycloak-service over TLS, trust that
+#    CA, expect the Service's name.
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: keycloak-service
+  namespace: keycloak
+spec:
+  targetRefs:
+  - { group: "", kind: Service, name: keycloak-service, sectionName: https }
+  validation:
+    caCertificateRefs:
+    - { group: "", kind: ConfigMap, name: keycloak-ca }
+    hostname: keycloak-service.keycloak.svc

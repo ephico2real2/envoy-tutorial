@@ -1,0 +1,13 @@
+# Step 5b. The same policy, trusting the public CAs every operating system
+# ships instead of the enterprise CA - which did not sign this certificate.
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: secure-echo
+  namespace: envoy-15
+spec:
+  targetRefs:
+  - { group: "", kind: Service, name: secure-echo, sectionName: https }
+  validation:
+    wellKnownCACertificates: System
+    hostname: secure-echo.envoy-15.svc

@@ -1,0 +1,101 @@
+# The catalog service: gRPC only, on port 50051.
+#
+# Nothing is built into an image. The .proto and the Python source arrive as
+# ConfigMaps (the walkthrough creates them from ../proto and ../app), and an
+# init container generates the Python stubs from the .proto every time the pod
+# starts. A running pod keeps the contract it started with: after changing the
+# .proto, update the ConfigMap and restart this Deployment and envoy's.
+#
+# Needs egress to PyPI: the init container installs grpcio and friends.
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog
+  labels: { app: catalog }
+spec:
+  # Headless, as in module 05: Envoy should hold every pod, not one virtual IP.
+  # For gRPC it matters more: each HTTP/2 connection carries many calls, so a
+  # virtual IP would balance connections, not calls.
+  clusterIP: None
+  selector: { app: catalog }
+  ports:
+  - { name: grpc, port: 50051, targetPort: 50051 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  labels: { app: catalog }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: catalog } }
+  template:
+    metadata:
+      labels: { app: catalog }
+    spec:
+      initContainers:
+      - name: codegen
+        image: python:3.12-slim
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -e
+            # OpenShift runs this as a random UID that cannot write to
+            # site-packages, and the catalog container needs what is installed
+            # here: so install into /pylibs, the emptyDir both of them mount.
+            # Pinned: this runs at every pod start, and a new release would
+            # otherwise change the running code with no change to this repo.
+            pip install --no-cache-dir --quiet --target=/pylibs \
+                grpcio==1.84.0 grpcio-tools==1.84.0 grpcio-reflection==1.84.0 \
+                protobuf==7.36.2 googleapis-common-protos==1.75.4
+            # catalog.proto imports google/api/annotations.proto, which the
+            # googleapis-common-protos package ships - hence -I /pylibs.
+            PYTHONPATH=/pylibs python -m grpc_tools.protoc -I /proto -I /pylibs \
+                --python_out=/gen --grpc_python_out=/gen /proto/catalog.proto
+            ls -1 /gen
+        env:
+        - { name: HOME, value: /tmp }
+        volumeMounts:
+        - { name: proto,  mountPath: /proto }
+        - { name: pylibs, mountPath: /pylibs }
+        - { name: gen,    mountPath: /gen }
+        resources:
+          requests: { cpu: "50m",  memory: "128Mi" }
+          limits:   { cpu: "1",    memory: "512Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+      containers:
+      - name: catalog
+        image: python:3.12-slim
+        command: ["python", "/app/server.py"]
+        env:
+        - { name: PYTHONPATH, value: "/pylibs:/gen" }
+        - { name: PYTHONUNBUFFERED, value: "1" }
+        - name: POD_NAME
+          valueFrom: { fieldRef: { fieldPath: metadata.name } }
+        ports:
+        - { name: grpc, containerPort: 50051 }
+        readinessProbe:
+          tcpSocket: { port: 50051 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        volumeMounts:
+        - { name: app,    mountPath: /app }
+        - { name: pylibs, mountPath: /pylibs }
+        - { name: gen,    mountPath: /gen }
+        resources:
+          requests: { cpu: "20m",  memory: "64Mi" }
+          limits:   { cpu: "300m", memory: "256Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+      volumes:
+      - name: proto
+        configMap: { name: catalog-proto }
+      - name: app
+        configMap: { name: catalog-app }
+      - name: pylibs
+        emptyDir: {}
+      - name: gen
+        emptyDir: {}

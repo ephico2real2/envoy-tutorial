@@ -1,0 +1,48 @@
+// A small gRPC-only service: the "legacy" backend this module modernises.
+//
+// The service itself speaks only gRPC - no HTTP routes, no JSON. The
+// google.api.http options below are read by ENVOY's grpc_json_transcoder to
+// offer a REST + JSON surface on top; the service never looks at them.
+syntax = "proto3";
+
+package tutorial.catalog.v1;
+
+import "google/api/annotations.proto";
+
+service Catalog {
+  // GET /v1/items          ->  ListItems
+  rpc ListItems (ListItemsRequest) returns (ListItemsResponse) {
+    option (google.api.http) = { get: "/v1/items" };
+  }
+  // GET /v1/items/widget   ->  GetItem { sku: "widget" }
+  // The {sku} in the path fills the request field of the same name.
+  rpc GetItem (GetItemRequest) returns (Item) {
+    option (google.api.http) = { get: "/v1/items/{sku}" };
+  }
+  // POST /v1/items/widget:reserve  {"quantity": 2}
+  // body: "*" maps the JSON body onto the remaining request fields.
+  rpc ReserveStock (ReserveStockRequest) returns (Item) {
+    option (google.api.http) = { post: "/v1/items/{sku}:reserve" body: "*" };
+  }
+}
+
+message Item {
+  string sku     = 1;
+  string name    = 2;
+  int32  on_hand = 3;
+}
+
+message ListItemsRequest {}
+
+message ListItemsResponse {
+  repeated Item items = 1;
+}
+
+message GetItemRequest {
+  string sku = 1;
+}
+
+message ReserveStockRequest {
+  string sku      = 1;
+  int32  quantity = 2;
+}

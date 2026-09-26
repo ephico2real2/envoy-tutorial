@@ -1,0 +1,195 @@
+# Module 06 — HTTP filters, and why their ORDER is part of the config.
+#
+# Two listeners with the SAME filters. The only difference is the order of
+# two of them:
+#
+#   :8080  cors -> lua trace-a -> lua trace-b -> jwt_authn -> local_ratelimit -> router
+#   :8081  cors -> lua trace-a -> lua trace-b -> local_ratelimit -> jwt_authn -> router
+#
+# HTTP filters run top to bottom on the request, and a filter that answers a
+# request itself (401, 429, a CORS preflight) stops it: nothing below it runs.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-config
+data:
+  envoy.yaml: |
+    admin:
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+    static_resources:
+      listeners:
+
+      # ---- :8080 — authenticate first, then rate limit ----------------------
+      - name: auth_then_limit
+        address:
+          socket_address: { address: 0.0.0.0, port_value: 8080 }
+        filter_chains:
+        - filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: auth_then_limit
+              route_config:
+                name: echo
+                virtual_hosts:
+                - name: echo
+                  domains: ["*"]
+                  routes:
+                  - match: { prefix: "/" }
+                    route: { cluster: echo_service }
+                  # The CORS filter reads its policy from here, per virtual host.
+                  typed_per_filter_config:
+                    envoy.filters.http.cors:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.cors.v3.CorsPolicy
+                      allow_origin_string_match:
+                      - exact: https://shop.example
+                      allow_methods: "GET, POST"
+                      allow_headers: "authorization, content-type"
+                      max_age: "600"
+              http_filters:
+              # 1. CORS first: a browser's preflight OPTIONS carries no token,
+              #    so it must be answered before jwt_authn could reject it.
+              - name: envoy.filters.http.cors
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.cors.v3.Cors
+              # 2 and 3. Two Lua filters that each stamp x-filter-trace, so the
+              #    order the request passed through is visible to the app.
+              - name: trace-a
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+                  default_source_code:
+                    inline_string: |
+                      function envoy_on_request(request_handle)
+                        request_handle:headers():replace("x-filter-trace", "trace-a")
+                      end
+              - name: trace-b
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+                  default_source_code:
+                    inline_string: |
+                      function envoy_on_request(request_handle)
+                        local seen = request_handle:headers():get("x-filter-trace") or ""
+                        request_handle:headers():replace("x-filter-trace", seen .. ",trace-b")
+                      end
+              # 4. JWT: reject any request without a valid token signed with
+              #    the key below. The token's `sub` claim is passed on to the
+              #    app as x-user; the token itself is not.
+              - name: envoy.filters.http.jwt_authn
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                  providers:
+                    tutorial:
+                      issuer: envoy-tutorial
+                      # HS256 with a shared secret, so ../make-jwt.sh can mint a
+                      # token with openssl. A TUTORIAL-ONLY key: real providers
+                      # publish an RS256/ES256 public key set (remote_jwks).
+                      local_jwks:
+                        inline_string: '{"keys":[{"kty":"oct","alg":"HS256","kid":"tutorial","k":"dHV0b3JpYWwtb25seS1zZWNyZXQtZG8tbm90LXJldXNl"}]}'
+                      claim_to_headers:
+                      - { claim_name: sub, header_name: x-user }
+                  rules:
+                  - match: { prefix: "/" }
+                    requires: { provider_name: tutorial }
+              # 5. Rate limit: 5 tokens, refilled continuously at 5 per 60s (one
+              #    every 12s); empty -> 429. Both switches are REQUIRED - without
+              #    them the filter is configured but limits nothing (step 9 measures it).
+              - name: envoy.filters.http.local_ratelimit
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                  stat_prefix: auth_then_limit
+                  token_bucket: { max_tokens: 5, tokens_per_fill: 5, fill_interval: 60s }
+                  filter_enabled:
+                    default_value: { numerator: 100, denominator: HUNDRED }
+                  filter_enforced:
+                    default_value: { numerator: 100, denominator: HUNDRED }
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      # ---- :8081 — rate limit first, then authenticate ----------------------
+      # Identical to :8080 except that filters 4 and 5 are swapped.
+      - name: limit_then_auth
+        address:
+          socket_address: { address: 0.0.0.0, port_value: 8081 }
+        filter_chains:
+        - filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: limit_then_auth
+              route_config:
+                name: echo
+                virtual_hosts:
+                - name: echo
+                  domains: ["*"]
+                  routes:
+                  - match: { prefix: "/" }
+                    route: { cluster: echo_service }
+                  typed_per_filter_config:
+                    envoy.filters.http.cors:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.cors.v3.CorsPolicy
+                      allow_origin_string_match:
+                      - exact: https://shop.example
+                      allow_methods: "GET, POST"
+                      allow_headers: "authorization, content-type"
+                      max_age: "600"
+              http_filters:
+              - name: envoy.filters.http.cors
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.cors.v3.Cors
+              - name: trace-a
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+                  default_source_code:
+                    inline_string: |
+                      function envoy_on_request(request_handle)
+                        request_handle:headers():replace("x-filter-trace", "trace-a")
+                      end
+              - name: trace-b
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+                  default_source_code:
+                    inline_string: |
+                      function envoy_on_request(request_handle)
+                        local seen = request_handle:headers():get("x-filter-trace") or ""
+                        request_handle:headers():replace("x-filter-trace", seen .. ",trace-b")
+                      end
+              # Swapped: the rate limiter now sees every request, signed or not.
+              - name: envoy.filters.http.local_ratelimit
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                  stat_prefix: limit_then_auth
+                  token_bucket: { max_tokens: 5, tokens_per_fill: 5, fill_interval: 60s }
+                  filter_enabled:
+                    default_value: { numerator: 100, denominator: HUNDRED }
+                  filter_enforced:
+                    default_value: { numerator: 100, denominator: HUNDRED }
+              - name: envoy.filters.http.jwt_authn
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                  providers:
+                    tutorial:
+                      issuer: envoy-tutorial
+                      local_jwks:
+                        inline_string: '{"keys":[{"kty":"oct","alg":"HS256","kid":"tutorial","k":"dHV0b3JpYWwtb25seS1zZWNyZXQtZG8tbm90LXJldXNl"}]}'
+                      claim_to_headers:
+                      - { claim_name: sub, header_name: x-user }
+                  rules:
+                  - match: { prefix: "/" }
+                    requires: { provider_name: tutorial }
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      clusters:
+      - name: echo_service
+        type: STRICT_DNS
+        lb_policy: ROUND_ROBIN
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: echo_service
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: echo, port_value: 8080 } } }

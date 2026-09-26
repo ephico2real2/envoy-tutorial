@@ -102,7 +102,9 @@ images the modules pull
   · envoyproxy/envoy:v1.39-latest  the proxy
   · curlimages/curl:8.11.1  the in-cluster client
   · alpine/openssl:3.3.2    module 03's test certificates
+  · fullstorydev/grpcurl:v1.9.3-alpine  module 07's gRPC client
   (all public; nothing is built or pushed by this tutorial)
+  (module 07's pods also pip-install grpcio at start: egress to pypi.org)
 
 optional, per module
   ✓ cert-manager
@@ -123,7 +125,7 @@ all checks passed
 |---|---|
 | cluster | the API server answers, which client is in use, and whether this is OpenShift |
 | permissions | you can create the four kinds of object every module creates |
-| images the modules pull | the public images modules 01–04 use — listed, not pulled yet |
+| images the modules pull | the public images the modules use — listed, not pulled yet — and the one module that also needs PyPI |
 | optional, per module | platform pieces only some modules need; a missing one is not a failure |
 | a real write, end to end | it created a namespace and started the same `client` pod every module uses, and waited for it to be Ready |
 
@@ -145,7 +147,7 @@ problem, it says so and shows the fix. Module 12 has the worked example.
 
 | | Modules |
 |---|---|
-| cert-manager | 08, 09, 12 |
+| cert-manager | 08, 09 |
 | Gateway API CRDs | 12 |
 | MetalLB (or any LoadBalancer) | 12 |
 | Prometheus Operator CRDs | 10 |

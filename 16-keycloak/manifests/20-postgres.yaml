@@ -1,0 +1,72 @@
+# The database Keycloak keeps its realms, users and sessions in. The operator
+# does not provide one: "you need to provision it yourself" (operator guide).
+#
+# LAB ONLY: one PostgreSQL pod with a 1 GiB volume and a password in a Secret
+# written here. Production uses a managed or replicated PostgreSQL, with
+# credentials that never enter a git repository.
+#
+# The image is Red Hat's PostgreSQL 16, which runs as the random UID OpenShift
+# assigns (restricted-v2) - the Docker Hub image expects to start as root.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keycloak-db
+  namespace: keycloak
+stringData:
+  username: keycloak
+  password: lab-only-db-password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: keycloak
+spec:
+  selector: { app: postgres }
+  ports:
+  - { name: postgres, port: 5432, targetPort: 5432 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: keycloak
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+      - name: postgres
+        image: registry.redhat.io/rhel9/postgresql-16:latest
+        env:
+        - name: POSTGRESQL_DATABASE
+          value: keycloak
+        - name: POSTGRESQL_USER
+          valueFrom: { secretKeyRef: { name: keycloak-db, key: username } }
+        - name: POSTGRESQL_PASSWORD
+          valueFrom: { secretKeyRef: { name: keycloak-db, key: password } }
+        ports:
+        - { name: postgres, containerPort: 5432 }
+        readinessProbe:
+          exec: { command: ["pg_isready", "-h", "127.0.0.1", "-p", "5432"] }
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests: { cpu: "50m",  memory: "128Mi" }
+          limits:   { cpu: "500m", memory: "512Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+        volumeMounts:
+        - { name: data, mountPath: /var/lib/pgsql/data }
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources:
+        requests: { storage: 1Gi }

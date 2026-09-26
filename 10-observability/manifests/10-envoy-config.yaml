@@ -1,0 +1,128 @@
+# Module 10 — observability: what Envoy tells you about the traffic it carries.
+#
+#   metrics   /stats/prometheus on the admin port, scraped by OpenShift's
+#             user-workload monitoring (50-servicemonitor.yaml)
+#   logs      one JSON line per request, with Envoy's response flags
+#   traces    a span per request, sent to Zipkin (40-zipkin.yaml)
+#
+# The routes exist to produce one of each outcome worth recognising:
+#   /          proxied to echo                   200
+#   /slow      a 1 s app, 250 ms timeout         504, flag UT
+#   /down      a Service with no pods            503, flag UH
+#   /refused   a port nothing listens on         503, flag UF
+#   anything the routes do not match            404, flag NR (no route)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-config
+data:
+  envoy.yaml: |
+    # node.cluster names this Envoy in its traces ("envoy-10" in Zipkin).
+    node:
+      id: envoy-10
+      cluster: envoy-10
+
+    admin:
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+    static_resources:
+      listeners:
+      - name: http
+        address:
+          socket_address: { address: 0.0.0.0, port_value: 8080 }
+        filter_chains:
+        - filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: ingress
+              # Trace every request and send it to Zipkin. 100% is for a
+              # tutorial; production samples a small fraction.
+              tracing:
+                random_sampling: { value: 100 }
+                provider:
+                  name: envoy.tracers.zipkin
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.config.trace.v3.ZipkinConfig
+                    collector_cluster: zipkin
+                    collector_endpoint: /api/v2/spans
+                    collector_endpoint_version: HTTP_JSON
+              access_log:
+              - name: envoy.access_loggers.stdout
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                  log_format:
+                    json_format:
+                      path:     "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+                      code:     "%RESPONSE_CODE%"
+                      flags:    "%RESPONSE_FLAGS%"
+                      details:  "%RESPONSE_CODE_DETAILS%"
+                      duration: "%DURATION%"
+                      upstream: "%UPSTREAM_HOST%"
+                      cluster:  "%UPSTREAM_CLUSTER%"
+                      trace_id: "%TRACE_ID%"
+              route_config:
+                name: observe
+                virtual_hosts:
+                - name: observe
+                  domains: ["*"]
+                  # No catch-all on purpose: an unmatched path has NO route.
+                  routes:
+                  - match: { path: "/" }
+                    route: { cluster: echo }
+                  - match: { path: "/slow" }
+                    route: { cluster: slow, timeout: 0.25s }
+                  - match: { path: "/down" }
+                    route: { cluster: down }
+                  - match: { path: "/refused" }
+                    route: { cluster: refused }
+              http_filters:
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      clusters:
+      - name: echo
+        type: STRICT_DNS
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: echo
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: echo, port_value: 8080 } } }
+      - name: slow
+        type: STRICT_DNS
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: slow
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: slow, port_value: 8080 } } }
+      # A headless Service whose Deployment has zero replicas: DNS returns no
+      # address, so the cluster has no endpoints at all.
+      - name: down
+        type: STRICT_DNS
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: down
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: down, port_value: 8080 } } }
+      # The echo pods, on a port nothing listens on: the connection is refused.
+      - name: refused
+        type: STRICT_DNS
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: refused
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: echo, port_value: 9999 } } }
+      - name: zipkin
+        type: STRICT_DNS
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: zipkin
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: zipkin, port_value: 9411 } } }

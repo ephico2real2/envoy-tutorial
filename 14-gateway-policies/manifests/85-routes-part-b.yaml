@@ -1,0 +1,23 @@
+# Part B's two routes, both to the echo app: /chaos for fault injection,
+# /sticky for consistent hashing.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: chaos
+  namespace: envoy-14
+spec:
+  parentRefs: [{ name: eg }]
+  rules:
+  - matches: [{ path: { type: PathPrefix, value: /chaos } }]
+    backendRefs: [{ name: echo, port: 8080 }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sticky
+  namespace: envoy-14
+spec:
+  parentRefs: [{ name: eg }]
+  rules:
+  - matches: [{ path: { type: PathPrefix, value: /sticky } }]
+    backendRefs: [{ name: echo, port: 8080 }]

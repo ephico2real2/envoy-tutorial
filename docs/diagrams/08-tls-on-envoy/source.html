@@ -1,0 +1,176 @@
+<title>Envoy TLS Termination</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 08 · TLS on Envoy</div>
+    <h1>A certificate from cert-manager, and who terminates TLS</h1>
+    <p class="lede">Drawn from <code>08-tls-on-envoy/manifests/</code>; every result was measured on CRC in namespace <code>envoy-08</code>.</p>
+  </header>
+
+  <section>
+    <h2>Where the certificate comes from</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 392" role="img" aria-label="A Certificate resource asks the enterprise-ca ClusterIssuer for a certificate for three names. cert-manager has it signed and stores the certificate, its private key and the signing CA in the Secret shop-tls. Envoy mounts the Secret and presents the certificate on port 8443; the client copies ca.crt and trusts the certificate because it trusts the CA that signed it.">
+  <defs><marker id="t1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="t1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="40" y="12" width="420" height="86" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="54" y="33" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">Certificate shop-tls</text>
+<text x="54" y="50" font-family="IBM Plex Mono, monospace" font-size="12">dnsNames: shop.apps-crc.testing,</text>
+<text x="54" y="67" font-family="IBM Plex Mono, monospace" font-size="12">shop-reencrypt.apps-crc.testing, envoy.envoy-08.svc</text>
+<rect x="520" y="12" width="420" height="86" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="534" y="33" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">ClusterIssuer enterprise-ca</text>
+<text x="534" y="50">a CA issuer: signs with the</text>
+<text x="534" y="67" fill="var(--muted)">Enterprise Root CA&#x27;s key</text>
+<line x1="460" y1="55" x2="518" y2="55" stroke="currentColor" stroke-width="1.3" marker-end="url(#t1)"/>
+<text x="464" y="46" fill="var(--muted)">asks</text>
+<line x1="250" y1="98" x2="250" y2="142" stroke="currentColor" stroke-width="1.3" marker-end="url(#t1)"/>
+<line x1="730" y1="98" x2="290" y2="142" stroke="currentColor" stroke-width="1.3" marker-end="url(#t1)"/>
+<text x="262" y="124" fill="var(--muted)">cert-manager signs and stores</text>
+<rect x="40" y="144" width="900" height="72" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="54" y="165" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">Secret shop-tls</text>
+<text x="54" y="182">tls.crt — the certificate (90 days, renewed before expiry)   tls.key — its private key</text>
+<text x="54" y="199">ca.crt — the CA that signed it</text>
+<line x1="250" y1="216" x2="250" y2="262" stroke="currentColor" stroke-width="1.3" marker-end="url(#t1)"/>
+<line x1="730" y1="216" x2="730" y2="262" stroke="currentColor" stroke-width="1.3" marker-end="url(#t1)"/>
+<text x="262" y="244" fill="var(--muted)">mounted as files</text>
+<text x="742" y="244" fill="var(--muted)">copied to the client</text>
+<rect x="40" y="264" width="420" height="60" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="54" y="285" font-weight="600">Envoy :8443</text>
+<text x="54" y="302">presents tls.crt, proves it holds tls.key</text>
+<rect x="520" y="264" width="420" height="60" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="534" y="285" font-weight="600">client</text>
+<text x="534" y="302">curl --cacert ca.crt: trusts that CA</text>
+<text x="40" y="360" font-weight="600">The client trusts the certificate because it trusts the CA that signed it — not because it has seen it before.</text>
+<text x="40" y="380" fill="var(--muted)">Measured on CRC: issuer CN=Enterprise Root CA, valid 90 days, no CommonName, three SANs.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>cert-manager turns a Certificate resource into a Secret holding the certificate, its key and the signing CA.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Three Routes, three places TLS ends</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 410" role="img" aria-label="Three OpenShift Route types in front of the same Envoy. Passthrough: the router forwards the TLS bytes, Envoy terminates TLS with the cert-manager certificate, and a client trusting the enterprise CA gets 200. Edge: the router terminates TLS with its own wildcard certificate and sends plain HTTP to Envoy on 8080; a client trusting only the enterprise CA fails with exit 60. Reencrypt: the router terminates with its own certificate and opens a new TLS connection to Envoy on 8443; the client again sees the router&#x27;s certificate.">
+  <defs><marker id="t2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="t2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<text x="20" y="22" font-weight="600" fill="var(--remote)">passthrough</text>
+<text x="20" y="40" font-family="IBM Plex Mono, monospace" font-size="12">shop.apps-crc.testing</text>
+<rect x="20" y="52" width="290" height="36" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="34" y="75" font-weight="600">client — https://…/</text>
+<line x1="165.0" y1="88" x2="165.0" y2="108" stroke="currentColor" stroke-width="1.3" marker-end="url(#t2)"/>
+<rect x="20" y="110" width="290" height="70" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="34" y="131" font-weight="600">router</text>
+<text x="34" y="148">forwards the TLS bytes untouched</text>
+<text x="34" y="165" fill="var(--muted)">cannot see inside</text>
+<line x1="165.0" y1="180" x2="165.0" y2="200" stroke="currentColor" stroke-width="1.3" marker-end="url(#t2)"/>
+<rect x="20" y="202" width="290" height="52" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="34" y="223" font-weight="600">Envoy :8443 terminates TLS</text>
+<text x="34" y="240">with the cert-manager certificate</text>
+<rect x="20" y="276" width="290" height="70" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="34" y="297" font-weight="600">client sees: Envoy&#x27;s certificate</text>
+<text x="34" y="314">issuer Enterprise Root CA</text>
+<text x="34" y="331" fill="var(--remote)" font-weight="600">trusting that CA: 200</text>
+<text x="345" y="22" font-weight="600" fill="var(--remote)">edge</text>
+<text x="345" y="40" font-family="IBM Plex Mono, monospace" font-size="12">shop-edge.apps-crc.testing</text>
+<rect x="345" y="52" width="290" height="36" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="359" y="75" font-weight="600">client — https://…/</text>
+<line x1="490.0" y1="88" x2="490.0" y2="108" stroke="currentColor" stroke-width="1.3" marker-end="url(#t2)"/>
+<rect x="345" y="110" width="290" height="70" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="359" y="131" font-weight="600">router terminates TLS</text>
+<text x="359" y="148">with its *.apps-crc.testing cert</text>
+<text x="359" y="165" fill="var(--muted)">then sends plain HTTP</text>
+<line x1="490.0" y1="180" x2="490.0" y2="200" stroke="currentColor" stroke-width="1.3" marker-end="url(#t2)"/>
+<rect x="345" y="202" width="290" height="52" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="359" y="223" font-weight="600">Envoy :8080, plain HTTP</text>
+<text x="359" y="240">no TLS reaches Envoy</text>
+<rect x="345" y="276" width="290" height="70" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="359" y="297" font-weight="600">client sees: the router&#x27;s certificate</text>
+<text x="359" y="314">issuer ingress-operator@…</text>
+<text x="359" y="331" fill="var(--gap)" font-weight="600">trusting only the CA: exit 60</text>
+<text x="670" y="22" font-weight="600" fill="var(--remote)">reencrypt</text>
+<text x="670" y="40" font-family="IBM Plex Mono, monospace" font-size="12">shop-reencrypt.apps-crc.testing</text>
+<rect x="670" y="52" width="290" height="36" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="684" y="75" font-weight="600">client — https://…/</text>
+<line x1="815.0" y1="88" x2="815.0" y2="108" stroke="currentColor" stroke-width="1.3" marker-end="url(#t2)"/>
+<rect x="670" y="110" width="290" height="70" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="684" y="131" font-weight="600">router terminates TLS</text>
+<text x="684" y="148">then opens NEW TLS to Envoy,</text>
+<text x="684" y="165" fill="var(--muted)">checked against the CA</text>
+<line x1="815.0" y1="180" x2="815.0" y2="200" stroke="currentColor" stroke-width="1.3" marker-end="url(#t2)"/>
+<rect x="670" y="202" width="290" height="52" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="684" y="223" font-weight="600">Envoy :8443 terminates TLS</text>
+<text x="684" y="240">the router is its client</text>
+<rect x="670" y="276" width="290" height="70" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="684" y="297" font-weight="600">client sees: the router&#x27;s certificate</text>
+<text x="684" y="314">issuer ingress-operator@…</text>
+<text x="684" y="331" fill="var(--gap)" font-weight="600">trusting only the CA: exit 60</text>
+<text x="20" y="380" font-weight="600">Whoever terminates TLS presents the certificate. Behind it the request is readable: edge sends it to Envoy as plain HTTP.</text>
+<text x="20" y="400" fill="var(--muted)">Measured in-cluster, trusting only the enterprise CA. Through all three the app saw x-forwarded-proto: https.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>Passthrough lets Envoy present its own certificate; edge and reencrypt present the router&#x27;s.</figcaption>
+    </figure>
+  </section>
+</div>

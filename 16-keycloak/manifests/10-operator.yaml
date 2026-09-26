@@ -1,0 +1,31 @@
+# The Red Hat build of Keycloak Operator, from OpenShift's own catalog
+# (redhat-operators), installed for one namespace.
+#
+# installPlanApproval: Manual - the operator guide's recommendation: a new
+# operator version waits for someone to approve it, instead of upgrading
+# Keycloak underneath its users. Step 2 approves the first install.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keycloak
+---
+# An OperatorGroup says which namespaces the operator may manage: only this one.
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  targetNamespaces: [keycloak]
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: rhbk-operator
+  namespace: keycloak
+spec:
+  name: rhbk-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  channel: stable-v26.6
+  installPlanApproval: Manual

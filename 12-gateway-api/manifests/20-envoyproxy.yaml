@@ -1,12 +1,13 @@
 # The data-plane equivalent of the Helm values used to install the controller.
 #
 # Envoy Gateway generates the proxy Deployment itself, so there is no YAML to
-# edit - this resource is the supported way to influence it. On OpenShift the
-# generated pod would otherwise carry the upstream default UID 65532, which
-# restricted-v2 refuses because it is outside the namespace's assigned range.
+# edit - this resource is the supported way to influence it.
 #
-# As with the controller, the fix is to REMOVE the pinned ids rather than to
-# grant anyuid: runAsNonRoot stays true and OpenShift allocates a compliant uid.
+# The securityContext below does not get the pod past OpenShift's restricted-v2.
+# Envoy Gateway v1.9.1 puts runAsUser 65532 on both proxy containers and merges
+# these fields over that default, so the uid - outside the namespace's range -
+# stays. What admits the pod is a nonroot-v2 grant to its ServiceAccount
+# (README, step 4); not anyuid, which would also allow root.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: EnvoyProxy
 metadata:

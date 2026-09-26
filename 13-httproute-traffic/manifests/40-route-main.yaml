@@ -1,0 +1,31 @@
+# Steps 2 and 3. Three rules, deliberately in the "wrong" order: the catch-all
+# comes first. In an envoy.yaml that would swallow everything - Envoy's first
+# match wins (module 04). The Gateway API instead ranks matches by how specific
+# they are, and the controller hands Envoy the routes in that order.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: main
+  namespace: envoy-13
+spec:
+  parentRefs:
+  - name: eg
+  rules:
+  # Everything, to the stable version.
+  - matches:
+    - path: { type: PathPrefix, value: / }
+    backendRefs:
+    - { name: echo, port: 8080 }
+  # A longer prefix: more specific, so it wins for /canary...
+  - matches:
+    - path: { type: PathPrefix, value: /canary }
+    backendRefs:
+    - { name: canary, port: 8080 }
+  # The same prefix as the first rule plus a header: more specific than the
+  # first rule, so a request carrying x-canary: yes goes to the canary.
+  - matches:
+    - path: { type: PathPrefix, value: / }
+      headers:
+      - { name: x-canary, value: "yes" }
+    backendRefs:
+    - { name: canary, port: 8080 }

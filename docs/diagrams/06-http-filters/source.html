@@ -1,0 +1,148 @@
+<title>Envoy Filter Order</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 06 · HTTP filters</div>
+    <h1>The same filters in a different order</h1>
+    <p class="lede">Drawn from <code>06-http-filters/manifests/10-envoy-config.yaml</code>; the results were measured on CRC in namespace <code>envoy-06</code>.</p>
+  </header>
+
+  <section>
+    <h2>Filter order is part of the config</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 598" role="img" aria-label="Two listeners with the same filters: cors, two Lua trace filters, jwt_authn, local_ratelimit and the router. On port 8080 jwt_authn comes first: ten unsigned requests get 401 and never reach the rate limiter, so alice&#x27;s signed request then gets 200. On port 8081 the rate limiter comes first: the unsigned requests use up its five tokens, five get 401 and five get 429, and alice&#x27;s signed request gets 429.">
+  <defs><marker id="h1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="h1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="250" y="12" width="480" height="44" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="264" y="39" font-weight="600">client — 10 requests with no token, then 1 signed by alice</text>
+<line x1="400" y1="56" x2="200" y2="72" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
+<line x1="580" y1="56" x2="780" y2="72" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
+<text x="20" y="94" font-weight="600">:8080 — authenticate, then rate limit</text>
+<rect x="30" y="104" width="200" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="44" y="126" font-family="IBM Plex Mono, monospace" font-size="12">cors</text>
+<line x1="230" y1="121" x2="258" y2="121" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#h1g)"/>
+<text x="264" y="125" fill="var(--muted)">allowed preflight → 200</text>
+<line x1="130" y1="138" x2="130" y2="150" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
+<rect x="30" y="152" width="200" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="44" y="174" font-family="IBM Plex Mono, monospace" font-size="12">lua trace-a</text>
+<line x1="130" y1="186" x2="130" y2="198" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
+<rect x="30" y="200" width="200" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="44" y="222" font-family="IBM Plex Mono, monospace" font-size="12">lua trace-b</text>
+<line x1="130" y1="234" x2="130" y2="246" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
+<rect x="30" y="248" width="200" height="34" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="44" y="270" font-family="IBM Plex Mono, monospace" font-size="12">jwt_authn</text>
+<line x1="230" y1="265" x2="258" y2="265" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#h1g)"/>
+<text x="264" y="269" fill="var(--gap)" font-weight="600">no or forged token → 401</text>
+<line x1="130" y1="282" x2="130" y2="294" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
+<rect x="30" y="296" width="200" height="34" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="44" y="318" font-family="IBM Plex Mono, monospace" font-size="12">local_ratelimit</text>
+<line x1="230" y1="313" x2="258" y2="313" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#h1g)"/>
+<text x="264" y="317" fill="var(--gap)" font-weight="600">no token left → 429</text>
+<line x1="130" y1="330" x2="130" y2="342" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
+<rect x="30" y="344" width="200" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="44" y="366" font-family="IBM Plex Mono, monospace" font-size="12">router</text>
+<line x1="130" y1="378" x2="130" y2="396" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
+<rect x="30" y="398" width="200" height="34" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="44" y="420" font-weight="600">echo pod</text>
+<rect x="20" y="452" width="450" height="70" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="34" y="473" fill="var(--remote)" font-weight="600">10 × 401, then alice: 200</text>
+<text x="34" y="490">jwt_authn stopped every unsigned request</text>
+<text x="34" y="507" fill="var(--muted)">before the rate limiter saw it</text>
+<text x="510" y="94" font-weight="600">:8081 — rate limit, then authenticate</text>
+<rect x="520" y="104" width="200" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="534" y="126" font-family="IBM Plex Mono, monospace" font-size="12">cors</text>
+<line x1="720" y1="121" x2="748" y2="121" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#h1g)"/>
+<text x="754" y="125" fill="var(--muted)">allowed preflight → 200</text>
+<line x1="620" y1="138" x2="620" y2="150" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
+<rect x="520" y="152" width="200" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="534" y="174" font-family="IBM Plex Mono, monospace" font-size="12">lua trace-a</text>
+<line x1="620" y1="186" x2="620" y2="198" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
+<rect x="520" y="200" width="200" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="534" y="222" font-family="IBM Plex Mono, monospace" font-size="12">lua trace-b</text>
+<line x1="620" y1="234" x2="620" y2="246" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
+<rect x="520" y="248" width="200" height="34" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="534" y="270" font-family="IBM Plex Mono, monospace" font-size="12">local_ratelimit</text>
+<line x1="720" y1="265" x2="748" y2="265" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#h1g)"/>
+<text x="754" y="269" fill="var(--gap)" font-weight="600">no token left → 429</text>
+<line x1="620" y1="282" x2="620" y2="294" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
+<rect x="520" y="296" width="200" height="34" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="534" y="318" font-family="IBM Plex Mono, monospace" font-size="12">jwt_authn</text>
+<line x1="720" y1="313" x2="748" y2="313" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#h1g)"/>
+<text x="754" y="317" fill="var(--gap)" font-weight="600">no or forged token → 401</text>
+<line x1="620" y1="330" x2="620" y2="342" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
+<rect x="520" y="344" width="200" height="34" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="534" y="366" font-family="IBM Plex Mono, monospace" font-size="12">router</text>
+<line x1="620" y1="378" x2="620" y2="396" stroke="currentColor" stroke-width="1.3" marker-end="url(#h1)"/>
+<rect x="520" y="398" width="200" height="34" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="534" y="420" font-weight="600">echo pod</text>
+<rect x="510" y="452" width="450" height="70" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="524" y="473" fill="var(--gap)" font-weight="600">5 × 401, 5 × 429, then alice: 429</text>
+<text x="524" y="490">unsigned requests spent the 5 tokens</text>
+<text x="524" y="507" fill="var(--muted)">alice waits for a token: one every 12 s</text>
+<text x="20" y="566" font-weight="600">The same filters, two of them swapped. HTTP filters run top to bottom, and one that answers a request stops it there.</text>
+<text x="20" y="586" fill="var(--muted)">Measured on CRC, each listener starting with a full bucket.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>Swapping jwt_authn and local_ratelimit decides whether unsigned requests can use up a signed user&#x27;s quota.</figcaption>
+    </figure>
+  </section>
+</div>

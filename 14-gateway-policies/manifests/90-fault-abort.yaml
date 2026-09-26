@@ -1,0 +1,15 @@
+# Step 10. Fault injection: the proxy itself answers 30 % of /chaos requests
+# with a 503 - the backend is fine. A way to test how callers cope with
+# failure, on purpose, before production does it by accident.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: chaos
+  namespace: envoy-14
+spec:
+  targetRefs:
+  - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: chaos }
+  faultInjection:
+    abort:
+      httpStatus: 503
+      percentage: 30

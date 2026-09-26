@@ -1,0 +1,61 @@
+# Envoy with three things mounted from Secrets and ConfigMaps:
+#   /etc/tls-edge    envoy-edge    the certificate clients see
+#   /etc/tls-client  envoy-client  the certificate Envoy shows the service
+#   /etc/sds         envoy-sds     the SDS file for :8443
+# All as DIRECTORIES, not subPath, so updates reach the running pod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy
+  labels: { app: envoy }
+spec:
+  selector: { app: envoy }
+  ports:
+  - { name: https,        port: 8443, targetPort: 8443 }
+  - { name: https-static, port: 8444, targetPort: 8444 }
+  - { name: admin,        port: 9901, targetPort: 9901 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy
+  labels: { app: envoy }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: envoy } }
+  template:
+    metadata:
+      labels: { app: envoy }
+    spec:
+      containers:
+      - name: envoy
+        image: envoyproxy/envoy:v1.39-latest
+        args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+        ports:
+        - { name: https,        containerPort: 8443 }
+        - { name: https-static, containerPort: 8444 }
+        - { name: admin,        containerPort: 9901 }
+        readinessProbe:
+          httpGet: { path: /ready, port: 9901 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        volumeMounts:
+        - { name: config,     mountPath: /etc/envoy/envoy.yaml, subPath: envoy.yaml }
+        - { name: sds,        mountPath: /etc/sds,        readOnly: true }
+        - { name: tls-edge,   mountPath: /etc/tls-edge,   readOnly: true }
+        - { name: tls-client, mountPath: /etc/tls-client, readOnly: true }
+        resources:
+          requests: { cpu: "50m",  memory: "64Mi" }
+          limits:   { cpu: "500m", memory: "256Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+      volumes:
+      - name: config
+        configMap: { name: envoy-config }
+      - name: sds
+        configMap: { name: envoy-sds }
+      - name: tls-edge
+        secret: { secretName: envoy-edge }
+      - name: tls-client
+        secret: { secretName: envoy-client }

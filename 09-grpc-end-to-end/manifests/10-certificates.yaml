@@ -1,0 +1,42 @@
+# Three certificates, all signed by the same enterprise CA:
+#
+#   envoy-edge     Envoy's SERVER certificate, for clients calling in through
+#                  the passthrough Route
+#   catalog-tls    the catalog service's SERVER certificate, for Envoy calling it
+#   envoy-client   Envoy's CLIENT certificate - the identity it proves to the
+#                  catalog service, which refuses callers without one (mTLS)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: envoy-edge
+spec:
+  secretName: envoy-edge
+  dnsNames:
+  - grpc.apps-crc.testing
+  - envoy.envoy-09.svc
+  usages: [server auth, digital signature, key encipherment]
+  issuerRef: { name: enterprise-ca, kind: ClusterIssuer, group: cert-manager.io }
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: catalog-tls
+spec:
+  secretName: catalog-tls
+  dnsNames:
+  - catalog.envoy-09.svc
+  usages: [server auth, digital signature, key encipherment]
+  issuerRef: { name: enterprise-ca, kind: ClusterIssuer, group: cert-manager.io }
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: envoy-client
+spec:
+  secretName: envoy-client
+  # A client certificate names WHO is calling, not a host. A URI SAN is the
+  # usual way to carry that identity; the catalog service logs it.
+  uris:
+  - spiffe://envoy-tutorial/ns/envoy-09/envoy
+  usages: [client auth, digital signature, key encipherment]
+  issuerRef: { name: enterprise-ca, kind: ClusterIssuer, group: cert-manager.io }

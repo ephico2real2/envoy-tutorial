@@ -1,0 +1,91 @@
+# The slow app from module 04: it waits 1 s before answering, so a burst of
+# concurrent requests piles up behind it - what the circuit breaker is for.
+#
+# /healthz answers immediately so readiness does not have to wait out the delay.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: slow-src
+data:
+  slow.py: |
+    """Answers slowly, so a route timeout can be demonstrated."""
+    import os, time
+    # Threading, not the plain HTTPServer: with one thread, a request that
+    # Envoy has already timed out still holds the server for the full delay,
+    # and the NEXT request queues behind it - a 1s reply measures as 2s+.
+    # That is an artifact of the test app, not Envoy behaviour.
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    DELAY = float(os.environ.get("DELAY_SECONDS", "1"))
+    PORT = int(os.environ.get("PORT", "8080"))
+
+    class Slow(BaseHTTPRequestHandler):
+        def _send(self, code, text):
+            body = text.encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            # Readiness must not pay the delay, or the pod takes DELAY seconds
+            # per probe and the deploy looks broken.
+            if self.path == "/healthz":
+                self._send(200, "ok\n")
+                return
+            time.sleep(DELAY)
+            self._send(200, "slow reply after %ss\n" % DELAY)
+
+        def log_message(self, fmt, *args):
+            print("%s %s" % (self.command, self.path), flush=True)
+
+    print("slow listening on :%d, delay %ss" % (PORT, DELAY), flush=True)
+    ThreadingHTTPServer(("0.0.0.0", PORT), Slow).serve_forever()
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: slow
+  labels: { app: slow }
+spec:
+  clusterIP: None
+  selector: { app: slow }
+  ports:
+  - { name: http, port: 8080, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slow
+  labels: { app: slow }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: slow } }
+  template:
+    metadata:
+      labels: { app: slow }
+    spec:
+      containers:
+      - name: slow
+        image: python:3.12-slim
+        command: ["python", "/app/slow.py"]
+        env:
+        - { name: DELAY_SECONDS, value: "1" }
+        ports:
+        - { name: http, containerPort: 8080 }
+        readinessProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        resources:
+          requests: { cpu: "10m",  memory: "32Mi" }
+          limits:   { cpu: "200m", memory: "128Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+        volumeMounts:
+        - { name: src, mountPath: /app }
+      volumes:
+      - name: src
+        configMap: { name: slow-src }

@@ -23,8 +23,19 @@ Every command runs as written from your laptop.
 | [`02-the-config-file`](02-the-config-file/README.md) | the config file, field by field, and what each field defaults to | **done** |
 | [`03-listeners-and-filter-chains`](03-listeners-and-filter-chains/README.md) | `filter_chain_match`, SNI, `tls_inspector`, passthrough Routes | **done** |
 | [`04-routing`](04-routing/README.md) | match types, first match wins, rewrites, timeouts, redirects, `direct_response` | **done** |
-| `05`–`11` | load balancing, filters, gRPC, TLS, observability, resilience | to come |
-| [`12-gateway-api`](12-gateway-api/README.md) | Envoy Gateway, `Gateway`, `HTTPRoute`, and the two OpenShift traps that block them | **done** |
+| [`05-clusters-and-load-balancing`](05-clusters-and-load-balancing/README.md) | STATIC / STRICT_DNS / LOGICAL_DNS / EDS, the headless lesson, load-balancing policies measured, health checks | **done** |
+| [`06-http-filters`](06-http-filters/README.md) | the filter chain: `cors`, `jwt_authn`, `local_ratelimit`, `lua` — and why their order matters, measured | **done** |
+| [`07-modernising-grpc`](07-modernising-grpc/README.md) | REST + JSON in front of a gRPC-only service: `grpc_json_transcoder`, the `.proto` contract, one port for REST and gRPC | **done** |
+| [`08-tls-on-envoy`](08-tls-on-envoy/README.md) | a cert-manager certificate on Envoy; trust and SAN errors; passthrough vs edge vs reencrypt Routes | **done** |
+| [`09-grpc-end-to-end`](09-grpc-end-to-end/README.md) | gRPC over TLS, mutual TLS to the service, ALPN `h2`, and certificate rotation with SDS | **done** |
+| [`10-observability`](10-observability/README.md) | response flags in the access log, Envoy metrics in OpenShift's monitoring with PromQL, traces in Zipkin | **done** |
+| [`11-resilience`](11-resilience/README.md) | retries and `previous_hosts`, outlier detection, circuit breakers — each measured against a sick or slow pod | **done** |
+| [`12-gateway-api`](12-gateway-api/README.md) | Envoy Gateway: `GatewayClass`, `Gateway`, `HTTPRoute`, the two OpenShift traps, and the Envoy config the controller generates | **done** |
+| [`13-httproute-traffic`](13-httproute-traffic/README.md) | `HTTPRoute` only: match precedence, header match, weighted split, rewrite, redirect, mirror, timeout — and what Envoy gets for each | **done** |
+| [`14-gateway-policies`](14-gateway-policies/README.md) | `BackendTrafficPolicy` and `SecurityPolicy`: modules 06 and 11 as policies — retry, ejection, circuit breaker, rate limit, JWT, CORS — and what Envoy got | **done** |
+| [`15-backend-tls-policy`](15-backend-tls-policy/README.md) | `BackendTLSPolicy`: TLS from the Gateway to a TLS-only backend — SNI, SAN check and CA, the wrong-name and wrong-CA failures, and what Envoy got | **done** |
+| [`16-keycloak`](16-keycloak/README.md) | a lab: the Red Hat build of Keycloak by its operator — manual InstallPlan approval, PostgreSQL, TLS, a realm with users, roles and clients, and reading a token | **done** |
+| [`17-keycloak-jwt`](17-keycloak-jwt/README.md) | Keycloak's tokens checked at the Gateway: remoteJWKS over TLS with a ReferenceGrant and BackendTLSPolicy, issuer and audience, role-based `/admin`, and failing closed | **done** |
 
 Module 12 was written first because it was the immediate need. The numbering is
 the reading order, not the build order.

@@ -1,0 +1,88 @@
+# Envoy, plus an init container that compiles catalog.proto into the
+# descriptor set grpc_json_transcoder reads (catalog.pb).
+#
+# --include_imports matters: the descriptor must also contain the files
+# catalog.proto imports (google/api/annotations.proto and what it pulls in).
+# Measured with the versions pinned below: without it the descriptor is 687
+# bytes instead of 15 248, and Envoy refuses to start -
+# "transcoding_filter: Unable to build proto descriptor pool".
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy
+  labels: { app: envoy }
+spec:
+  selector: { app: envoy }
+  ports:
+  - { name: http,  port: 8080, targetPort: 8080 }
+  - { name: admin, port: 9901, targetPort: 9901 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy
+  labels: { app: envoy }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: envoy } }
+  template:
+    metadata:
+      labels: { app: envoy }
+    spec:
+      initContainers:
+      - name: descriptor
+        image: python:3.12-slim
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -e
+            # Pinned: google/protobuf/descriptor.proto ships in grpcio-tools and
+            # google/api/*.proto in googleapis-common-protos, so these two
+            # versions decide what goes into catalog.pb.
+            pip install --no-cache-dir --quiet --target=/pylibs \
+                grpcio-tools==1.84.0 googleapis-common-protos==1.75.4
+            PYTHONPATH=/pylibs python -m grpc_tools.protoc -I /proto -I /pylibs \
+                --include_imports --descriptor_set_out=/descriptor/catalog.pb \
+                /proto/catalog.proto
+            ls -l /descriptor
+        env:
+        - { name: HOME, value: /tmp }
+        volumeMounts:
+        - { name: proto,      mountPath: /proto }
+        - { name: pylibs,     mountPath: /pylibs }
+        - { name: descriptor, mountPath: /descriptor }
+        resources:
+          requests: { cpu: "50m", memory: "128Mi" }
+          limits:   { cpu: "1",   memory: "512Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+      containers:
+      - name: envoy
+        image: envoyproxy/envoy:v1.39-latest
+        args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+        ports:
+        - { name: http,  containerPort: 8080 }
+        - { name: admin, containerPort: 9901 }
+        readinessProbe:
+          httpGet: { path: /ready, port: 9901 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        volumeMounts:
+        - { name: config,     mountPath: /etc/envoy/envoy.yaml, subPath: envoy.yaml }
+        - { name: descriptor, mountPath: /etc/envoy/proto, readOnly: true }
+        resources:
+          requests: { cpu: "50m",  memory: "64Mi" }
+          limits:   { cpu: "500m", memory: "256Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+      volumes:
+      - name: config
+        configMap: { name: envoy-config }
+      - name: proto
+        configMap: { name: catalog-proto }
+      - name: pylibs
+        emptyDir: {}
+      - name: descriptor
+        emptyDir: {}

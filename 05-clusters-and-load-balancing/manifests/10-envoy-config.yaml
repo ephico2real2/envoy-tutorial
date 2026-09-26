@@ -1,0 +1,198 @@
+# Module 05 — clusters: how Envoy finds endpoints, and how it chooses between them.
+#
+# One listener, one route per cluster. Every cluster points at the same kind of
+# backend - the echo app, which names the pod that answered - so the only thing
+# that differs between two routes is the cluster setting being taught.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-config
+data:
+  envoy.yaml: |
+    # Required here, not optional: any dynamic resource - even the EDS file
+    # below - makes Envoy refuse to start without a node id and cluster
+    # ("node 'id' and 'cluster' are required"). A control plane uses them to
+    # know which proxy is asking; module 02 introduced the block.
+    node:
+      id: envoy-05
+      cluster: envoy-tutorial
+
+    admin:
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+    static_resources:
+      listeners:
+      - name: http_listener
+        address:
+          socket_address: { address: 0.0.0.0, port_value: 8080 }
+        filter_chains:
+        - filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: http
+              route_config:
+                name: clusters
+                virtual_hosts:
+                - name: clusters
+                  domains: ["*"]
+                  # path_separated_prefix, not prefix: module 04 measured that
+                  # prefix "/vip" would also claim "/vipers".
+                  routes:
+                  - { match: { path_separated_prefix: "/static" },        route: { cluster: static_sidecar } }
+                  - { match: { path_separated_prefix: "/headless" },      route: { cluster: headless } }
+                  - { match: { path_separated_prefix: "/vip" },           route: { cluster: vip } }
+                  - { match: { path_separated_prefix: "/logical" },       route: { cluster: logical } }
+                  - { match: { path_separated_prefix: "/eds" },           route: { cluster: eds } }
+                  - { match: { path_separated_prefix: "/least-request" }, route: { cluster: least_request } }
+                  - { match: { path_separated_prefix: "/random" },        route: { cluster: random } }
+                  # RING_HASH needs something to hash. This hashes the x-user
+                  # header, so one user keeps landing on one pod.
+                  - match: { path_separated_prefix: "/ring-hash" }
+                    route:
+                      cluster: ring_hash
+                      hash_policy:
+                      - header: { header_name: x-user }
+                  - { match: { path_separated_prefix: "/unchecked" },     route: { cluster: unchecked } }
+                  - { match: { path_separated_prefix: "/checked" },       route: { cluster: checked } }
+              http_filters:
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      clusters:
+
+      # ---- Part A: how Envoy finds endpoints -------------------------------
+
+      # STATIC: the address is written in the config. Only useful when it is
+      # truly fixed - here, an echo container in Envoy's OWN pod, reached over
+      # localhost. That is the sidecar pattern.
+      - name: static_sidecar
+        type: STATIC
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: static_sidecar
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: 127.0.0.1, port_value: 8081 } } }
+
+      # STRICT_DNS against the HEADLESS Service: DNS returns every ready pod's
+      # IP, and Envoy keeps one endpoint per address.
+      - name: headless
+        type: STRICT_DNS
+        lb_policy: ROUND_ROBIN
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: headless
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: echo, port_value: 8080 } } }
+
+      # STRICT_DNS against an ordinary ClusterIP Service: DNS returns ONE
+      # virtual IP, so Envoy sees one endpoint and has nothing to balance.
+      - name: vip
+        type: STRICT_DNS
+        lb_policy: ROUND_ROBIN
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: vip
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: echo-vip, port_value: 8080 } } }
+
+      # LOGICAL_DNS: resolves the same headless name, but uses only the first
+      # address it gets back - meant for large DNS-balanced services, not pods.
+      - name: logical
+        type: LOGICAL_DNS
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: logical
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: echo, port_value: 8080 } } }
+
+      # EDS: the endpoint list arrives separately from the cluster. Normally a
+      # control plane sends it; here Envoy reads it from a file, which it
+      # reloads whenever the watched directory changes. The ConfigMap in
+      # 15-eds.yaml is mounted as a DIRECTORY (not subPath) so edits reach the
+      # running pod.
+      - name: eds
+        type: EDS
+        connect_timeout: 1s
+        eds_cluster_config:
+          eds_config:
+            resource_api_version: V3
+            path_config_source:
+              path: /etc/eds/eds.yaml
+              watched_directory: { path: /etc/eds }
+
+      # ---- Part B: how Envoy chooses between endpoints ---------------------
+      # The same headless name each time; only lb_policy changes. (headless,
+      # above, is the ROUND_ROBIN case.)
+
+      - name: least_request
+        type: STRICT_DNS
+        lb_policy: LEAST_REQUEST
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: least_request
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: echo, port_value: 8080 } } }
+
+      - name: random
+        type: STRICT_DNS
+        lb_policy: RANDOM
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: random
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: echo, port_value: 8080 } } }
+
+      - name: ring_hash
+        type: STRICT_DNS
+        lb_policy: RING_HASH
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: ring_hash
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: echo, port_value: 8080 } } }
+
+      # ---- Part C: health checks -------------------------------------------
+      # Both clusters hold the healthy echo pods AND the sick pod (40-sick-app),
+      # which Kubernetes considers Ready but which fails every request.
+
+      - name: unchecked
+        type: STRICT_DNS
+        lb_policy: ROUND_ROBIN
+        connect_timeout: 1s
+        load_assignment:
+          cluster_name: unchecked
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: echo, port_value: 8080 } } }
+            - endpoint: { address: { socket_address: { address: sick, port_value: 8080 } } }
+
+      # The same endpoints, with Envoy asking each one GET /healthz every 2s
+      # (every 60s until the cluster first carries traffic). Any status but 200
+      # marks an endpoint unhealthy at once - unhealthy_threshold counts only
+      # timeouts and refused connections. One success marks it healthy.
+      - name: checked
+        type: STRICT_DNS
+        lb_policy: ROUND_ROBIN
+        connect_timeout: 1s
+        health_checks:
+        - timeout: 1s
+          interval: 2s
+          unhealthy_threshold: 2
+          healthy_threshold: 1
+          http_health_check: { path: /healthz }
+        load_assignment:
+          cluster_name: checked
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: echo, port_value: 8080 } } }
+            - endpoint: { address: { socket_address: { address: sick, port_value: 8080 } } }

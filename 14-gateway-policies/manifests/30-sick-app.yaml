@@ -1,0 +1,80 @@
+# The sick app from module 05: Ready (a TCP readiness probe), but it answers
+# every request with 503. Its pod carries pool: "yes", so the pool Service
+# (20-pool.yaml) sends it one request in three.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sick-src
+data:
+  sick.py: |
+    """Accepts connections, fails every request."""
+    import os
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    POD = os.environ.get("POD_NAME", "sick")
+
+    class Sick(BaseHTTPRequestHandler):
+        def _reply(self):
+            body = ("503 from %s\n" % POD).encode()
+            self.send_response(503)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = do_POST = _reply
+
+        def log_message(self, fmt, *args):
+            print("%s %s" % (self.command, self.path), flush=True)
+
+    print("sick listening on :8080 as %s" % POD, flush=True)
+    ThreadingHTTPServer(("0.0.0.0", 8080), Sick).serve_forever()
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sick
+  labels: { app: sick }
+spec:
+  clusterIP: None
+  selector: { app: sick }
+  ports:
+  - { name: http, port: 8080, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sick
+  labels: { app: sick }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: sick } }
+  template:
+    metadata:
+      labels: { app: sick, pool: "yes" }
+    spec:
+      containers:
+      - name: sick
+        image: python:3.12-slim
+        command: ["python", "/app/sick.py"]
+        env:
+        - name: POD_NAME
+          valueFrom: { fieldRef: { fieldPath: metadata.name } }
+        ports:
+        - { name: http, containerPort: 8080 }
+        # TCP, not HTTP: "the port is open" - true, and not the same as healthy.
+        readinessProbe:
+          tcpSocket: { port: 8080 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        resources:
+          requests: { cpu: "10m",  memory: "32Mi" }
+          limits:   { cpu: "100m", memory: "64Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+        volumeMounts:
+        - { name: src, mountPath: /app }
+      volumes:
+      - name: src
+        configMap: { name: sick-src }

@@ -1,0 +1,28 @@
+# Steps 7 and 8. Module 06's jwt_authn and cors, as one SecurityPolicy on /api.
+#
+# The JWKS is module 06's: an HS256 key shared with ../06-http-filters/make-jwt.sh.
+# TUTORIAL-ONLY - real identity providers publish an RS256/ES256 public key set,
+# which Envoy Gateway fetches with remoteJWKS.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: api
+  namespace: envoy-14
+spec:
+  targetRefs:
+  - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: api }
+  jwt:
+    providers:
+    - name: tutorial
+      issuer: envoy-tutorial
+      localJWKS:
+        type: Inline
+        inline: '{"keys":[{"kty":"oct","alg":"HS256","kid":"tutorial","k":"dHV0b3JpYWwtb25seS1zZWNyZXQtZG8tbm90LXJldXNl"}]}'
+      # The verified subject, passed to the app as a header it can trust.
+      claimToHeaders:
+      - { claim: sub, header: x-user }
+  cors:
+    allowOrigins: ["https://shop.example.com"]
+    allowMethods: [GET, POST]
+    allowHeaders: [authorization, content-type]
+    maxAge: 10m

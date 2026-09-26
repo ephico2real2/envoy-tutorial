@@ -1,0 +1,33 @@
+# Steady traffic, so the graphs in the console have something to show: mostly
+# 200s, and a trickle of each failure the routes produce.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traffic
+  labels: { app: traffic }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: traffic } }
+  template:
+    metadata:
+      labels: { app: traffic }
+    spec:
+      containers:
+      - name: curl
+        image: curlimages/curl:8.11.1
+        command: ["sh", "-c"]
+        args:
+          - |
+            while true; do
+              for i in 1 2 3 4 5 6 7 8; do curl -s -o /dev/null http://envoy:8080/; done
+              for p in /slow /down /refused /nowhere; do curl -s -o /dev/null http://envoy:8080$p; done
+              sleep 1
+            done
+        resources:
+          requests: { cpu: "10m", memory: "16Mi" }
+          limits:   { cpu: "100m", memory: "32Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          capabilities: { drop: ["ALL"] }
+          seccompProfile: { type: RuntimeDefault }

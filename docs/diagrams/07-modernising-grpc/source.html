@@ -1,0 +1,150 @@
+<title>Envoy gRPC Transcoding</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 07 · modernising gRPC</div>
+    <h1>REST and JSON in front of a gRPC-only service</h1>
+    <p class="lede">Drawn from <code>07-modernising-grpc/</code>; every result was measured on CRC in namespace <code>envoy-07</code>.</p>
+  </header>
+
+  <section>
+    <h2>Two clients, one port, one gRPC-only service</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 524" role="img" aria-label="A REST client using curl over HTTP/1.1 and a gRPC client using grpcurl over HTTP/2 both call Envoy on port 8080. The grpc_json_transcoder, reading catalog.pb, rewrites GET /v1/items/widget into the gRPC call Catalog/GetItem and converts JSON to protobuf and back; native gRPC passes through unchanged. The router sends everything to the catalog service over HTTP/2. The service speaks only gRPC: plain curl straight at it fails with Received HTTP/0.9 when not allowed.">
+  <defs><marker id="g1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="g1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="40" y="12" width="400" height="88" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="54" y="33" font-weight="600">curl — REST + JSON, HTTP/1.1</text>
+<text x="54" y="50" font-family="IBM Plex Mono, monospace" font-size="12">GET /v1/items/widget</text>
+<text x="54" y="67" fill="var(--muted)">← {&quot;onHand&quot;: 8}    unknown sku ← 404 {&quot;code&quot;: 5}</text>
+<rect x="540" y="12" width="400" height="88" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="554" y="33" font-weight="600">grpcurl — gRPC, HTTP/2</text>
+<text x="554" y="50" font-family="IBM Plex Mono, monospace" font-size="12">tutorial.catalog.v1.Catalog/GetItem</text>
+<text x="554" y="67" fill="var(--muted)">← {&quot;on_hand&quot;: 8}   unknown sku ← Code: NotFound</text>
+<line x1="240" y1="100" x2="240" y2="146" stroke="currentColor" stroke-width="1.3" marker-end="url(#g1)"/>
+<line x1="740" y1="100" x2="740" y2="146" stroke="currentColor" stroke-width="1.3" marker-end="url(#g1)"/>
+<rect x="40" y="148" width="900" height="200" rx="8" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="58" y="172" font-weight="600">ENVOY :8080 — one port for both; codec AUTO speaks HTTP/1.1 and HTTP/2</text>
+<rect x="60" y="186" width="860" height="72" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="74" y="207" font-family="IBM Plex Mono, monospace" font-size="12">grpc_json_transcoder — reads catalog.pb</text>
+<text x="74" y="224">REST: GET /v1/items/widget  →  POST /tutorial.catalog.v1.Catalog/GetItem, JSON ⇄ protobuf</text>
+<text x="74" y="241" fill="var(--muted)">gRPC: already a gRPC call — passed on unchanged</text>
+<line x1="490" y1="258" x2="490" y2="274" stroke="currentColor" stroke-width="1.3" marker-end="url(#g1)"/>
+<rect x="60" y="276" width="860" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="74" y="297" font-family="IBM Plex Mono, monospace" font-size="12">router → cluster catalog</text>
+<text x="74" y="314">HTTP/2 upstream (http2_protocol_options)</text>
+<line x1="490" y1="348" x2="490" y2="400" stroke="currentColor" stroke-width="1.3" marker-end="url(#g1)"/>
+<text x="502" y="380" fill="var(--muted)">HTTP/2 only — measured: 0 HTTP/1.1 connections</text>
+<rect x="290" y="402" width="400" height="70" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="304" y="423" font-weight="600">catalog · gRPC only · :50051</text>
+<text x="304" y="440">no HTTP routes, no JSON</text>
+<text x="304" y="457" fill="var(--muted)">its log shows every call as gRPC: GetItem sku=widget</text>
+<line x1="690" y1="437" x2="780" y2="437" stroke="var(--gap)" stroke-width="1.3"/>
+<rect x="780" y="402" width="180" height="70" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="794" y="423" fill="var(--gap)" font-weight="600">curl straight here</text>
+<text x="794" y="440">HTTP/0.9 when not</text>
+<text x="794" y="457" fill="var(--muted)">allowed — curl exit 1</text>
+<text x="40" y="506" font-weight="600">The service stayed gRPC-only; Envoy added the REST surface from the .proto alone. Measured on CRC.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>The transcoder turns REST into gRPC calls; native gRPC passes through; everything reaches the service as HTTP/2.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>One .proto, generated twice</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 384" role="img" aria-label="One file, catalog.proto, stored as a ConfigMap, is compiled twice whenever a pod starts: in the catalog pod into the Python stubs the server imports, and in the Envoy pod, with include_imports, into the descriptor set catalog.pb that grpc_json_transcoder reads to build its REST routes.">
+  <defs><marker id="g2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="g2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="290" y="12" width="400" height="70" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="304" y="33" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">catalog.proto</text>
+<text x="304" y="50">the contract — ConfigMap catalog-proto</text>
+<text x="304" y="67" fill="var(--muted)">service, messages, google.api.http routes</text>
+<line x1="420" y1="82" x2="250" y2="128" stroke="currentColor" stroke-width="1.3" marker-end="url(#g2)"/>
+<line x1="560" y1="82" x2="730" y2="128" stroke="currentColor" stroke-width="1.3" marker-end="url(#g2)"/>
+<rect x="40" y="130" width="420" height="86" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="54" y="151" font-weight="600">catalog pod · init container codegen</text>
+<text x="54" y="168" font-family="IBM Plex Mono, monospace" font-size="12">protoc --python_out --grpc_python_out</text>
+<text x="54" y="185" font-family="IBM Plex Mono, monospace" font-size="12">→ catalog_pb2.py, catalog_pb2_grpc.py</text>
+<rect x="520" y="130" width="420" height="86" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="534" y="151" font-weight="600">envoy pod · init container descriptor</text>
+<text x="534" y="168" font-family="IBM Plex Mono, monospace" font-size="12">protoc --include_imports --descriptor_set_out</text>
+<text x="534" y="185" font-family="IBM Plex Mono, monospace" font-size="12">→ catalog.pb (15 248 bytes)</text>
+<line x1="250" y1="216" x2="250" y2="258" stroke="currentColor" stroke-width="1.3" marker-end="url(#g2)"/>
+<line x1="730" y1="216" x2="730" y2="258" stroke="currentColor" stroke-width="1.3" marker-end="url(#g2)"/>
+<rect x="40" y="260" width="420" height="60" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="54" y="281" font-weight="600">server.py imports the stubs</text>
+<text x="54" y="298">serves the gRPC methods</text>
+<rect x="520" y="260" width="420" height="60" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="534" y="281" font-weight="600">grpc_json_transcoder reads catalog.pb</text>
+<text x="534" y="298">builds the REST routes from it</text>
+<text x="40" y="354" font-weight="600">Generated each time a pod starts, from the same ConfigMap — after a .proto change, restart both pods.</text>
+<text x="40" y="374" fill="var(--muted)">Without --include_imports: 687 bytes, and Envoy refuses to start — &quot;Unable to build proto descriptor pool&quot;.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>The service&#x27;s stubs and Envoy&#x27;s descriptor both come from the same file, at pod start.</figcaption>
+    </figure>
+  </section>
+</div>

@@ -1,0 +1,117 @@
+<title>Backend TLS Policy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 15 · BackendTLSPolicy</div>
+    <h1>TLS behind the Gateway</h1>
+    <p class="lede">Drawn from <code>15-backend-tls-policy/manifests/</code>; every outcome was measured on CRC in namespace <code>envoy-15</code>.</p>
+  </header>
+
+  <section>
+    <h2>One policy, four outcomes</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 980 420" role="img" aria-label="A client sends plain HTTP to the Gateway for /secure; the HTTPRoute sends it to the Service secure-echo, whose pods speak only TLS with a certificate for secure-echo.envoy-15.svc signed by enterprise-ca. A BackendTLSPolicy attaches to that Service. Four measured outcomes: with no policy, the Gateway speaks plain HTTP to the TLS port, the backend logs a failed handshake and the client gets 503. With the right policy, TLS 1.3 with SNI secure-echo.envoy-15.svc and 200. With hostname payments, the SAN check fails, 503, ssl.fail_verify_san. With wellKnownCACertificates System, the chain leads to no trusted CA, 503, ssl.fail_verify_error.">
+  <defs><marker id="t1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="t1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<rect x="330" y="12" width="320" height="40" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="344" y="37" font-weight="600">client — GET /secure, plain HTTP</text>
+<line x1="490" y1="52" x2="490" y2="78" stroke="currentColor" stroke-width="1.3" marker-end="url(#t1)"/>
+<rect x="250" y="80" width="480" height="56" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="264" y="101" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">GATEWAY eg — the generated Envoy</text>
+<text x="264" y="118">HTTPRoute secure → Service secure-echo, port https</text>
+<rect x="760" y="164" width="200" height="56" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="774" y="185" font-weight="600">BackendTLSPolicy</text>
+<text x="774" y="202" fill="var(--muted)">targets this Service</text>
+<line x1="760" y1="192" x2="732" y2="192" stroke="currentColor" stroke-width="1.3" marker-end="url(#t1)"/>
+<line x1="490" y1="136" x2="490" y2="162" stroke="currentColor" stroke-width="1.3" marker-end="url(#t1)"/>
+<rect x="250" y="164" width="480" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="264" y="185" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">secure-echo — TLS only, port 8443</text>
+<text x="264" y="202">certificate: secure-echo.envoy-15.svc, by enterprise-ca</text>
+<text x="20" y="250" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">WHAT THE POLICY SAYS → WHAT HAPPENED (measured)</text>
+<rect x="20" y="262" width="220" height="92" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="34" y="283" fill="var(--gap)" font-weight="600">no policy</text>
+<text x="34" y="300">plain HTTP to a TLS port</text>
+<text x="34" y="317" font-weight="600">503 · backend: handshake failed,</text>
+<text x="34" y="334" fill="var(--muted)">&quot;http request&quot;</text>
+<rect x="260" y="262" width="220" height="92" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="274" y="283" fill="var(--remote)" font-weight="600">the right policy</text>
+<text x="274" y="300">TLS 1.3, SNI = the hostname</text>
+<text x="274" y="317" font-weight="600">200 · the SAN matches,</text>
+<text x="274" y="334" fill="var(--muted)">the CA signed it</text>
+<rect x="500" y="262" width="220" height="92" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="514" y="283" fill="var(--gap)" font-weight="600">hostname: payments…</text>
+<text x="514" y="300">SNI and SAN check: payments…</text>
+<text x="514" y="317" font-weight="600">503 · ssl.fail_verify_san</text>
+<text x="514" y="334" fill="var(--muted)">the name is not in the certificate</text>
+<rect x="740" y="262" width="220" height="92" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="754" y="283" fill="var(--gap)" font-weight="600">wellKnownCACertificates:</text>
+<text x="754" y="300">System — only the public CAs</text>
+<text x="754" y="317" font-weight="600">503 · ssl.fail_verify_error</text>
+<text x="754" y="334" fill="var(--muted)">the chain leads to no trusted CA</text>
+<text x="20" y="388" font-weight="600">The hop behind the Gateway gets TLS from a policy on the Service; the name it sends is the name it checks.</text>
+<text x="20" y="408" fill="var(--muted)">Measured on CRC in envoy-15. A changed policy takes about 15 s to reach Envoy (module 14); the first, under a second.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>Without a policy the Gateway speaks plain HTTP to the backend; with one it speaks TLS, sends the policy&#x27;s hostname and checks it.</figcaption>
+    </figure>
+  </section>
+</div>

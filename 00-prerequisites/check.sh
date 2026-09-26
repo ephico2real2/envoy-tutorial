@@ -27,14 +27,16 @@ say "images the modules pull"
 for i in "python:3.12-slim        the echo app" \
          "envoyproxy/envoy:v1.39-latest  the proxy" \
          "curlimages/curl:8.11.1  the in-cluster client" \
-         "alpine/openssl:3.3.2    module 03's test certificates"; do
+         "alpine/openssl:3.3.2    module 03's test certificates" \
+         "fullstorydev/grpcurl:v1.9.3-alpine  module 07's gRPC client"; do
   printf '  · %s\n' "$i"
 done
 echo "  (all public; nothing is built or pushed by this tutorial)"
+echo "  (module 07's pods also pip-install grpcio at start: egress to pypi.org)"
 
 say "optional, per module"
 have() { $KUBE get crd "$1" >/dev/null 2>&1 && ok "$2" || printf '  · %s — not installed (only module %s needs it)\n' "$2" "$3"; }
-have certificates.cert-manager.io "cert-manager"           "08, 09, 12"
+have certificates.cert-manager.io "cert-manager"           "08, 09"
 have gateways.gateway.networking.k8s.io "Gateway API CRDs" "12"
 have ipaddresspools.metallb.io "MetalLB"                   "12"
 $KUBE get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1 \

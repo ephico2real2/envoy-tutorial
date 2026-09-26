@@ -1,0 +1,50 @@
+# The proxy, with both listeners from 10-envoy-config.yaml exposed:
+#   8080  auth_then_limit   jwt_authn before local_ratelimit
+#   8081  limit_then_auth   local_ratelimit before jwt_authn
+apiVersion: v1
+kind: Service
+metadata:
+  name: envoy
+  labels: { app: envoy }
+spec:
+  selector: { app: envoy }
+  ports:
+  - { name: auth-then-limit, port: 8080, targetPort: 8080 }
+  - { name: limit-then-auth, port: 8081, targetPort: 8081 }
+  - { name: admin,           port: 9901, targetPort: 9901 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: envoy
+  labels: { app: envoy }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: envoy } }
+  template:
+    metadata:
+      labels: { app: envoy }
+    spec:
+      containers:
+      - name: envoy
+        image: envoyproxy/envoy:v1.39-latest
+        args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+        ports:
+        - { name: auth-then-limit, containerPort: 8080 }
+        - { name: limit-then-auth, containerPort: 8081 }
+        - { name: admin,           containerPort: 9901 }
+        readinessProbe:
+          httpGet: { path: /ready, port: 9901 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        volumeMounts:
+        - { name: config, mountPath: /etc/envoy/envoy.yaml, subPath: envoy.yaml }
+        resources:
+          requests: { cpu: "50m",  memory: "64Mi" }
+          limits:   { cpu: "500m", memory: "256Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+      volumes:
+      - name: config
+        configMap: { name: envoy-config }

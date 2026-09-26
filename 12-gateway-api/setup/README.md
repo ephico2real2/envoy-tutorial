@@ -56,7 +56,7 @@ already there.
 | `gateway-helm` `crds.enabled` | `true` (default) — installs both CRD sets | **`false`** |
 | `gateway-crds-helm` `crds.gatewayAPI.enabled` | not used by the one-command install | `false` (also its default) |
 | `gateway-crds-helm` `crds.envoyGateway.enabled` | not used by the one-command install | **`true`** (default `false`) |
-| Extra work for pod security | none | an `EnvoyProxy` resource for the SCC |
+| Extra work for pod security | none | a `nonroot-v2` grant to each Gateway's proxy ServiceAccount (module 12, step 4) |
 
 ## What you must NOT do on OpenShift 4.19+
 
@@ -127,7 +127,7 @@ different control plane.
 
 - [Envoy Gateway — Install with Helm](https://gateway.envoyproxy.io/docs/install/install-helm/)
 - [Envoy Gateway — CRDs Helm chart](https://gateway.envoyproxy.io/docs/install/gateway-crds-helm-api/)
-- [Gateway API — API specification](https://gateway-api.sigs.k8s.io/reference/spec/)
+- [Gateway API — API specification](https://gateway-api.sigs.k8s.io/reference/api-spec/1.4/spec/)
 - [OpenShift 4.22 — Configuring Gateway API](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/ingress_and_load_balancing/configuring-gateway-api)
 - [OpenShift — Managing security context constraints](https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/authentication_and_authorization/managing-pod-security-policies)
 

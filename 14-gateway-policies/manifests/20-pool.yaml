@@ -1,0 +1,50 @@
+# One Service over three pods: two healthy echo pods ("good") and the sick app
+# from module 05, which is Ready but answers every request with 503. Both carry
+# the label pool: "yes", which is all the Service selects on - so, as in
+# module 11, one endpoint in three is bad and the policies have work to do.
+apiVersion: v1
+kind: Service
+metadata:
+  name: pool
+spec:
+  clusterIP: None
+  selector: { pool: "yes" }
+  ports:
+  - { name: http, port: 8080, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: good
+  labels: { app: good }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: good } }
+  template:
+    metadata:
+      labels: { app: good, pool: "yes" }
+    spec:
+      containers:
+      - name: echo
+        image: python:3.12-slim
+        command: ["python", "/app/echo.py"]
+        env:
+        - name: POD_NAME
+          valueFrom: { fieldRef: { fieldPath: metadata.name } }
+        ports:
+        - { name: http, containerPort: 8080 }
+        readinessProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        resources:
+          requests: { cpu: "10m",  memory: "32Mi" }
+          limits:   { cpu: "200m", memory: "128Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+        volumeMounts:
+        - { name: src, mountPath: /app }
+      volumes:
+      - name: src
+        configMap: { name: echo-src }    # from _shared/echo-app.yaml

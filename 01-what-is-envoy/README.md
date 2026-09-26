@@ -218,10 +218,10 @@ clusterIP: None         # in the SERVICE: so DNS returns pod IPs, not one virtua
 ```
 
 Without `clusterIP: None`, DNS returns a single virtual IP, Envoy sees one
-endpoint, and `ROUND_ROBIN` has nothing to choose between. Module 05, still to
-come, will measure exactly that failure, and how evenly requests split: the
-numbers above change from run to run — 6/6, 5/7 and 7/5 in three runs while
-writing this.
+endpoint, and `ROUND_ROBIN` has nothing to choose between.
+[Module 05](../05-clusters-and-load-balancing/README.md) measures exactly that,
+and why the split changes from run to run — 6/6, 5/7 and 7/5 in three runs
+while writing this: each of Envoy's worker threads keeps its own rotation.
 
 ### Step 8 — ask Envoy what it is doing
 

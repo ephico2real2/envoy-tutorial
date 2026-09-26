@@ -1,0 +1,27 @@
+# Step 4. Only requests with a valid token from the realm "tutorial", meant for
+# shop-api, get through - on the whole Gateway.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: keycloak-jwt
+  namespace: envoy-17
+spec:
+  targetRefs:
+  - { group: gateway.networking.k8s.io, kind: Gateway, name: eg }
+  jwt:
+    providers:
+    - name: keycloak
+      # Must equal the token's iss claim exactly - module 16, step 9.
+      issuer: https://keycloak.apps-crc.testing/realms/tutorial
+      # The token must be meant for this API: aud must contain shop-api.
+      audiences: [shop-api]
+      remoteJWKS:
+        # Where Envoy fetches the public keys. The URI's host is only a name
+        # here: the connection goes to the backendRef, over TLS per the
+        # BackendTLSPolicy in 30-trust-keycloak.yaml.
+        uri: https://keycloak-service.keycloak.svc:8443/realms/tutorial/protocol/openid-connect/certs
+        backendRefs:
+        - { group: "", kind: Service, name: keycloak-service, namespace: keycloak, port: 8443 }
+      claimToHeaders:
+      - { claim: preferred_username, header: x-user }
+      - { claim: azp, header: x-client }

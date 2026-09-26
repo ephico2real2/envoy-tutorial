@@ -1,0 +1,122 @@
+# A backend that speaks ONLY TLS, on 8443. It answers like the echo app, and
+# adds what it saw of the TLS connection: version, cipher, and the server name
+# (SNI) the client asked for - which is how steps 4 and 5 see what the Gateway
+# sent. A client that speaks plain HTTP to it fails the handshake, and the pod
+# logs one line saying so (step 3).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: secure-echo-src
+data:
+  tls_echo.py: |
+    """Answers any request over TLS with a description of the request - and of the
+    TLS connection it came on: version, cipher, and the name the client asked for
+    (SNI). That last one shows which hostname the Gateway used."""
+    import json, os, ssl
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    
+    POD = os.environ.get("POD_NAME", "secure-echo")
+    PORT = int(os.environ.get("PORT", "8443"))
+    CERT_DIR = os.environ.get("CERT_DIR", "/tls")
+    
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(os.path.join(CERT_DIR, "tls.crt"), os.path.join(CERT_DIR, "tls.key"))
+    
+    def remember_sni(sock, server_name, _ctx):
+        sock.sni = server_name          # None when the client sent no SNI
+    ctx.sni_callback = remember_sni
+    
+    
+    class Server(ThreadingHTTPServer):
+        # Accept plain TCP and do the TLS handshake in the request's own thread,
+        # so one client that never completes a handshake cannot stall the others.
+        def get_request(self):
+            sock, addr = self.socket.accept()
+            return ctx.wrap_socket(sock, server_side=True, do_handshake_on_connect=False), addr
+    
+        def handle_error(self, request, client_address):
+            # One line, not a traceback: a failed handshake is an expected event
+            # in this module (step 3 sends plain HTTP to this TLS port).
+            import sys
+            print("TLS handshake failed from %s: %s" % (client_address[0], sys.exc_info()[1]), flush=True)
+    
+    
+    class Echo(BaseHTTPRequestHandler):
+        def setup(self):
+            self.request.do_handshake()
+            super().setup()
+    
+        def _reply(self):
+            s = self.connection
+            body = json.dumps({
+                "served_by": POD,
+                "method": self.command,
+                "path": self.path,
+                "tls": {"version": s.version(), "cipher": s.cipher()[0], "sni": getattr(s, "sni", None)},
+                "headers": {k.lower(): v for k, v in self.headers.items()},
+            }, indent=2).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+    
+        do_GET = do_POST = _reply
+    
+        def log_message(self, fmt, *args):
+            print("%s %s" % (self.command, self.path), flush=True)
+    
+    
+    print("secure-echo listening on :%d (TLS) as %s" % (PORT, POD), flush=True)
+    Server(("0.0.0.0", PORT), Echo).serve_forever()
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: secure-echo
+  labels: { app: secure-echo }
+spec:
+  selector: { app: secure-echo }
+  ports:
+  # The port's name is what a BackendTLSPolicy's sectionName refers to.
+  - { name: https, port: 8443, targetPort: 8443 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secure-echo
+  labels: { app: secure-echo }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: secure-echo } }
+  template:
+    metadata:
+      labels: { app: secure-echo }
+    spec:
+      containers:
+      - name: secure-echo
+        image: python:3.12-slim
+        command: ["python", "/app/tls_echo.py"]
+        env:
+        - name: POD_NAME
+          valueFrom: { fieldRef: { fieldPath: metadata.name } }
+        ports:
+        - { name: https, containerPort: 8443 }
+        readinessProbe:
+          httpGet: { path: /healthz, port: 8443, scheme: HTTPS }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        resources:
+          requests: { cpu: "10m",  memory: "32Mi" }
+          limits:   { cpu: "200m", memory: "128Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+        volumeMounts:
+        - { name: src, mountPath: /app }
+        - { name: tls, mountPath: /tls, readOnly: true }
+      volumes:
+      - name: src
+        configMap: { name: secure-echo-src }
+      - name: tls
+        secret: { secretName: secure-echo-tls }

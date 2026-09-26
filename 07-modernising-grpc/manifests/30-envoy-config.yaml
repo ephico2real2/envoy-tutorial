@@ -1,0 +1,80 @@
+# Module 07 — REST + JSON in front of a gRPC-only service.
+#
+# One listener, two kinds of client, one backend:
+#   - a gRPC client (grpcurl)        -> passes straight through to the service
+#   - a REST client (curl, a browser) -> grpc_json_transcoder turns
+#       GET /v1/items/widget   into   the gRPC call Catalog/GetItem {sku: "widget"}
+#     and turns the protobuf reply back into JSON.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-config
+data:
+  envoy.yaml: |
+    admin:
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+    static_resources:
+      listeners:
+      - name: listener
+        address:
+          socket_address: { address: 0.0.0.0, port_value: 8080 }
+        filter_chains:
+        - filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: http
+              # AUTO (the default) serves HTTP/1.1 and HTTP/2 on one port: curl
+              # arrives as HTTP/1.1, grpcurl as HTTP/2 - both land here.
+              codec_type: AUTO
+              route_config:
+                name: catalog
+                virtual_hosts:
+                - name: catalog
+                  domains: ["*"]
+                  routes:
+                  # One route for both: by the time the router runs, the
+                  # transcoder has already rewritten a REST request into
+                  # POST /tutorial.catalog.v1.Catalog/<Method>.
+                  - match: { prefix: "/" }
+                    route: { cluster: catalog }
+              http_filters:
+              - name: envoy.filters.http.grpc_json_transcoder
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.grpc_json_transcoder.v3.GrpcJsonTranscoder
+                  # The compiled .proto (a descriptor set), generated when the
+                  # pod starts - see 40-envoy.yaml. This is how Envoy knows the
+                  # service's methods, messages and google.api.http routes.
+                  proto_descriptor: /etc/envoy/proto/catalog.pb
+                  services: ["tutorial.catalog.v1.Catalog"]
+                  # Put a gRPC error's code and message in a JSON body. The
+                  # HTTP status (grpc-status 5 -> 404) is set either way; with
+                  # this off the body is empty and the error is only in the
+                  # grpc-status / grpc-message headers.
+                  convert_grpc_status: true
+                  print_options:
+                    add_whitespace: true
+                    always_print_primitive_fields: true
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      clusters:
+      - name: catalog
+        type: STRICT_DNS
+        lb_policy: ROUND_ROBIN
+        connect_timeout: 2s
+        # gRPC is HTTP/2. Without this, Envoy talks HTTP/1.1 upstream, cannot
+        # read the service's HTTP/2 answer, and fails every call with a 502.
+        typed_extension_protocol_options:
+          envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+            "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+            explicit_http_config:
+              http2_protocol_options: {}
+        load_assignment:
+          cluster_name: catalog
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: catalog, port_value: 50051 } } }
