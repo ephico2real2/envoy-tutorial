@@ -88,8 +88,9 @@ def main() -> int:
         return 2
     readme = pathlib.Path(args[0]).resolve()
     lines = readme.read_text().splitlines(keepends=True)
+    # The reader's own environment, unchanged: the walkthrough must run as the
+    # reader's `oc` does, with whatever KUBECONFIG / ~/.kube/config they have.
     env = dict(os.environ)
-    env.setdefault("KUBECONFIG", str(pathlib.Path.home() / ".crc/machines/crc/kubeconfig"))
 
     replacements: list[tuple[int, int, list[str]]] = []
     ran = skipped = 0

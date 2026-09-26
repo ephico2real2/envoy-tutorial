@@ -6,9 +6,17 @@
 # NS defaults to the module's own namespace so modules never collide and any
 # one of them can be run on its own.
 set -uo pipefail
-: "${KUBECONFIG:=$HOME/.crc/machines/crc/kubeconfig}"
-export KUBECONFIG
 KUBE=$(command -v oc >/dev/null 2>&1 && echo oc || echo kubectl)
+
+# Use the same cluster and identity as the reader's own `oc`: their KUBECONFIG,
+# or ~/.kube/config. Only when that has no current context fall back to CRC's
+# machine kubeconfig. An earlier version always forced the CRC file, which ran
+# the scripts as system:admin while the reader's `oc` was kubeadmin, and broke
+# every script on a machine without CRC.
+if ! $KUBE config current-context >/dev/null 2>&1 \
+   && [ -f "$HOME/.crc/machines/crc/kubeconfig" ]; then
+  export KUBECONFIG="$HOME/.crc/machines/crc/kubeconfig"
+fi
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }

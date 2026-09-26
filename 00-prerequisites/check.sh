@@ -34,6 +34,14 @@ have gateways.gateway.networking.k8s.io "Gateway API CRDs" "12"
 have ipaddresspools.metallb.io "MetalLB"                   "12"
 $KUBE get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1 \
   && ok "Prometheus Operator CRDs" || printf '  · %s — not installed (only module %s needs it)\n' "Prometheus Operator CRDs" "10"
+# On OpenShift the CRDs are always there; what decides whether YOUR namespaces
+# are scraped is user-workload monitoring, a switch in the platform's config.
+if [ "$IS_OCP" = yes ]; then
+  $KUBE get configmap cluster-monitoring-config -n openshift-monitoring \
+      -o jsonpath='{.data.config\.yaml}' 2>/dev/null | grep -q 'enableUserWorkload: *true' \
+    && ok "user-workload monitoring" \
+    || printf '  · %s — not enabled, or not readable by you (only module %s needs it)\n' "user-workload monitoring" "10"
+fi
 
 say "a real write, end to end"
 ns_ensure
