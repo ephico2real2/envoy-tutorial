@@ -3,9 +3,9 @@
 It knows nothing about HTTP routes or JSON. Everything REST about it is added by
 Envoy in front - which is the point of the module.
 
-catalog_pb2 / catalog_pb2_grpc are generated from proto/catalog.proto when the
-pod starts (see manifests/20-catalog.yaml), so the stubs can never drift from
-the .proto they came from.
+catalog_pb2 / catalog_pb2_grpc are generated from proto/catalog.proto (the
+catalog-proto ConfigMap) when the pod starts - see manifests/20-catalog.yaml. A
+running pod keeps the contract it started with until it is restarted.
 """
 import os
 import threading
@@ -21,6 +21,20 @@ POD = os.environ.get("POD_NAME", "catalog")
 PORT = int(os.environ.get("PORT", "50051"))
 
 
+def _snapshot(item):
+    """A copy of a stored Item to reply with, or None.
+
+    gRPC serialises a reply after the method has returned - after the lock is
+    released - so replying with the stored Item itself would let a concurrent
+    ReserveStock change what this caller is told.
+    """
+    if item is None:
+        return None
+    reply = catalog_pb2.Item()
+    reply.CopyFrom(item)
+    return reply
+
+
 class Catalog(catalog_pb2_grpc.CatalogServicer):
     def __init__(self):
         self._lock = threading.Lock()
@@ -32,12 +46,13 @@ class Catalog(catalog_pb2_grpc.CatalogServicer):
     def ListItems(self, request, context):
         print("%s ListItems" % POD, flush=True)
         with self._lock:
+            # The constructor copies every Item, so this reply is a snapshot too.
             return catalog_pb2.ListItemsResponse(items=list(self._items.values()))
 
     def GetItem(self, request, context):
         print("%s GetItem sku=%s" % (POD, request.sku), flush=True)
         with self._lock:
-            item = self._items.get(request.sku)
+            item = _snapshot(self._items.get(request.sku))
         if item is None:
             context.abort(grpc.StatusCode.NOT_FOUND, "no item with sku %r" % request.sku)
         return item
@@ -54,7 +69,7 @@ class Catalog(catalog_pb2_grpc.CatalogServicer):
                 context.abort(grpc.StatusCode.FAILED_PRECONDITION,
                               "only %d %s left" % (item.on_hand, request.sku))
             item.on_hand -= request.quantity
-            return item
+            return _snapshot(item)
 
 
 def main():

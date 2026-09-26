@@ -49,8 +49,10 @@ data:
                   # service's methods, messages and google.api.http routes.
                   proto_descriptor: /etc/envoy/proto/catalog.pb
                   services: ["tutorial.catalog.v1.Catalog"]
-                  # Turn a gRPC error (grpc-status) into the matching HTTP
-                  # status with a JSON body, instead of a 200 with trailers.
+                  # Put a gRPC error's code and message in a JSON body. The
+                  # HTTP status (grpc-status 5 -> 404) is set either way; with
+                  # this off the body is empty and the error is only in the
+                  # grpc-status / grpc-message headers.
                   convert_grpc_status: true
                   print_options:
                     add_whitespace: true
@@ -64,8 +66,8 @@ data:
         type: STRICT_DNS
         lb_policy: ROUND_ROBIN
         connect_timeout: 2s
-        # gRPC is HTTP/2. Without this, Envoy would talk HTTP/1.1 upstream and
-        # the service would reject every call.
+        # gRPC is HTTP/2. Without this, Envoy talks HTTP/1.1 upstream, cannot
+        # read the service's HTTP/2 answer, and fails every call with a 502.
         typed_extension_protocol_options:
           envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
             "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions

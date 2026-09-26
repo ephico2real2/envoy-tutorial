@@ -108,14 +108,16 @@ $ oc logs -n envoy-07 deploy/catalog -c codegen | tail -2
 catalog_pb2.py
 catalog_pb2_grpc.py
 $ oc logs -n envoy-07 deploy/catalog -c catalog
-catalog (gRPC only) listening on :50051 as catalog-7bc84497-lgdwq
+catalog (gRPC only) listening on :50051 as catalog-7b6b89445f-fl8wm
 ```
 
 **What just happened:** before the service started, an init container called
 `codegen` installed the gRPC tools and ran `protoc` on `catalog.proto`, producing
 `catalog_pb2.py` (the messages) and `catalog_pb2_grpc.py` (the service stubs)
-that `server.py` imports. Generated at every start, from the same file, they can
-never drift from the contract.
+that `server.py` imports. They are generated from the ConfigMap each time the
+pod starts, and a running pod keeps the contract it started with: after changing
+the `.proto`, update the ConfigMap (`./run.sh deploy` does) and restart **both**
+Deployments — Envoy compiles the same file in step 5.
 
 ### Step 4 — it really does speak only gRPC
 
@@ -167,7 +169,7 @@ Waiting for deployment "envoy" rollout to finish: 0 of 1 updated replicas are av
 deployment "envoy" successfully rolled out
 $ oc logs -n envoy-07 deploy/envoy -c descriptor | tail -2
 total 16
--rw-r--r--. 1 1001530000 1001530000 15248 Sep 26 04:17 catalog.pb
+-rw-r--r--. 1 1001440000 1001440000 15248 Sep 26 05:16 catalog.pb
 ```
 
 <!-- markdownlint-disable MD033 -->
@@ -181,7 +183,8 @@ total 16
 **What just happened:** the Envoy pod ran `protoc` on the **same** `catalog.proto`
 — this time to produce `catalog.pb`, a **descriptor set**: the compiled contract,
 which `grpc_json_transcoder` reads to learn the methods, messages and REST routes.
-`--include_imports` puts the imported `google/api/annotations.proto` in too.
+`--include_imports` puts the files it imports in too: `google/api/annotations.proto`
+and, through it, `google/api/http.proto` and `google/protobuf/descriptor.proto`.
 Measured without it: a 687-byte file, and Envoy refused to start —
 *"transcoding_filter: Unable to build proto descriptor pool"*.
 
@@ -211,7 +214,7 @@ x-envoy-upstream-service-time: 0
 grpc-status: 0
 grpc-message: 
 content-length: 55
-date: Sat, 26 Sep 2026 04:17:17 GMT
+date: Sat, 26 Sep 2026 05:16:31 GMT
 server: envoy
 
 {
@@ -226,8 +229,9 @@ never heard of either. Two details:
 
 - the field is **`onHand`**, not `on_hand`. Protobuf's JSON mapping writes field
   names in lowerCamelCase.
-- the response still carries gRPC's own headers — `grpc-status: 0` means the
-  call succeeded — because the transcoder passes them through.
+- the response still carries gRPC's status — `grpc-status: 0` means the call
+  succeeded. gRPC sends it as a trailer, after the body; the transcoder copies it
+  into the HTTP/1.1 headers.
 
 Change something — reserve two widgets:
 
@@ -320,14 +324,14 @@ count is two lower — the `:reserve` in step 6 changed the same service.
 
 ```console
 $ oc logs -n envoy-07 deploy/catalog -c catalog --tail=8
-catalog-7bc84497-lgdwq ListItems
-catalog-7bc84497-lgdwq GetItem sku=widget
-catalog-7bc84497-lgdwq ReserveStock sku=widget quantity=2
-catalog-7bc84497-lgdwq GetItem sku=nope
-catalog-7bc84497-lgdwq ReserveStock sku=gadget quantity=100
-catalog-7bc84497-lgdwq ReserveStock sku=gadget quantity=0
-catalog-7bc84497-lgdwq GetItem sku=widget
-catalog-7bc84497-lgdwq GetItem sku=nope
+catalog-7b6b89445f-fl8wm ListItems
+catalog-7b6b89445f-fl8wm GetItem sku=widget
+catalog-7b6b89445f-fl8wm ReserveStock sku=widget quantity=2
+catalog-7b6b89445f-fl8wm GetItem sku=nope
+catalog-7b6b89445f-fl8wm ReserveStock sku=gadget quantity=100
+catalog-7b6b89445f-fl8wm ReserveStock sku=gadget quantity=0
+catalog-7b6b89445f-fl8wm GetItem sku=widget
+catalog-7b6b89445f-fl8wm GetItem sku=nope
 ```
 
 **What just happened:** every call — whether it arrived as REST or as gRPC — shows
@@ -339,12 +343,13 @@ Envoy's counters for the `catalog` cluster say the same, from the other side:
 ```console
 $ oc exec -n envoy-07 client -- curl -s 'http://envoy:9901/stats?filter=^cluster\.catalog\.upstream_cx_http(1|2)_total$'
 cluster.catalog.upstream_cx_http1_total: 0
-cluster.catalog.upstream_cx_http2_total: 7
+cluster.catalog.upstream_cx_http2_total: 6
 ```
 
 No HTTP/1.1 connection to the service at all. The cluster's
 `http2_protocol_options` is what makes Envoy speak HTTP/2 upstream; without it,
-Envoy would send HTTP/1.1 and the service would refuse every call.
+Envoy sends HTTP/1.1, cannot read the service's HTTP/2 answer, and fails every
+call — measured: `502`, *"reset reason: protocol error"*.
 
 ### Step 10 — check yourself
 
@@ -383,7 +388,7 @@ all checks passed
 |---|---|---|
 | `proto_descriptor` | `/etc/envoy/proto/catalog.pb` | the compiled contract — generated with `--include_imports` |
 | `services` | `tutorial.catalog.v1.Catalog` | which services to expose as REST |
-| `convert_grpc_status` | `true` | turn a gRPC error into the matching HTTP status and a JSON body |
+| `convert_grpc_status` | `true` | put a gRPC error's code and message in a JSON body. The HTTP status (`404`, `400`) is set with it off too — step 7 |
 | `print_options.add_whitespace` | `true` | indented JSON |
 | `print_options.always_print_primitive_fields` | `true` | keep fields at their zero value — measured: switched off, a sold-out item's `"onHand": 0` disappears from the JSON |
 
@@ -395,7 +400,7 @@ all checks passed
 | the `.proto` | `body: "*"` | the JSON body fills the remaining request fields |
 | the listener | `codec_type: AUTO` (the default) | one port for HTTP/1.1 (curl) and HTTP/2 (grpcurl) |
 | the cluster | `http2_protocol_options` | gRPC is HTTP/2 — talk HTTP/2 to the service |
-| the Service | `clusterIP: None` | Envoy holds every pod (module 05); for gRPC it matters more, since one HTTP/2 connection carries every call |
+| the Service | `clusterIP: None` | Envoy holds every pod (module 05); for gRPC it matters more: each HTTP/2 connection carries many calls, so a virtual IP would balance connections, not calls |
 
 ## Troubleshooting
 
@@ -403,7 +408,8 @@ all checks passed
 |---|---|---|
 | a pod stuck in `Init` | the init container could not reach PyPI | `oc logs -n envoy-07 <pod> -c codegen` (or `-c descriptor`); the cluster needs egress to pypi.org |
 | Envoy crash-loops: `Unable to build proto descriptor pool` | the descriptor was built without `--include_imports` | keep the flag in `40-envoy.yaml` |
-| every REST call gets `404` with no JSON | the path matches no `google.api.http` route, and there is no other route | check the method, path and `:verb` against the `.proto` |
+| a REST call gets `503`: `upstream connect error or disconnect/reset before headers. reset reason: remote reset` | its method and path match no `google.api.http` route, so the transcoder passes it on untranslated, and the `/` route sends it to the service as a plain HTTP/2 request, which the service resets | check the method, path and `:verb` against the `.proto`. With `request_validation_options: { reject_unknown_method: true }` the transcoder answers `404` itself |
+| every call gets `502`: `reset reason: protocol error` | the cluster has no `http2_protocol_options`, so Envoy talks HTTP/1.1 to a gRPC service | keep `explicit_http_config: { http2_protocol_options: {} }` on the cluster |
 | an error status with an empty body and `content-type: application/grpc` | `convert_grpc_status` is off | set it to `true` |
 | `Received HTTP/0.9 when not allowed` | you called the gRPC service directly with HTTP/1.1 | go through Envoy on port 8080 |
 
@@ -417,6 +423,8 @@ namespace "envoy-07" deleted
 ## The shortcut
 
 `./run.sh deploy` does steps 2, 3 and 5; `./run.sh verify` is step 10;
+`./run.sh test` runs the service's unit tests
+([`app/test_server.py`](app/test_server.py)) inside the catalog pod;
 `./run.sh clean` removes the namespace.
 
 ## What this module skipped
@@ -425,7 +433,7 @@ namespace "envoy-07" deleted
 and a larger service with a database behind it. Both are assembled in
 [`envoy-grpc-modernization`](https://github.com/ephico2real2/envoy-grpc-modernization),
 which puts this pattern in front of a MongoDB-backed inventory service with a
-browser kiosk. TLS for gRPC is module 09, still to come.
+browser kiosk. TLS for gRPC is [module 09](../09-grpc-end-to-end/README.md).
 
 ## References
 
