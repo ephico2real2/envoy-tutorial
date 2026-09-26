@@ -26,11 +26,7 @@ OpenShift: **who actually terminates TLS**, Envoy or the router in front of it?
 ## Where the certificate comes from
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/08-tls-on-envoy/certificate-flow.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/08-tls-on-envoy/certificate-flow.light.png">
-  <img alt="A Certificate resource asks the enterprise-ca ClusterIssuer for a certificate for three names. cert-manager has it signed and stores the certificate, its private key and the signing CA in the Secret shop-tls. Envoy mounts the Secret and presents the certificate on port 8443; the client copies ca.crt and trusts the certificate because it trusts the CA that signed it." src="../docs/diagrams/08-tls-on-envoy/certificate-flow.light.png">
-</picture>
+<img alt="A Certificate resource asks the enterprise-ca ClusterIssuer for a certificate for three names. cert-manager has it signed and stores the certificate, its private key and the signing CA in the Secret shop-tls. Envoy mounts the Secret and presents the certificate on port 8443; the client copies ca.crt and trusts the certificate because it trusts the CA that signed it." src="../docs/diagrams/08-tls-on-envoy/certificate-flow.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ## Walkthrough
@@ -245,11 +241,7 @@ command terminated with exit code 60
 ```
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/08-tls-on-envoy/route-types.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/08-tls-on-envoy/route-types.light.png">
-  <img alt="Three OpenShift Route types in front of the same Envoy. Passthrough: the router forwards the TLS bytes, Envoy terminates TLS with the cert-manager certificate, and a client trusting the enterprise CA gets 200. Edge: the router terminates TLS with its own wildcard certificate and sends plain HTTP to Envoy on 8080; a client trusting only the enterprise CA fails with exit 60. Reencrypt: the router terminates with its own certificate and opens a new TLS connection to Envoy on 8443; the client again sees the router's certificate." src="../docs/diagrams/08-tls-on-envoy/route-types.light.png">
-</picture>
+<img alt="Three OpenShift Route types in front of the same Envoy. Passthrough: the router forwards the TLS bytes, Envoy terminates TLS with the cert-manager certificate, and a client trusting the enterprise CA gets 200. Edge: the router terminates TLS with its own wildcard certificate and sends plain HTTP to Envoy on 8080; a client trusting only the enterprise CA fails with exit 60. Reencrypt: the router terminates with its own certificate and opens a new TLS connection to Envoy on 8443; the client again sees the router's certificate." src="../docs/diagrams/08-tls-on-envoy/route-types.light.png">
 <!-- markdownlint-enable MD033 -->
 
 **What just happened:** **whoever terminates TLS presents the certificate.** With

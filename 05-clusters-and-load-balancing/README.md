@@ -29,11 +29,7 @@ actually working?**
 ## How Envoy finds endpoints
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/05-clusters-and-load-balancing/discovery.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/05-clusters-and-load-balancing/discovery.light.png">
-  <img alt="Five cluster types, the same three echo pods. STATIC holds the sidecar at 127.0.0.1:8081. STRICT_DNS on the headless Service holds three endpoints, one per pod, and Envoy chooses between them. STRICT_DNS on a ClusterIP Service holds one virtual IP, so the Service chooses the pod per connection. LOGICAL_DNS holds only the first address, so all requests go to one pod. EDS holds the three endpoints written to a file by write-eds.sh, picked up 3 to 77 seconds after the edit, with no restart." src="../docs/diagrams/05-clusters-and-load-balancing/discovery.light.png">
-</picture>
+<img alt="Five cluster types, the same three echo pods. STATIC holds the sidecar at 127.0.0.1:8081. STRICT_DNS on the headless Service holds three endpoints, one per pod, and Envoy chooses between them. STRICT_DNS on a ClusterIP Service holds one virtual IP, so the Service chooses the pod per connection. LOGICAL_DNS holds only the first address, so all requests go to one pod. EDS holds the three endpoints written to a file by write-eds.sh, picked up 3 to 77 seconds after the edit, with no restart." src="../docs/diagrams/05-clusters-and-load-balancing/discovery.light.png">
 <!-- markdownlint-enable MD033 -->
 
 *Every number is from a run on CRC; the walkthrough re-measures each one.*
@@ -386,11 +382,7 @@ $ oc exec -n envoy-05 client -- sh -c 'curl -s $(for i in $(seq 1 60); do printf
 ```
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/05-clusters-and-load-balancing/round-robin-workers.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/05-clusters-and-load-balancing/round-robin-workers.light.png">
-  <img alt="Sixty requests, each on a new connection, to two Envoys with the same config. With one worker thread, round robin gave an exact 20, 20, 20 across three pods in ten runs out of ten. With ten worker threads, each keeping its own round-robin position, the split was uneven in 28 runs out of 30. Sent down one connection, which one worker handles, the ten-worker Envoy gave 20, 20, 20 in ten runs out of ten." src="../docs/diagrams/05-clusters-and-load-balancing/round-robin-workers.light.png">
-</picture>
+<img alt="Sixty requests, each on a new connection, to two Envoys with the same config. With one worker thread, round robin gave an exact 20, 20, 20 across three pods in ten runs out of ten. With ten worker threads, each keeping its own round-robin position, the split was uneven in 28 runs out of 30. Sent down one connection, which one worker handles, the ten-worker Envoy gave 20, 20, 20 in ten runs out of ten." src="../docs/diagrams/05-clusters-and-load-balancing/round-robin-workers.light.png">
 <!-- markdownlint-enable MD033 -->
 
 **What just happened:** by default Envoy runs one worker thread per CPU it can
@@ -451,11 +443,7 @@ $ oc exec -n envoy-05 client -- sh -c 'for i in $(seq 1 60); do curl -s -o /dev/
 ```
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/05-clusters-and-load-balancing/health-checks.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/05-clusters-and-load-balancing/health-checks.light.png">
-  <img alt="Two clusters with the same four endpoints: three echo pods and one sick pod that Kubernetes considers Ready because its TCP probe passes, but which answers every request with 503. Without a health check, about one request in four failed — 14 to 17 of 60 in three runs. With Envoy asking each endpoint GET /healthz, the sick pod is marked failed_active_hc, gets no traffic, and 60 of 60 succeed." src="../docs/diagrams/05-clusters-and-load-balancing/health-checks.light.png">
-</picture>
+<img alt="Two clusters with the same four endpoints: three echo pods and one sick pod that Kubernetes considers Ready because its TCP probe passes, but which answers every request with 503. Without a health check, about one request in four failed — 14 to 17 of 60 in three runs. With Envoy asking each endpoint GET /healthz, the sick pod is marked failed_active_hc, gets no traffic, and 60 of 60 succeed." src="../docs/diagrams/05-clusters-and-load-balancing/health-checks.light.png">
 <!-- markdownlint-enable MD033 -->
 
 **What just happened:** the sick pod answers `503` — yet step 1 showed it

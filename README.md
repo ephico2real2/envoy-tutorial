@@ -72,10 +72,11 @@ output — a module either passes or names the claim that failed.
 - **Options are explained, not just used.** Each module has a table of the
   fields it introduces: what the field does, its default, and when you would
   change it.
-- **Diagrams are rendered figures**, light and dark, with traffic flowing top
-  to bottom. Each is drawn from the module's manifests and measured output, its
-  `alt` text states the same claim for screen readers, and its source is in
-  [`docs/diagrams/`](docs/diagrams/).
+- **Diagrams are rendered figures**, with traffic flowing top to bottom. Each
+  is drawn from the module's manifests and measured output, its `alt` text
+  states the same claim for screen readers, and its source is in
+  [`docs/diagrams/`](docs/diagrams/), rendered light and dark — the pages show
+  the light one.
 - **Console screenshots are legible.** Where a module shows the OpenShift
   console, the capture is zoomed to the content and checked before it ships —
   see [`tooling/screenshot`](tooling/screenshot/README.md).

@@ -33,11 +33,7 @@ uses them.
 ## The picture
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/17-keycloak-jwt/flow.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/17-keycloak-jwt/flow.light.png">
-  <img alt="A caller gets a token from Keycloak's token endpoint, then calls the Gateway with it. The Gateway's jwt_authn filter checks the token's issuer and its audience shop-api, then its signature with Keycloak's public keys, which it fetched itself from keycloak-service.keycloak.svc:8443 over TLS - allowed by a ReferenceGrant and trusted through a BackendTLSPolicy - and cached for 300 seconds; then, on /admin, that the realm role admin is present. Measured answers: no token 401, an edited token 401 Jwt verification fails, another realm 401 Jwt issuer is not configured, another audience 403, alice on /admin 403 RBAC access denied, alice on /api and bob on /admin 200 with x-user set." src="../docs/diagrams/17-keycloak-jwt/flow.light.png">
-</picture>
+<img alt="A caller gets a token from Keycloak's token endpoint, then calls the Gateway with it. The Gateway's jwt_authn filter checks the token's issuer and its audience shop-api, then its signature with Keycloak's public keys, which it fetched itself from keycloak-service.keycloak.svc:8443 over TLS - allowed by a ReferenceGrant and trusted through a BackendTLSPolicy - and cached for 300 seconds; then, on /admin, that the realm role admin is present. Measured answers: no token 401, an edited token 401 Jwt verification fails, another realm 401 Jwt issuer is not configured, another audience 403, alice on /admin 403 RBAC access denied, alice on /api and bob on /admin 200 with x-user set." src="../docs/diagrams/17-keycloak-jwt/flow.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ## Walkthrough

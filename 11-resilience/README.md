@@ -30,11 +30,7 @@ down under load. Envoy has three defences, each for a different failure:
 ## The pool, and three defences
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/11-resilience/retry-paths.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/11-resilience/retry-paths.light.png">
-  <img alt="A request enters Envoy and is sent to one of three pods, picked at random: two healthy echo pods and a sick pod that answers every request with 503. With no defence, one request in three fails. With a retry, a 503 from the sick pod is sent again - to a random pod, which is the sick pod again one time in three. With previous_hosts, the retry rejects the sick pod and picks again, up to three more times; only if all four picks are the sick pod does the retry still go there, one retry in 81. Measured: 21 of 90, 7 of 90 and 0 of 180 failed." src="../docs/diagrams/11-resilience/retry-paths.light.png">
-</picture>
+<img alt="A request enters Envoy and is sent to one of three pods, picked at random: two healthy echo pods and a sick pod that answers every request with 503. With no defence, one request in three fails. With a retry, a 503 from the sick pod is sent again - to a random pod, which is the sick pod again one time in three. With previous_hosts, the retry rejects the sick pod and picks again, up to three more times; only if all four picks are the sick pod does the retry still go there, one retry in 81. Measured: 21 of 90, 7 of 90 and 0 of 180 failed." src="../docs/diagrams/11-resilience/retry-paths.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ## Walkthrough
@@ -192,11 +188,7 @@ cure is not to keep picking the sick pod at all — the next step.
 ### Step 6 — outlier detection ejects the sick pod
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/11-resilience/ejection-and-breaker.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/11-resilience/ejection-and-breaker.light.png">
-  <img alt="Left, outlier detection on /ejecting: in the first 30 requests the sick pod fails twice in a row and is ejected, measured 28 200s and 2 503s. It is ejected for 30 seconds with health flag failed_outlier_check while Kubernetes still reports it Ready; the next 30 requests all succeed. Thirty seconds later it is let back in, fails twice and is ejected again - for 30 seconds again, measured, because it had been back for longer than the 1-second interval. Right, the circuit breaker on /slow: 10 requests at once to an app that takes one second; with max_requests 2 and max_pending_requests 2, 2 are served after one second and 8 are refused at once with 503 flag UO; pending_overflow 1 plus active_overflow 7 equals 8." src="../docs/diagrams/11-resilience/ejection-and-breaker.light.png">
-</picture>
+<img alt="Left, outlier detection on /ejecting: in the first 30 requests the sick pod fails twice in a row and is ejected, measured 28 200s and 2 503s. It is ejected for 30 seconds with health flag failed_outlier_check while Kubernetes still reports it Ready; the next 30 requests all succeed. Thirty seconds later it is let back in, fails twice and is ejected again - for 30 seconds again, measured, because it had been back for longer than the 1-second interval. Right, the circuit breaker on /slow: 10 requests at once to an app that takes one second; with max_requests 2 and max_pending_requests 2, 2 are served after one second and 8 are refused at once with 503 flag UO; pending_overflow 1 plus active_overflow 7 equals 8." src="../docs/diagrams/11-resilience/ejection-and-breaker.light.png">
 <!-- markdownlint-enable MD033 -->
 
 The cluster behind `/ejecting` has **outlier detection**: two `5xx` in a row from

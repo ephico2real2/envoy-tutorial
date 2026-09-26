@@ -25,11 +25,7 @@ not adding behaviour — it is declining a default you would not have chosen.
 ## The config file, top to bottom
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/02-the-config-file/config-anatomy.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/02-the-config-file/config-anatomy.light.png">
-  <img alt="The shape of envoy.yaml: node and admin, then static_resources holding the listener, whose http_connection_manager has use_remote_address default false, server_name default envoy, generate_request_id default true, request_timeout default none, idle_timeout default one hour, and a route with timeout default 15 seconds and no retries; and the cluster, with lb_policy default ROUND_ROBIN, connect_timeout 5 seconds, dns_refresh_rate 5 seconds, and circuit breakers of 1024 connections, pending requests and requests and 3 retries." src="../docs/diagrams/02-the-config-file/config-anatomy.light.png">
-</picture>
+<img alt="The shape of envoy.yaml: node and admin, then static_resources holding the listener, whose http_connection_manager has use_remote_address default false, server_name default envoy, generate_request_id default true, request_timeout default none, idle_timeout default one hour, and a route with timeout default 15 seconds and no retries; and the cluster, with lb_policy default ROUND_ROBIN, connect_timeout 5 seconds, dns_refresh_rate 5 seconds, and circuit breakers of 1024 connections, pending requests and requests and 3 retries." src="../docs/diagrams/02-the-config-file/config-anatomy.light.png">
 <!-- markdownlint-enable MD033 -->
 
 Every value in that picture is what you get **if you leave the line out**.

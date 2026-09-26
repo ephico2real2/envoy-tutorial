@@ -37,11 +37,7 @@ the Gateway in front of it.
 ## The lab
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/16-keycloak/lab.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/16-keycloak/lab.light.png">
-  <img alt="The Keycloak lab in namespace keycloak. The rhbk-operator, installed from the redhat-operators catalog with a manually approved InstallPlan, runs the Keycloak server described by a Keycloak resource. Keycloak stores its data in a PostgreSQL StatefulSet with a 1 GiB volume claim, serves HTTPS with a cert-manager certificate from enterprise-ca, and is reached from outside through a passthrough Route at keycloak.apps-crc.testing and from inside at keycloak-service.keycloak.svc:8443. A KeycloakRealmImport creates the realm tutorial: roles reader and admin, users alice and bob, clients shop-api, shop-cli and orders-service. A client asks the token endpoint for a token, signed RS256 with a private key; the public keys are published at the realm's certs endpoint." src="../docs/diagrams/16-keycloak/lab.light.png">
-</picture>
+<img alt="The Keycloak lab in namespace keycloak. The rhbk-operator, installed from the redhat-operators catalog with a manually approved InstallPlan, runs the Keycloak server described by a Keycloak resource. Keycloak stores its data in a PostgreSQL StatefulSet with a 1 GiB volume claim, serves HTTPS with a cert-manager certificate from enterprise-ca, and is reached from outside through a passthrough Route at keycloak.apps-crc.testing and from inside at keycloak-service.keycloak.svc:8443. A KeycloakRealmImport creates the realm tutorial: roles reader and admin, users alice and bob, clients shop-api, shop-cli and orders-service. A client asks the token endpoint for a token, signed RS256 with a private key; the public keys are published at the realm's certs endpoint." src="../docs/diagrams/16-keycloak/lab.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ## Walkthrough

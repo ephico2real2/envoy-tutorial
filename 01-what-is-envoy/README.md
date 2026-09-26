@@ -39,11 +39,7 @@ Open `manifests/10-envoy-config.yaml` alongside this. Every Envoy config is
 these four, nested:
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/01-what-is-envoy/four-nouns.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/01-what-is-envoy/four-nouns.light.png">
-  <img alt="Every Envoy config is four nouns, nested: a listener is a port Envoy accepts connections on; a filter chain is what to do with a connection that arrives; filters see bytes, and http_connection_manager turns them into requests; routes decide which cluster a request belongs to; a cluster is a named group of upstream endpoints." src="../docs/diagrams/01-what-is-envoy/four-nouns.light.png">
-</picture>
+<img alt="Every Envoy config is four nouns, nested: a listener is a port Envoy accepts connections on; a filter chain is what to do with a connection that arrives; filters see bytes, and http_connection_manager turns them into requests; routes decide which cluster a request belongs to; a cluster is a named group of upstream endpoints." src="../docs/diagrams/01-what-is-envoy/four-nouns.light.png">
 <!-- markdownlint-enable MD033 -->
 
 Read it as a sentence: *accept on this port, speak HTTP, match this path, send
@@ -55,11 +51,7 @@ Traffic flows down: the client at the top, Envoy in the middle, the app at the
 bottom. The reply comes back up the same way — **through** Envoy.
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/01-what-is-envoy/request-path.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/01-what-is-envoy/request-path.light.png">
-  <img alt="curl sends GET /hello down into Envoy: listener on port 8080, filter_chain, hcm, route slash, then cluster echo_service, STRICT_DNS and ROUND_ROBIN, which sends it down to echo-1 or echo-2. The reply rises back up through Envoy to curl: 200, plus headers the app never set." src="../docs/diagrams/01-what-is-envoy/request-path.light.png">
-</picture>
+<img alt="curl sends GET /hello down into Envoy: listener on port 8080, filter_chain, hcm, route slash, then cluster echo_service, STRICT_DNS and ROUND_ROBIN, which sends it down to echo-1 or echo-2. The reply rises back up through Envoy to curl: 200, plus headers the app never set." src="../docs/diagrams/01-what-is-envoy/request-path.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ## Walkthrough

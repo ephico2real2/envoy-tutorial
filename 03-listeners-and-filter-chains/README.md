@@ -30,11 +30,7 @@ That is why SNI selects a chain and the `Host` header cannot.
 ## Five stages, in order
 
 <!-- markdownlint-disable MD033 -->
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../docs/diagrams/03-listeners-and-filter-chains/chain-vs-vhost.dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../docs/diagrams/03-listeners-and-filter-chains/chain-vs-vhost.light.png">
-  <img alt="A TCP connection passes five stages in order: listener filters run, where tls_inspector reads SNI; filter_chain_match picks one chain, where SNI is available and the Host header is not; transport_socket terminates TLS with the chain's own certificate; http_connection_manager, where there is now HTTP; and virtual_hosts match domains, where the Host header is available." src="../docs/diagrams/03-listeners-and-filter-chains/chain-vs-vhost.light.png">
-</picture>
+<img alt="A TCP connection passes five stages in order: listener filters run, where tls_inspector reads SNI; filter_chain_match picks one chain, where SNI is available and the Host header is not; transport_socket terminates TLS with the chain's own certificate; http_connection_manager, where there is now HTTP; and virtual_hosts match domains, where the Host header is available." src="../docs/diagrams/03-listeners-and-filter-chains/chain-vs-vhost.light.png">
 <!-- markdownlint-enable MD033 -->
 
 | | `filter_chain_match` | `virtual_hosts.domains` |
