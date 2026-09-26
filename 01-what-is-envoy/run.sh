@@ -10,6 +10,7 @@ deploy() {
   $KUBE apply -n "$NS" -f ../_shared/echo-app.yaml >/dev/null
   $KUBE apply -n "$NS" -f manifests/ >/dev/null
   wait_ready echo; wait_ready envoy
+  wait_upstream echo_service
   ok "echo and envoy are up"
 }
 
