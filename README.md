@@ -41,6 +41,19 @@ Every command runs as written from your laptop.
 Module 12 was written first because it was the immediate need. The numbering is
 the reading order, not the build order.
 
+## A permanent Keycloak offering
+
+Most modules are deployed, read and removed. Modules 16, 17 and 18 are also a
+**standing Keycloak offering** on the operator's CRC — Keycloak with realm
+`tutorial` and the LDAP-federated realm `corp`, and the Gateway that checks their
+tokens — that other work depends on. Each module's `run.sh` builds and checks it;
+one Argo CD Application per module, in [`argocd/`](argocd/README.md), keeps the
+same manifests as git declares them and puts back what changes. Each of the three
+READMEs has a "Permanent lab" section: what is kept, what stays `run.sh`'s and
+why, and how to pause Argo CD before changing anything by hand
+(`./run.sh pause`, then `./run.sh resume`). Module 16's also says how to add an
+integration, and lists them.
+
 ## What you need
 
 A Kubernetes or OpenShift cluster you can create namespaces in, and `oc` (or
@@ -57,6 +70,9 @@ each module's `run.sh` does them in one go:
 ./run.sh verify     # check the running proxy behaves as the README says
 ./run.sh clean      # delete the namespace
 ```
+
+Modules 16 to 18 add `./run.sh pause` and `./run.sh resume`, for their Argo CD
+Applications ([`argocd/`](argocd/README.md)).
 
 `verify` is a set of assertions against the **running** proxy, not a wall of
 output — a module either passes or names the claim that failed.
@@ -95,6 +111,8 @@ output — a module either passes or names the claim that failed.
   UI, and a `verify.py` that fails a capture with a wide flat margin.
 - [`_shared/client.yaml`](_shared/client.yaml) — the in-cluster pod every
   walkthrough runs `curl` from.
+- [`argocd/`](argocd/README.md) — the Argo CD Applications that keep modules 16,
+  17 and 18 as declared, and how to pause them.
 
 ## A worked example
 

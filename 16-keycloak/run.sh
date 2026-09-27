@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Module 16 — a Keycloak lab (Red Hat build of Keycloak).  ./run.sh deploy | verify | clean
+# Module 16 — a Keycloak lab (Red Hat build of Keycloak).  ./run.sh deploy | verify | clean | pause | resume
 cd "$(dirname "$0")"
 NS=keycloak
 . ../_shared/lib.sh
+. ../_shared/argocd.sh
 
 REALM=https://keycloak.apps-crc.testing/realms/tutorial
 
@@ -37,6 +38,7 @@ deploy() {
   $KUBE wait keycloakrealmimport/tutorial -n "$NS" --for=condition=Done --timeout=300s >/dev/null \
     || { bad "the realm import did not finish"; exit 1; }
   ok "Keycloak ready at https://keycloak.apps-crc.testing, realm tutorial imported"
+  app_resume 16-keycloak
 }
 
 # kc <curl args...> - curl from the client pod, trusting only the enterprise CA.
@@ -96,6 +98,9 @@ verify() {
 }
 
 clean() {
+  # Argo CD would put everything back as it is deleted. Modules 17 and 18 keep
+  # objects in this namespace too, so their Applications pause with it.
+  app_pause 16-keycloak 17-keycloak-jwt 18-keycloak-ldap
   warn=$($KUBE get securitypolicy -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {end}' 2>/dev/null)
   [ -n "$warn" ] && echo "  note: SecurityPolicies that may use this Keycloak: $warn"
   # The database's volume outlives its claim here: CRC's StorageClass has
@@ -112,9 +117,12 @@ clean() {
   $KUBE delete ns "$NS" --wait=false >/dev/null 2>&1
   ok "namespace $NS deleting, with the operator, the database and its volume${pv:+ $pv}"
   echo "  note: OLM leaves the CRDs keycloaks.k8s.keycloak.org and keycloakrealmimports.k8s.keycloak.org installed"
+  [ -z "$(app_automated 16-keycloak)" ] \
+    || echo "  note: to bring the lab back: ./run.sh deploy, then ../18-keycloak-ldap/run.sh deploy and ../17-keycloak-jwt/run.sh deploy - each resumes its Argo CD Application"
 }
 
 case "${1:-deploy}" in
   deploy) deploy ;; verify) verify ;; clean) clean ;;
+  pause) app_pause 16-keycloak ;; resume) app_resume 16-keycloak ;;
   *) sed -n '2p' "$0" | sed 's/^# //'; exit 2 ;;
 esac

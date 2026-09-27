@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Module 17 — Keycloak tokens at the Gateway.  ./run.sh deploy | verify | clean
+# Module 17 — Keycloak tokens at the Gateway.  ./run.sh deploy | verify | clean | pause | resume
 cd "$(dirname "$0")"
 NS=envoy-17
 . ../_shared/lib.sh
 . ../_shared/gateway.sh
+. ../_shared/argocd.sh
 
 # Module 16's lab must be up: this module checks the tokens that Keycloak issues.
 need_keycloak() {
@@ -35,6 +36,7 @@ deploy() {
   # Not fatal: tutorial's tokens work without corp. Steps 8 to 10 need it.
   [ "$(corp_state)" = True ] \
     || echo "  note: realm corp is not imported - steps 8 to 10 need module 18 (../18-keycloak-ldap/run.sh deploy)"
+  app_resume 17-keycloak-jwt
 }
 
 # call <token|""> <path> [curl args...] - the response body and, last, " -> <status>".
@@ -208,6 +210,8 @@ print(".".join([h, base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rst
 }
 
 clean() {
+  # Argo CD would put everything back as it is deleted.
+  app_pause 17-keycloak-jwt
   gw_down "$NS" eg
   $KUBE delete -f manifests/10-gateway.yaml --ignore-not-found --wait=false >/dev/null 2>&1
   # What this module added next to Keycloak - not the lab itself.
@@ -218,5 +222,6 @@ clean() {
 
 case "${1:-deploy}" in
   deploy) deploy ;; verify) verify ;; clean) clean ;;
+  pause) app_pause 17-keycloak-jwt ;; resume) app_resume 17-keycloak-jwt ;;
   *) sed -n '2p' "$0" | sed 's/^# //'; exit 2 ;;
 esac

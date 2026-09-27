@@ -32,7 +32,9 @@ the Gateway in front of it.
   450 MiB, PostgreSQL 128 MiB — and, while step 8's import runs, its Job 1.7 GiB.
 - Work from this folder: `cd 16-keycloak`.
 - This lab uses the namespace **`keycloak`** and takes about 20 minutes. Leave it
-  running for module 17.
+  running for module 17. On the operator's CRC it is **permanent** — a standing
+  offering that Argo CD keeps as declared: read [Permanent lab](#permanent-lab)
+  before you change anything by hand there.
 
 ## The lab
 
@@ -392,16 +394,158 @@ all checks passed
 | editing the realm file changes nothing | an import only creates a realm — measured: a changed token lifespan, re-applied, ran no new import and tokens kept the old lifespan | change it in the console, or delete the realm and import again |
 | `curl: (60) SSL certificate problem` | the caller does not trust the enterprise CA | copy `ca.crt` as in step 6 |
 
-## Clean up
+## Permanent lab
 
-Leave the lab running if you go on to module 17. To remove it — the server, the
-database and its volume, and the operator. On CRC the database's volume outlives
-its claim — the StorageClass keeps volumes (`reclaimPolicy: Retain`), and an
-earlier clean-up left one behind, `Released`, data and all (measured) — so mark it
-for deletion first:
+On the operator's CRC this lab is not deployed and removed: Keycloak is a
+**standing offering** that other work depends on
+([#9](https://github.com/ephico2real2/envoy-tutorial/issues/9)) — realm
+`tutorial` for module 17, realm `corp` for module 18, and every integration in
+the [index](#integrations-index) below. Two things keep it:
+
+- **`./run.sh`** builds it and checks it. `./run.sh verify` is the one check of
+  its health, with or without Argo CD.
+- **Argo CD** keeps it as declared. The Application `16-keycloak`
+  ([`../argocd/16-keycloak.yaml`](../argocd/16-keycloak.yaml)), in OpenShift
+  GitOps' instance `openshift-gitops`, applies this module's `manifests/` from
+  the `main` branch — the same files `./run.sh deploy` applies — and puts back
+  whatever differs from them: a deleted object, an edited field. Modules 17 and
+  18 have one each; [`../argocd`](../argocd/README.md) says how they are set up,
+  and how fast they put a change back (measured: under a second, or up to five
+  minutes when Argo CD has just done so).
+
+These blocks need the Applications, which a fresh cluster does not have, so the
+walkthrough runner skips them; they were run as written on the operator's CRC.
 
 <!-- walkthrough: skip -->
 ```console
+$ oc get applications.argoproj.io 16-keycloak 17-keycloak-jwt 18-keycloak-ldap -n openshift-gitops -o custom-columns=NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,AUTOMATED:.spec.syncPolicy.automated.enabled
+NAME               SYNC     HEALTH    AUTOMATED
+16-keycloak        Synced   Healthy   true
+17-keycloak-jwt    Synced   Healthy   true
+18-keycloak-ldap   Synced   Healthy   true
+$ oc get keycloak keycloak -n keycloak -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/tracking-id}{"\n"}'
+16-keycloak:k8s.keycloak.org/Keycloak:keycloak/keycloak
+```
+
+**What just happened:** all three Applications are **Synced** — the cluster
+matches git — and **Healthy**, and their automated sync is on. Argo CD marks
+each object it keeps with a tracking annotation — Application, kind, namespace
+and name.
+
+### What `./run.sh deploy` makes, and who keeps it
+
+Everything `deploy` applies from `manifests/` is Argo CD's to keep. What it does
+by hand, and what other controllers make, is not:
+
+| What | Made by | Kept by | Why |
+|---|---|---|---|
+| namespace `keycloak`, `OperatorGroup` and `Subscription` `rhbk-operator` | `manifests/10-operator.yaml` | Argo CD | a manifest |
+| Secret `keycloak-db`, Service and StatefulSet `postgres` | `20-postgres.yaml` | Argo CD | a manifest |
+| `Certificate keycloak-tls` | `30-certificate.yaml` | Argo CD; its Secret, cert-manager, which renews it | a manifest |
+| Secret `keycloak-admin`, the `Keycloak` resource — with module 18's truststore entry | `40-keycloak.yaml` | Argo CD | a manifest |
+| Route `keycloak` | `50-route.yaml` | Argo CD | a manifest |
+| `KeycloakRealmImport tutorial` | `60-realm.yaml` | Argo CD keeps the resource; the realm is created once | an import only creates (step 8): no sync ever changes realm `tutorial` |
+| **approving the InstallPlan** (step 2) | `./run.sh deploy`: `oc patch installplan … approved: true` | nobody — `run.sh` only | `Manual` approval is the point: a person decides on each operator version. OLM makes one InstallPlan per version, under a generated name; approving it from git would make `Manual` automatic. While a new version waits, Argo CD's health check for a `Subscription` says `Progressing` (`status.state` `UpgradePending`; argo-cd v3.4.7, `resource_customizations/operators.coreos.com/Subscription/health.lua`), so the Application shows it |
+| the operator's CSV and Deployment | OLM | OLM | |
+| StatefulSet `keycloak`, Services `keycloak-service` and `keycloak-discovery`, the import's Job | the Keycloak operator | the operator | made from the resources above |
+| claim `data-postgres-0` | the StatefulSet | the StatefulSet | Argo CD does not track it, so it never prunes it |
+| pod `client` | step 6, or `./run.sh verify` when it is missing | nobody | a test tool, not part of the offering |
+
+### Walkthroughs, experiments and clean
+
+Argo CD would undo, as it happens, any change made on purpose — a walkthrough
+step that deletes or edits an object, an experiment such as the realm file in
+Troubleshooting. So pause the module's Application first, and resume it after:
+
+<!-- walkthrough: skip -->
+```console
+$ ./run.sh pause
+  ✓ Argo CD Application 16-keycloak paused: it no longer puts back what changes
+$ oc get applications.argoproj.io 16-keycloak -n openshift-gitops -o jsonpath='{.spec.syncPolicy.automated.enabled} {.status.sync.status}{"\n"}'
+false Synced
+$ ./run.sh resume
+  ✓ Argo CD Application 16-keycloak resumed: Synced/Healthy - it keeps the lab as git declares it
+```
+
+**What just happened:** `pause` set the Application's
+`spec.syncPolicy.automated.enabled` to `false`: Argo CD still compares — it says
+`OutOfSync` as soon as something differs — but changes nothing. `resume` set it
+back to `true` and waited until Argo CD had put back everything that differed
+from git and said `Synced` — up to five minutes, because Argo CD spaces out the
+repairs it makes in a row ([`../argocd`](../argocd/README.md)).
+
+- **`./run.sh clean`** pauses first — this Application, and 17's and 18's, which
+  keep objects in `keycloak` too — so the clean-up is not undone. It is a
+  deliberate reset, and it deletes the database's volume (Clean up).
+- **`./run.sh deploy`** resumes the Application at its end. After a clean, bring
+  the offering back in order: `./run.sh deploy`, then
+  `../18-keycloak-ldap/run.sh deploy`, then `../17-keycloak-jwt/run.sh deploy` —
+  each resumes its own Application.
+- **Deleting an Application leaves the lab running.** These Applications carry no
+  `resources-finalizer.argocd.argoproj.io`, which would make Argo CD delete
+  every object they keep — namespace `keycloak`, and with it the database's claim.
+
+Not measured yet (#9): whether the lab comes back by itself after `crc stop` and
+`crc start` — on hold, the operator keeps CRC running — and a forced renewal of
+`keycloak-tls`.
+
+## Adding an integration
+
+Keycloak is the hub for more integrations than these modules. Adding one is a
+recipe, not a redesign — module 18 is the worked example of every item:
+
+1. **Trust.** A CA the integration needs Keycloak to trust is one more entry in
+   **this** module's `Keycloak` resource, `spec.truststores.<name>.secret{name,
+   optional: true}` ([`manifests/40-keycloak.yaml`](manifests/40-keycloak.yaml)).
+   One owner for the resource, so the integration never patches it; `optional`,
+   so this module still runs without the integration. The Secret itself is the
+   integration's: its `run.sh deploy` fetches the CA and checks it against the
+   PKI owner's copy before writing it, as module 18 does (steps 4 to 6). A CA
+   each cluster makes for itself, like the directory's here, does not go in git
+   (module 18, "Why the directory's root is not in git"). A new Secret restarts
+   Keycloak about 45 s later (measured, module 18 step 6).
+2. **Content.** The integration's realm, or its clients, is its own
+   `KeycloakRealmImport`, in its own module folder. Credentials reach it only
+   through `spec.placeholders` from a Secret (module 18's
+   `LDAP_BIND_PASSWORD`). An import only creates: to change a realm, follow
+   module 18's step 13 — delete the realm, delete the import, apply — with the
+   Application paused.
+3. **Access by group.** Who may log in comes from a **gate group** — the
+   enterprise default is `app-ssb-autobahnusers`, the gate OpenShift's own
+   `ldap-local` login uses (module 18, step 8); what they may do comes from
+   **role groups**: a group declared in the realm with its `realmRoles`, which
+   the LDAP group mapper adopts (module 18, step 10). Never a list of users.
+4. **Kept alive.** Its own Argo CD Application in [`../argocd`](../argocd/README.md)
+   on its own `manifests/` (copy `18-keycloak-ldap.yaml`: name, path); its own
+   `run.sh` with `deploy | verify | clean | pause | resume`, sourcing
+   [`../_shared/argocd.sh`](../_shared/argocd.sh) — `clean` pauses, `deploy`
+   resumes; and a "Permanent lab" section listing what `deploy` does by hand.
+
+Then add its row to the index below. Each new integration gets its own issue —
+or an epic, when it is large.
+
+## Integrations index
+
+| Integration | Realm and clients | Trust | Gate | Role groups | Argo CD Application | Check | Issue |
+|---|---|---|---|---|---|---|---|
+| `tutorial` — modules 16, 17 | realm `tutorial`; `shop-api`, `shop-cli`, `orders-service` | Keycloak's own certificate, `enterprise-ca`; the Gateway trusts it through a `BackendTLSPolicy` (module 17) | none: users written in the realm file (lab only) | realm roles `reader`, `admin`, given in the realm file | `16-keycloak`; `17-keycloak-jwt` (the Gateway) | `./run.sh verify`; `../17-keycloak-jwt/run.sh verify` | built in [PR #2](https://github.com/ephico2real2/envoy-tutorial/pull/2); kept by [#9](https://github.com/ephico2real2/envoy-tutorial/issues/9) |
+| `corp` — module 18 (and 17's second issuer) | realm `corp`, LDAP-federated; `shop-api`, `shop-cli` | truststore `ldap-root-ca`: the directory's root, checked out of band | `app-ssb-autobahnusers` | `app-ocp-rbac-ocp-keycloak-admin` → role `admin` | `18-keycloak-ldap`; `17-keycloak-jwt` (the Gateway) | `../18-keycloak-ldap/run.sh verify`; `../17-keycloak-jwt/run.sh verify` | [#7](https://github.com/ephico2real2/envoy-tutorial/issues/7), [#8](https://github.com/ephico2real2/envoy-tutorial/issues/8) |
+| Cilium JWT — **parked** | tokens from realm `corp`, checked by Cilium's Envoy (`jwt_authn`) with module 17's checks | — | — | — | — | — | [cilium-implementation-poc#85](https://github.com/ephico2real2/cilium-implementation-poc/issues/85), lab [#86](https://github.com/ephico2real2/cilium-implementation-poc/issues/86) — parked until a stable homelab host exists |
+
+## Clean up
+
+Leave the lab running if you go on to module 17 — and on the permanent lab, a
+clean-up is a deliberate reset, never the end of a walkthrough. To remove it —
+the server, the database and its volume, and the operator. On CRC the database's volume outlives
+its claim — the StorageClass keeps volumes (`reclaimPolicy: Retain`), and an
+earlier clean-up left one behind, `Released`, data and all (measured) — so mark it
+for deletion first. Where Argo CD keeps the lab, pause it first — this module's
+Application, and 17's and 18's, which keep objects in `keycloak` too — or it puts
+each object back as you delete it:
+
+<!-- walkthrough: skip -->
+```console
+$ ./run.sh pause; ../17-keycloak-jwt/run.sh pause; ../18-keycloak-ldap/run.sh pause
 $ oc patch pv "$(oc get pvc data-postgres-0 -n keycloak -o jsonpath='{.spec.volumeName}')" --type=merge -p '{"spec":{"persistentVolumeReclaimPolicy":"Delete"}}'
 $ oc delete keycloakrealmimport tutorial -n keycloak
 $ oc delete keycloak keycloak -n keycloak
@@ -416,8 +560,10 @@ operator on the cluster uses them.
 
 ## The shortcut
 
-`./run.sh deploy` does steps 2 to 8, approving the InstallPlan for you;
-`./run.sh verify` is step 11; `./run.sh clean` is the clean-up.
+`./run.sh deploy` does steps 2 to 8, approving the InstallPlan for you, and
+resumes Argo CD's Application if there is one; `./run.sh verify` is step 11;
+`./run.sh clean` is the clean-up, with the three Applications paused first;
+`./run.sh pause` and `./run.sh resume` are the [Permanent lab](#permanent-lab)'s.
 
 ## References
 

@@ -35,7 +35,9 @@ real system uses them.
   [`15`](../15-backend-tls-policy/README.md) explain the two policies used here.
 - Work from this folder: `cd 17-keycloak-jwt`.
 - This module uses the namespace **`envoy-17`**, adds three small resources to
-  **`keycloak`**, and takes about 20 minutes.
+  **`keycloak`**, and takes about 20 minutes. On the operator's CRC it is
+  **permanent**, kept by Argo CD: see [Permanent lab](#permanent-lab) before you
+  change anything by hand there.
 
 ## The picture
 
@@ -306,7 +308,9 @@ difference between the two answers is the difference between *who are you*
 ### Step 7 — when the Gateway cannot fetch the keys
 
 Take the `BackendTLSPolicy` away and restart the Gateway's Envoy, so it must
-fetch the keys again — and now does so in plain HTTP, to a port that speaks only
+fetch the keys again (on the permanent lab, `./run.sh pause` first: Argo CD
+would put the policy back — [Permanent lab](#permanent-lab)) — and now does so
+in plain HTTP, to a port that speaks only
 TLS (module 15, step 3):
 
 ```console
@@ -567,7 +571,63 @@ all checks passed
 | a directory user gets `invalid_grant`, `Invalid user credentials`; Keycloak's log says `user_not_found` | not in the login gate `app-ssb-autobahnusers` | add them to the gate in the directory (module 18, step 8) |
 | `500` for every request; the policy says `Accepted=False` … `backend ref to Service keycloak/keycloak-service not permitted by any ReferenceGrant` | the `ReferenceGrant` in `keycloak` is missing — measured | step 3 |
 
+## Permanent lab
+
+On the operator's CRC this Gateway stays: it is part of the Keycloak offering
+(module 16, [Permanent lab](../16-keycloak/README.md#permanent-lab)). Argo CD's
+Application `17-keycloak-jwt`
+([`../argocd/17-keycloak-jwt.yaml`](../argocd/17-keycloak-jwt.yaml)) keeps this
+module's `manifests/` and the echo app behind the routes — the same files
+`./run.sh deploy` applies — as they are on the `main` branch. Delete one of its
+objects, the echo app's source, and it is back:
+
+<!-- walkthrough: skip -->
+```console
+$ date -u +%T; oc delete configmap echo-src -n envoy-17; until oc get configmap echo-src -n envoy-17 >/dev/null 2>&1; do sleep 1; done; oc get configmap echo-src -n envoy-17 -o jsonpath='{.metadata.creationTimestamp}  {.metadata.annotations.argocd\.argoproj\.io/tracking-id}{"\n"}'
+11:15:58
+configmap "echo-src" deleted from envoy-17 namespace
+2026-09-27T11:16:39Z  17-keycloak-jwt:/ConfigMap:envoy-17/echo-src
+```
+
+**What just happened:** Argo CD saw the ConfigMap go and applied it again from
+git — a new object, with Argo CD's tracking annotation — 41 seconds later. Not
+at once: Argo CD spaces out repairs made one after another — 2 s, 6 s, 18 s …
+up to five minutes after the previous one — and its previous repair here was
+4 minutes before, when `./run.sh deploy` resumed it. Run again right after, the
+same command waited exactly five minutes; with no repair before it, the same
+deletion was undone in 0.7 s ([`../argocd`](../argocd/README.md) has the
+measurements).
+(This block needs the Application, so the walkthrough runner skips it; it was
+run as written.)
+
+### What `./run.sh deploy` makes, and who keeps it
+
+| What | Made by | Kept by | Why |
+|---|---|---|---|
+| namespace `envoy-17`, Gateway `eg`; HTTPRoutes `api`, `admin`; `ReferenceGrant` and `BackendTLSPolicy` in `keycloak`; SecurityPolicies `keycloak-jwt`, `admin-only` | `manifests/` | Argo CD | manifests |
+| the echo app: ConfigMap `echo-src`, Service and Deployment `echo` | [`../_shared/echo-app.yaml`](../_shared/echo-app.yaml), applied with `-n envoy-17` | Argo CD — the Application's second source | the backend of both routes; its objects carry no namespace and take the Application's, `envoy-17` |
+| GatewayClass `eg`, EnvoyProxy `openshift-scc` | module 12's files, applied in step 2 | nobody here — module 12 owns them | shared by modules 12 to 17; only module 12's clean removes them. An Application of this module must not own another module's objects |
+| **the `nonroot-v2` grant** for the Gateway's Envoy (step 2) | `./run.sh deploy`: `oc adm policy add-scc-to-user` | nobody — `run.sh` only | `oc adm policy` writes it into one RoleBinding, `system:openshift:scc:nonroot-v2` in `envoy-gateway-system`, which every Gateway module (12 to 17) adds its own ServiceAccount to: an Application owning that object would remove the others. The grant stays in that RoleBinding until `./run.sh clean` removes it. (A RoleBinding of this module's own could hold it: Envoy Gateway names the ServiceAccount `envoy-envoy-17-eg-` plus the first 8 hex digits of the SHA-256 of `envoy-17/eg` — measured, `0d84cb63` — but every Gateway module's `gw_up` would have to change with it.) |
+| **restarting the Envoy** after the grant (step 2) | `./run.sh deploy` | — | needed once, so a pod starts now rather than after the ReplicaSet's back-off |
+| **ConfigMap `keycloak-ca`** in `keycloak` (step 3) | `./run.sh deploy`, from Secret `keycloak-tls` | nobody — `run.sh` only | it holds the cluster's own CA — `enterprise-ca`'s, which each cluster makes for itself (module 00). A copy in git would be this CRC's CA, and wrong on every other cluster. Without it the `BackendTLSPolicy` is refused — `Accepted=False` `NoValidCACertificate` (measured in module 15's Troubleshooting) — so `./run.sh verify` fails on its first check, and `./run.sh deploy` writes it again |
+| pod `client` in `envoy-17` | `./run.sh deploy` | nobody | a test tool |
+| the Envoy's Deployment and Service in `envoy-gateway-system` | Envoy Gateway | Envoy Gateway | made from the Gateway |
+
+### Walkthroughs, experiments and clean
+
+Step 7 deletes the `BackendTLSPolicy` to show the Gateway failing closed. With
+Argo CD on, the policy would be put back like the ConfigMap above, and the
+failure would not show. So pause this module's Application first, and resume
+it after — `./run.sh pause`, `./run.sh resume`, as in module 16's
+[Permanent lab](../16-keycloak/README.md#permanent-lab).
+To walk the module again from the start, `./run.sh clean` pauses it for you, and
+`./run.sh resume` hands the lab back once you are done — or `./run.sh deploy`,
+which resumes it at its end.
+
 ## Clean up
+
+On the permanent lab a clean-up is a deliberate reset: pause Argo CD first
+(`./run.sh pause`), or it puts each object back as you delete it.
 
 Remove this module's Gateway and what it added next to Keycloak; the Keycloak
 lab itself stays (module 16 removes it), and so do realm `corp` (module 18) and
@@ -588,8 +648,10 @@ configmap "keycloak-ca" deleted from keycloak namespace
 
 ## The shortcut
 
-`./run.sh deploy` does steps 2 to 6; `./run.sh verify` is step 11;
-`./run.sh clean` is the clean-up.
+`./run.sh deploy` does steps 2 to 6, and resumes Argo CD's Application if there
+is one; `./run.sh verify` is step 11; `./run.sh clean` is the clean-up, with the
+Application paused first; `./run.sh pause` and `./run.sh resume` are the
+[Permanent lab](#permanent-lab)'s.
 
 ## References
 

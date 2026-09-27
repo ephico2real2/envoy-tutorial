@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Module 18 — a realm federated from the cluster's LDAP.  ./run.sh deploy | verify | clean
+# Module 18 — a realm federated from the cluster's LDAP.  ./run.sh deploy | verify | clean | pause | resume
 cd "$(dirname "$0")"
 NS=keycloak
 . ../_shared/lib.sh
+. ../_shared/argocd.sh
 
 LDAP_HOST=ldaps-ldap-testing.apps-crc.testing
 REALM=https://keycloak.apps-crc.testing/realms/corp
@@ -132,6 +133,9 @@ deploy() {
     present) ;;
     absent)
       if $KUBE get keycloakrealmimport corp -n "$NS" >/dev/null 2>&1; then
+        # Argo CD would create the deleted import again from git before the apply
+        # below: this apply decides. The end of deploy resumes it.
+        app_pause 18-keycloak-ldap
         $KUBE delete keycloakrealmimport corp -n "$NS" >/dev/null \
           || { bad "the old import of the missing realm corp could not be deleted"; exit 1; }
         ok "realm corp is missing, its import was not: import deleted, to run again"
@@ -145,6 +149,7 @@ deploy() {
   [ "$(realm_state)" = present ] \
     || { bad "the import says Done, but realm corp does not exist - README step 13"; exit 1; }
   ok "realm corp exists, federated from ldaps://$LDAP_HOST:443"
+  app_resume 18-keycloak-ldap
 }
 
 # claims - the claims of the access token on stdin (or a token.sh "no token: ..."
@@ -272,6 +277,8 @@ keycloak_restarted() {
 
 clean() {
   local out failed=0 pod root
+  # Argo CD would put the import and the bind Secret back as they are deleted.
+  app_pause 18-keycloak-ldap
   # The realm first: deleting the KeycloakRealmImport leaves the realm it made. If
   # the realm cannot be removed, stop - its import and Secrets stay, for a retry.
   out=$(./admin.sh DELETE /admin/realms/corp 2>&1) \
@@ -295,5 +302,6 @@ clean() {
 
 case "${1:-deploy}" in
   deploy) deploy ;; verify) verify ;; clean) clean ;;
+  pause) app_pause 18-keycloak-ldap ;; resume) app_resume 18-keycloak-ldap ;;
   *) sed -n '2p' "$0" | sed 's/^# //'; exit 2 ;;
 esac
