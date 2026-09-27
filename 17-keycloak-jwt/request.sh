@@ -20,10 +20,12 @@ path=$1; shift
 token=
 IFS= read -r token || true
 [ -n "$token" ] || { echo "request.sh: no token on standard input" >&2; exit 1; }
-# A JWT is three base64url parts: nothing that could end the quoted config value below.
-case "$token" in
-  *[!A-Za-z0-9._-]*) echo "request.sh: that is not a token (only A-Z a-z 0-9 . _ - allowed)" >&2; exit 1 ;;
-esac
+# A Keycloak access token is a compact JWS: exactly three non-empty base64url parts -
+# and nothing that could end the quoted config value below.
+if [[ ! $token =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]; then
+  echo "request.sh: not a JWT (expected three non-empty base64url parts)" >&2
+  exit 1
+fi
 
 # run.sh passes the address it already looked up; a reader's command looks it up here.
 addr=${ADDR:-$($KUBE get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')}

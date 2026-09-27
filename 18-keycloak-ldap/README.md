@@ -485,7 +485,7 @@ directory as they log in. A realm whose users live in Keycloak would lose them.
 
 The rebuilt realm also has **new signing keys**, so anything that caches `corp`'s
 public keys rejects its tokens until that cache expires. Module 17's Gateway
-keeps them for `cache_duration: 300s` (its step 5): measured on this lab after a
+keeps them for `cache_duration: 300s` (its step 4): measured on this lab after a
 rebuild at 04:51:17Z, its `corp` checks answered `Jwks doesn't have key to match
 kid or alg from Jwt -> 401` until 04:54:49Z and passed again at 04:55:24Z — about
 four minutes. The `tutorial` realm's tokens were unaffected throughout.
