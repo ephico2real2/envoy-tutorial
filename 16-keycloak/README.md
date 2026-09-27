@@ -180,6 +180,13 @@ two Services: **`keycloak-service`** — HTTPS on 8443, and a management port,
 9000 — and `keycloak-discovery`, which Keycloak instances use to find each other
 when there are several.
 
+The resource also declares a **truststore**, `ldap-root-ca`, read from a Secret
+of that name with `optional: true`. Module 18 creates that Secret — the LDAP
+directory's root CA — and uses it; the field lives here because a resource has
+one owner, and `optional` lets this module run without module 18: Keycloak
+starts without the Secret (measured — `./run.sh verify` passes with and without
+it).
+
 ### Step 6 — a way in
 
 [`manifests/50-route.yaml`](manifests/50-route.yaml) is a **passthrough** Route

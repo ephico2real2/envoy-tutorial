@@ -32,6 +32,15 @@ spec:
   http:
     # Keycloak serves HTTPS itself, with the certificate from 30-certificate.
     tlsSecret: keycloak-tls
+  # The CAs Keycloak trusts for its own outgoing TLS - here the LDAP directory's
+  # root, which module 18 fetches from the wire, checks, and stores in the
+  # Secret ldap-root-ca. It is declared in THIS file, not in module 18, because
+  # an object has one owner: if 18 patched this resource, the next apply of 16
+  # would take the truststore away again. optional: true lets module 16 run on
+  # a cluster that never ran module 18 - Keycloak starts without the Secret.
+  truststores:
+    ldap-root-ca:
+      secret: { name: ldap-root-ca, optional: true }
   hostname:
     # The public name: it goes into every token's issuer (iss) and every URL
     # Keycloak writes into its discovery document.
