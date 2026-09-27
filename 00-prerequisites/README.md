@@ -168,8 +168,9 @@ runs MetalLB's controller and a speaker on each node.
 - **Layer 2.** An `L2Advertisement` makes a node answer ARP for those addresses
   on one interface: here `br-ex`, the node's side of the CRC network
   `192.168.127.0/24`. Anything on that network reaches the address.
-- **Why CRC needs a forward.** On bare metal the clients are on that network, or
-  route to it, and the address simply works. Your laptop is not on it. CRC runs
+- **Why CRC needs a forward.** Where the clients are on that network, or can
+  route to it, the address simply works, and no forward is needed. Your laptop
+  is not on it, and does not route to it. CRC runs
   its VM behind its own network proxy, gvproxy, which forwards only a few laptop
   ports into it: `:80`, `:443`, the API server and ssh. So to reach a MetalLB
   address from the laptop, you ask gvproxy for one more forward, from a laptop

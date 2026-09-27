@@ -21,7 +21,7 @@ same pattern:
 
 | Application | Source | Keeps |
 |---|---|---|
-| [`ingress-shard`](ingress-shard.yaml) | `00-prerequisites/ingress-shard/manifests`, and `_shared/echo-app.yaml` into `ingress-shard` | pool `ingress-shard-pool` and `L2Advertisement ingress-shard-l2` in `metallb-system`; the shard's certificate in `openshift-ingress`; `IngressController metallb`; namespace `ingress-shard` with Route `canary` and the echo app |
+| [`ingress-shard`](ingress-shard.yaml) | `00-prerequisites/ingress-shard/manifests`, and `_shared/echo-app.yaml` into `ingress-shard` | pool `ingress-shard-pool` and `L2Advertisement ingress-shard-l2` in `metallb-system`; the shard's certificate in `openshift-ingress`; `IngressController metallb`; namespace `ingress-shard` (`Prune=false`, as `keycloak`) with Route `canary` and the echo app |
 
 The laptop's forward to the shard's address is not in the cluster, so it stays
 `run.sh`'s ([its Permanent lab](../00-prerequisites/ingress-shard/README.md#permanent-lab)).

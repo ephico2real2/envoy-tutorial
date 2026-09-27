@@ -1,7 +1,8 @@
 # A second router on a MetalLB address — an IngressController shard
 
 OpenShift's own router, the **default IngressController**, carries every Route on
-this cluster: the console, OAuth, Keycloak, the kiosk. On CRC it listens on the
+this cluster except the ones this page moves to the shard: the console, OAuth,
+Keycloak, the kiosk. On CRC it listens on the
 node's own ports 80 and 443 (`HostNetwork`).
 
 This page adds a **second router**, a *shard*, which:
@@ -27,8 +28,8 @@ CRC's network proxy.
 - how a router published as a `LoadBalancerService` gets a MetalLB address. The
   address is chosen by a pool, so nothing has to be added to a Service the
   ingress operator owns;
-- why a laptop running CRC needs a port forward to reach that address, and why
-  bare metal does not.
+- why a laptop running CRC needs a port forward to reach that address, and why a
+  client that can route to the address does not.
 
 ## Before you start
 
@@ -37,7 +38,7 @@ CRC's network proxy.
 - You are a cluster admin. This adds an `IngressController`, a MetalLB pool and
   a certificate in `openshift-ingress`, and changes the **default**
   IngressController (step 5).
-- **Step 5 takes every Route down for half a minute to a minute and a half** on a
+- **Step 5 takes every Route down for about half a minute** (31 s, measured) on a
   single-node cluster: the console, OAuth logins, Keycloak, every app. Pick a
   moment when nobody depends on them. `./run.sh deploy` does the same the first
   time. The clean-up does not undo step 5, on purpose ([Clean up](#clean-up)
@@ -51,7 +52,7 @@ CRC's network proxy.
 ## The picture
 
 <!-- markdownlint-disable MD033 -->
-<img alt="The laptop reaches two routers through CRC&#x27;s network proxy, gvproxy, because it has no route to the CRC network 192.168.127.0/24. Port 443 is CRC&#x27;s own forward to 192.168.127.2, the node, where router-default of IngressController default listens on the node&#x27;s ports 80 and 443 (HostNetwork). 127.0.0.1:20443 is a forward that ./run.sh deploy adds through gvproxy&#x27;s forwarder API, to 192.168.127.130:443, which MetalLB announces at layer 2 on br-ex: the LoadBalancer Service of router-metallb, IngressController metallb, a pod on the pod network, domain apps-metallb.crc.testing. Beside each router, what configures it: on default, routeSelector ingress-shard DoesNotExist, set by ./run.sh deploy and not by Argo CD, kept by clean, and setting it took every Route down for 31 seconds, and for 98 seconds on a later rollout; on metallb, IPAddressPool ingress-shard-pool with the single address 192.168.127.130/32, autoAssign true, and a serviceAllocation that selects the label the ingress operator puts on the router&#x27;s Service, owning-ingresscontroller metallb, plus L2Advertisement ingress-shard-l2 on br-ex; routeSelector ingress-shard: metallb; and Certificate router-metallb-default for *.apps-metallb.crc.testing from ClusterIssuer enterprise-ca, the router&#x27;s default certificate. router-default admits every Route without an ingress-shard label: 21 Routes, among them console 200, oauth 403, keycloak 302, kiosk 200 and ldaps by SNI. The canary&#x27;s host sent to port 443 gets 503: the default router has not admitted it, and its certificate is for *.apps-crc.testing. router-metallb admits only Routes labelled ingress-shard=metallb: Route canary in namespace ingress-shard, edge TLS, admitted by metallb only, to the echo app, which answers 200. The laptop finds canary.apps-metallb.crc.testing as 127.0.0.1 in /etc/hosts, written by CRC&#x27;s routes-controller. All measured on CRC on 2026-09-27." src="../../docs/diagrams/ingress-shard/shard.light.png">
+<img alt="The laptop reaches two routers through CRC&#x27;s network proxy, gvproxy, because it has no route to the CRC network 192.168.127.0/24. Port 443 is CRC&#x27;s own forward to 192.168.127.2, the node, where router-default of IngressController default listens on the node&#x27;s ports 80 and 443 (HostNetwork). 127.0.0.1:20443 is a forward that ./run.sh deploy adds through gvproxy&#x27;s forwarder API, to 192.168.127.130:443, which MetalLB announces at layer 2 on br-ex: the LoadBalancer Service of router-metallb, IngressController metallb, a pod on the pod network, domain apps-metallb.crc.testing. Beside each router, what configures it: on default, routeSelector ingress-shard DoesNotExist, set by ./run.sh deploy and not by Argo CD, kept by clean, and adding it took every Route down for 31 seconds, removing it later for 98 seconds; on metallb, IPAddressPool ingress-shard-pool with the single address 192.168.127.130/32, autoAssign true, and a serviceAllocation that selects, by label, LoadBalancer Services in openshift-ingress carrying the label the ingress operator puts on the router&#x27;s Service, owning-ingresscontroller metallb, plus L2Advertisement ingress-shard-l2 on br-ex; routeSelector ingress-shard: metallb; and Certificate router-metallb-default for *.apps-metallb.crc.testing from ClusterIssuer enterprise-ca, the router&#x27;s default certificate. router-default admits every Route without an ingress-shard label: 21 Routes, among them console 200, oauth 403, keycloak 302, kiosk 200 and ldaps by SNI. The canary&#x27;s host sent to port 443 gets 503: the default router has not admitted it, and its certificate is for *.apps-crc.testing. router-metallb admits only Routes labelled ingress-shard=metallb: Route canary in namespace ingress-shard, edge TLS, admitted by metallb only, to the echo app, which answers 200. The laptop finds canary.apps-metallb.crc.testing as 127.0.0.1 in /etc/hosts, written by CRC&#x27;s routes-controller for Route hosts ending in .crc.testing or .apps-crc.testing. All measured on CRC on 2026-09-27." src="../../docs/diagrams/ingress-shard/shard.light.png">
 <!-- markdownlint-enable MD033 -->
 
 *The laptop reaches the default router on CRC's `:443` and the shard on
@@ -97,11 +98,19 @@ replicas=1  hostNetwork=true  strategy={"maxSurge":0,"maxUnavailable":"25%"}
 
 - The default router listens on the node's own ports (`HostNetwork`), for
   `apps-crc.testing`.
-- It has **no selector**, so it admits every Route in the cluster, whatever the
-  host's domain. Red Hat's docs: "there might be routes that are admitted to your
-  new Ingress shard that are also admitted by the default Ingress Controller.
-  This is because the default Ingress Controller has no selectors and admits all
-  routes by default" (4.22, "Sharding the default Ingress Controller").
+- It already has a `routeSelector`, `ingress-shard DoesNotExist`: this page
+  was walked on a cluster where step 5 had run before, and the clean-up leaves
+  that field in place ([Clean up](#clean-up) says why). The default router
+  admits every Route **without** an `ingress-shard` label, whatever the host's
+  domain.
+- On a cluster where this page never ran, the same command prints
+  `routeSelector=` with nothing after it: **no selector**, so the default router
+  admits every Route. Red Hat's docs: "there might be routes that are admitted to
+  your new Ingress shard that are also admitted by the default Ingress
+  Controller. This is because the default Ingress Controller has no selectors and
+  admits all routes by default" (4.22, "Sharding the default Ingress
+  Controller"). Step 5 adds the selector there, and does nothing where it is
+  already this one.
 - It runs **one** pod, and a rolling update may not add a pod
   (`maxSurge: 0`). Step 5 is where that matters.
 
@@ -119,7 +128,14 @@ defines a pool that **selects the Service**:
 | `addresses` | `192.168.127.130/32` | one address, so the shard always gets the same one. It lies outside `mongot-pool` (MetalLB refuses overlapping pools), and it is not `.1`, `.2` or `.254`, which are gvproxy's gateway, the node and the host |
 | `serviceAllocation.namespaces` | `openshift-ingress` | where the operator puts router Services |
 | `serviceAllocation.serviceSelectors` | `ingresscontroller.operator.openshift.io/owning-ingresscontroller: metallb` | the label the operator itself puts on the shard's Service (`load_balancer_service.go`, `desiredLoadBalancerService`) |
-| `autoAssign` | `true` | MetalLB tries a pool that selects a Service only when the pool may auto-assign, and never gives a pool with `serviceAllocation` to a Service it does not select (`allocator.go`, `pinnedPoolsForService`, `Allocate`) |
+| `autoAssign` | `true` | MetalLB tries a pool that selects a Service only when the pool may auto-assign, and never auto-assigns from a pool with `serviceAllocation` to a Service it does not select (`allocator.go`, `pinnedPoolsForService`, `Allocate`) |
+
+The selection is by **label**, not by name. Any `LoadBalancer` Service in
+`openshift-ingress` with that label is eligible for the address; `router-metallb`
+is the only one there (step 10), and only someone who may create Services in
+`openshift-ingress` could add another. A Service elsewhere that names the pool in
+a `metallb.io/address-pool` annotation is not checked against `serviceAllocation`
+either (`AllocateFromPool`); nothing on this cluster does that.
 
 `L2Advertisement ingress-shard-l2` advertises it on `br-ex`. `mongot-l2` names
 only `mongot-pool`, and stays as it is.
@@ -175,11 +191,13 @@ No resources found
 >   So the old pod must stop, and free the ports, before the new one can bind
 >   them. Until the new pod is ready, **no Route answers**: console, OAuth,
 >   Keycloak, every app.
-> - **Measured on CRC** (2026-09-27, probing every second): console and Keycloak
->   answered `000` from 16:29:52 to 16:30:23 UTC, about **31 seconds**. A later
->   rollout of the same router was down **98 seconds** (16:38:08–16:39:46): the
->   new pod waited 47 s to be scheduled (`FailedScheduling … didn't have free
->   ports`) until the old one let go of 80 and 443.
+> - **Measured on CRC** (2026-09-27, probing every second): adding the selector
+>   took console and Keycloak to `000` from 16:29:52 to 16:30:23 UTC, about
+>   **31 seconds**. **Removing** it later (the incident in [Clean up](#clean-up))
+>   rolled the same router out again, and it was down **98 seconds**
+>   (16:38:08–16:39:46): the new pod waited 47 s to be scheduled
+>   (`FailedScheduling … didn't have free ports`) until the old one let go of 80
+>   and 443. That removal is one reason the clean-up leaves the field.
 > - **It happens once.** The clean-up leaves the selector in place (below).
 
 The selector, and a wait for the new router pod. The operator passes the
@@ -205,8 +223,13 @@ ROUTE_LABELS=!ingress-shard  generation=4
   Controller". They also warn: "You must keep all of OpenShift Container
   Platform's administration routes on the same Ingress Controller". A selector
   that excludes only one label, which none of those Routes carry, does that.
-- Patching again with the same selector changes nothing: measured, a second
-  `./run.sh deploy` left `router-default` at generation 2, and nothing restarted.
+- Patching again with the same selector rolls neither router and changes no
+  router generation: measured, a second `./run.sh deploy` left `router-default`
+  at generation 2, and later at 4 (after the incident in [Clean up](#clean-up)).
+  `./run.sh deploy` does not patch at all when the selector is already this one.
+- `./run.sh deploy` also refuses to add the selector while any Route already
+  carries an `ingress-shard` label, and names them: the selector would take
+  those Routes off the default router. The first command above is that check.
 
 ### Step 6 — the shard
 
@@ -290,10 +313,10 @@ $ curl -s --unix-socket ~/.crc/sockets/crc-http.sock http://crc/network/services
 (Once [#15](https://github.com/ephico2real2/envoy-tutorial/issues/15) is merged,
 this is `../../_shared/crc-forward.sh ensure 127.0.0.1:20443 192.168.127.130:443`.)
 
-**The name.** CRC's `routes-controller` pod in `openshift-ingress` writes every
-Route's host into the laptop's `/etc/hosts` as `127.0.0.1`, through CRC's admin
-helper. The helper accepts only hosts ending in `.crc.testing` or
-`.apps-crc.testing`, which is one reason for this domain. Measured: the canary's
+**The name.** CRC's `routes-controller` pod in `openshift-ingress` writes Route
+hosts into the laptop's `/etc/hosts` as `127.0.0.1`, through CRC's admin helper,
+for hosts ending in `.crc.testing` or `.apps-crc.testing`: the helper refuses
+any other. That is one reason for this domain. Measured: the canary's
 host appeared there, and a browser or `curl` finds it by name. Port `20443`
 takes it to the shard:
 
@@ -485,8 +508,8 @@ all checks passed
 
 | Here (CRC) | Production |
 |---|---|
-| a gvproxy forward from `127.0.0.1:20443` | none: the address is on a network the clients route to |
-| `/etc/hosts`, written by CRC for each Route | a DNS wildcard record, `*.apps-metallb.<domain>` → the shard's address |
+| a gvproxy forward from `127.0.0.1:20443` | where the clients can route to the MetalLB address, no forward is needed |
+| `/etc/hosts`, written by CRC for Route hosts ending in `.crc.testing` or `.apps-crc.testing` | a DNS wildcard record, `*.apps-metallb.<domain>` → the shard's address |
 | one shard address, one replica | more replicas on several nodes; MetalLB layer 2 moves the address to another node if one fails |
 | the default router's selector costs a ~31 s outage: one `HostNetwork` pod that must stop before its replacement can bind the ports | the default router runs a pod on each of several nodes, and the load balancer in front of them sends traffic to the ones still serving. Not measured here: this cluster has one node. The selector is still a change to the router that carries the console and OAuth, so it goes through that router's owner and a change window |
 
@@ -494,9 +517,10 @@ all checks passed
 
 | You see | Why | Fix |
 |---|---|---|
-| console, OAuth, every Route answers `000` or refuses connections for about half a minute | the default router is rolling out after a change to its IngressController: step 5, `./run.sh deploy` the first time, or the clean-up | wait: `oc rollout status deploy/router-default -n openshift-ingress` |
+| console, OAuth, every Route answers `000` or refuses connections for about half a minute | the default router is rolling out after a change to its IngressController: step 5, or `./run.sh deploy` the first time on a cluster that has no selector yet. `./run.sh clean` does not change the default router | wait: `oc rollout status deploy/router-default -n openshift-ingress` |
 | after someone removes the default router's `routeSelector`, every Route shows no `Admitted` status for minutes, `kube-apiserver` rolls out new revisions, and `oc get routes` fails with `the server doesn't have a resource type "routes"` | a missing selector is read as "select nothing" when the operator clears status ([Clean up](#clean-up)) | wait: the router re-admits every Route once its new pod runs, and the API servers settle (about four minutes, measured). Don't remove the field. To reset it, set an empty selector `{}`, which the same code reads as "every Route". That is from the source, not measured here |
 | `IngressController default already has routeSelector … - left alone` from `./run.sh deploy` | someone gave the default router a selector of their own; `run.sh` does not merge selectors | decide with whoever set it; step 5's selector must be combined with theirs by hand |
+| `not changing the default router: these Routes carry ingress-shard …` from `./run.sh deploy` | Routes already carry the label; the selector would take them off the default router | remove the label from each, or move them to the shard on purpose, then deploy again |
 | a Route that should be on the default router stops answering after step 5 | it carries an `ingress-shard` label | remove the label, or move the Route to the shard's domain on purpose |
 | `admission webhook "ipaddresspoolvalidationwebhook.metallb.io" denied the request: CIDR … overlaps with already defined CIDR` | the address is in another pool (measured with `.120`) | pick an address outside every pool |
 | `router-metallb` stays `<pending>`, the IngressController not `Available` | no pool gives it an address: a selecting pool with `autoAssign: false` is skipped (`allocator.go`, `pinnedPoolsForService`) | `autoAssign: true` on the selecting pool |
@@ -515,11 +539,11 @@ and no resources-finalizer.
 
 | What | Made by | Kept by | Why |
 |---|---|---|---|
-| pool and L2 advertisement, the certificate, `IngressController metallb`, namespace `ingress-shard`, Route `canary`, the echo app | `manifests/`, `../../_shared/echo-app.yaml` | Argo CD | manifests |
+| pool and L2 advertisement, the certificate, `IngressController metallb`, namespace `ingress-shard`, Route `canary`, the echo app | `manifests/`, `../../_shared/echo-app.yaml` | Argo CD | manifests. The namespace carries `argocd.argoproj.io/sync-options: Prune=false`, as module 16's `keycloak` does ([`argocd`](../../argocd/README.md)): were a later commit to drop or rename its document, automated prune would otherwise delete it and everything in it. `./run.sh clean` is the one way to remove it |
 | **the default router's `routeSelector`** (step 5) | `./run.sh deploy` | nobody: `run.sh` only | the default IngressController is the platform's, not this lab's. An Application that owned it could prune it, which would delete the router every Route depends on, and would put its own copy of the object back over any other change to it. `run.sh` adds the one field, only if the router has no selector yet; `clean` leaves it ([Clean up](#clean-up) says why). `./run.sh verify` checks that it is there |
 | Deployment and Service `router-metallb` | the ingress operator | the ingress operator | made from the IngressController |
 | the laptop's forward `127.0.0.1:20443 → 192.168.127.130:443` | `./run.sh deploy` | nobody: `run.sh` only | it lives in CRC's gvproxy, not in the cluster, and ends when the CRC VM stops. After `crc start`, run `./run.sh deploy` again |
-| `/etc/hosts` lines for the Route hosts | CRC's `routes-controller` | CRC | CRC's own |
+| `/etc/hosts` lines for Route hosts ending in `.crc.testing` or `.apps-crc.testing` | CRC's `routes-controller` | CRC | CRC's own |
 
 `./run.sh clean` pauses the Application before it deletes anything, and
 `./run.sh deploy` resumes it at its end. `./run.sh pause` and `./run.sh resume`
@@ -554,25 +578,35 @@ selector from step 5**.
 <!-- walkthrough: skip -->
 ```console
 $ ./run.sh pause
+$ curl -s --unix-socket ~/.crc/sockets/crc-http.sock http://crc/network/services/forwarder/all | python3 -c 'import json, sys; [print(f["local"], "->", f["remote"]) for f in json.load(sys.stdin) if f["local"] == "127.0.0.1:20443"]'
 $ curl -s --unix-socket ~/.crc/sockets/crc-http.sock -X POST -d '{"local":"127.0.0.1:20443","protocol":"tcp"}' -w '%{http_code}\n' http://crc/network/services/forwarder/unexpose
 $ oc delete -f manifests/40-canary.yaml --wait=false
-$ oc delete -f manifests/30-ingresscontroller.yaml
-$ oc wait svc/router-metallb -n openshift-ingress --for=delete --timeout=120s
+$ oc delete -f manifests/30-ingresscontroller.yaml --wait=false
+$ oc wait ingresscontroller/metallb -n openshift-ingress-operator --for=delete --timeout=180s
+$ oc wait svc/router-metallb -n openshift-ingress --for=delete --timeout=180s
 $ oc delete -f manifests/20-certificate.yaml
 $ oc delete secret router-metallb-default-cert -n openshift-ingress
 $ oc delete -f manifests/10-pool.yaml
+$ oc wait ns/ingress-shard --for=delete --timeout=180s
 $ rm -f enterprise-root-ca.pem
 ```
 
-`./run.sh clean` does all of this. The default router, `mongot-pool`,
+Remove the forward only when the first command shows it going to
+`192.168.127.130:443`: another forward of the same port is someone else's.
+`./run.sh clean` does all of this, checks every step, and stops at the first
+that fails, before it says the shard is gone. It removes the forward only when it
+is this lab's, and fails otherwise. The default router, `mongot-pool`,
 `mongot-l2` and CRC's own forwards are not touched, so there is no outage.
 
 ## The shortcut
 
 - `./run.sh deploy` does steps 3 to 8 and resumes Argo CD's Application if there
-  is one. It includes step 5's outage the first time; a second `deploy` leaves the
-  default router alone (measured).
+  is one. It includes step 5's outage the first time; a second `deploy` rolls
+  neither router and changes no router generation (measured).
 - `./run.sh verify` is step 12. It checks:
+  - the manifests' contract: the pool's `autoAssign` and `serviceAllocation`,
+    the L2 advertisement's pool and interface, and the shard's domain,
+    publishing strategy, `routeSelector` and default certificate;
   - the address and its pool;
   - the default router's selector;
   - which routers admit what: the canary on the shard alone, every other Route
@@ -580,7 +614,9 @@ $ rm -f enterprise-root-ca.pem
   - the laptop's way in;
   - `503` on `:443`;
   - the default router's Routes.
-- `./run.sh clean` is the clean-up, with the Application paused first. It leaves
+- `./run.sh clean` is the clean-up, with the Application paused first; every
+  step is checked, and it waits until the IngressController, the Service and
+  the namespace are gone. It leaves
   the default router's selector, so it causes no outage.
 
 ## References
