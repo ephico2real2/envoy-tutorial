@@ -55,17 +55,39 @@ gw_up() {
 # Gateway is already gone - its namespace deleted by hand - the grant is still
 # there: find it by the name Envoy Gateway gives the ServiceAccount,
 # envoy-<namespace>-<gateway>-<8 hex>, among the subjects of the RoleBinding
-# that `oc adm policy add-scc-to-user` wrote, so it is not left behind.
+# that `oc adm policy add-scc-to-user` wrote, so it is not left behind. Returns 1,
+# having said why, when the grant is there and cannot be removed.
 gw_down() {
   has_sccs || return 0
   local sa; sa=$(gw_proxy_sa "$1" "$2")
   [ -n "$sa" ] || sa=$($KUBE get rolebinding system:openshift:scc:nonroot-v2 -n "$GW_SYSTEM_NS" \
     -o jsonpath='{range .subjects[*]}{.name}{"\n"}{end}' 2>/dev/null | grep -m1 -x "envoy-$1-$2-[0-9a-f]\{8\}")
-  if [ -n "$sa" ]; then
-    $KUBE adm policy remove-scc-from-user nonroot-v2 -z "$sa" -n "$GW_SYSTEM_NS" >/dev/null 2>&1
-  fi
-  return 0
+  [ -n "$sa" ] || return 0
+  local out
+  out=$($KUBE adm policy remove-scc-from-user nonroot-v2 -z "$sa" -n "$GW_SYSTEM_NS" 2>&1) && return 0
+  # Already removed: oc says so and exits 1 (measured: "unable to find target").
+  case "$out" in (*"unable to find target"*) return 0 ;; esac
+  bad "cannot remove nonroot-v2 from $GW_SYSTEM_NS/$sa: $out"
+  return 1
 }
 
 # gw_address <namespace> <gateway> - the address the Gateway was given.
 gw_address() { $KUBE get "gateway/$2" -n "$1" -o jsonpath='{.status.addresses[0].value}'; }
+
+# keycloak_tls <namespace> - "yes" when module 16's BackendTLSPolicy keycloak/keycloak-service
+# lists the SecurityPolicies of <namespace> among its ancestors, each Accepted=True: this
+# namespace's Gateway reaches Keycloak over TLS. "no (...)" otherwise. A policy nobody uses
+# has no ancestors at all (measured, #15), so this is the consumer's check, not module 16's.
+keycloak_tls() {
+  local s
+  s=$($KUBE get backendtlspolicy keycloak-service -n keycloak \
+    -o jsonpath="{.status.ancestors[?(@.ancestorRef.namespace==\"$1\")].conditions[?(@.type==\"Accepted\")].status}" 2>/dev/null)
+  case " $s " in (*" True "*) case " $s " in (*" False "*) echo "no ($s)" ;; (*) echo yes ;; esac ;; (*) echo "no (${s:-no ancestor for $1})" ;; esac
+}
+# wait_keycloak_tls <namespace> - keycloak_tls, for a minute at most; fatal after that.
+wait_keycloak_tls() {
+  local s
+  for _ in $(seq 1 30); do s=$(keycloak_tls "$1"); [ "$s" = yes ] && return 0; sleep 2; done
+  bad "BackendTLSPolicy keycloak/keycloak-service does not accept $1's SecurityPolicies: $s - module 16, step 11"
+  exit 1
+}

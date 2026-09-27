@@ -501,7 +501,7 @@ realm, before a request ever reaches it (module 18, steps 8 and 9).
 $ ./run.sh verify
 
 1. the policies
-  ✓ BackendTLSPolicy to keycloak-service accepted
+  ✓ module 16's BackendTLSPolicy to keycloak-service accepts this Gateway's SecurityPolicies
   ✓ SecurityPolicy keycloak-jwt accepted
   ✓ SecurityPolicy admin-only accepted
   ✓ ...and the Gateway's policy says it is overridden on /admin

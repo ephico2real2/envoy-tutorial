@@ -49,7 +49,9 @@ configmap() {
       | grep -v '^  creationTimestamp: null$'; } > "manifests/$out"
 }
 
-manifest manifests/05-database.yaml  21-shop-database.yaml  "The shop's MongoDB, its claim and Service (the app's layer 0)."
+manifest manifests/05-database.yaml  21-shop-database.yaml  "The shop's MongoDB, its claim and Service (the app's layer 0). NOTE: the app's
+# comment below speaks of its demo.sh, which generates the password; this module commits a
+# published LAB value in 20-shop-db-secret.yaml instead, so Argo CD can keep the Secret."
 configmap inventory-src 22-shop-inventory-src.yaml "The inventory service's source: the gRPC server and its generated stubs." \
   server.py=app/server.py inventory_pb2.py=app/inventory_pb2.py inventory_pb2_grpc.py=app/inventory_pb2_grpc.py
 manifest manifests/10-inventory.yaml 23-shop-inventory.yaml "The inventory service: gRPC only, three replicas, a headless Service (layer 1)."

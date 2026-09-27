@@ -119,3 +119,21 @@ incluster_sh() {
   [ -n "$CLIENT_READY" ] || client_ensure
   $KUBE exec -n "$NS" client -- sh -c "$1" 2>/dev/null
 }
+
+# checked <what> <command...> - run one clean-up step; fatal, with the command's
+# own error, when it fails. --ignore-not-found keeps a re-run at exit 0.
+checked() {
+  local what=$1 out
+  shift
+  out=$("$@" 2>&1) || { bad "cannot $what: $out"; exit 1; }
+}
+# gone <what> <resource> [-n <namespace>] - wait, three minutes at most, until the
+# object is deleted. Already gone - NotFound - counts as deleted.
+gone() {
+  local what=$1 out
+  shift
+  out=$($KUBE wait "$@" --for=delete --timeout=180s 2>&1) && return 0
+  case "$out" in (*NotFound* | *"not found"*) return 0 ;; esac
+  bad "$what is still there after 3 minutes: $out"
+  exit 1
+}

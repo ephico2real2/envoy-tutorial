@@ -113,10 +113,14 @@ it happens. Each module's `run.sh` has two more commands, from
   Measured: `echo-src` was back in the second `resume` was run, and `resume`
   returned 5 s later.
 - **`./run.sh clean`** pauses before it deletes anything (module 16's pauses 16,
-  17 and 18: the other two keep objects in `keycloak`). Measured with module 17:
-  for 4 minutes after its clean, namespace `envoy-17`, the `BackendTLSPolicy` and
-  ConfigMap `keycloak-ca` stayed gone, and the Application said `OutOfSync` /
-  `Missing`.
+  17, 18 and 19: the other three keep objects in `keycloak`; module 18's pauses 18
+  and 19, whose shop signs in on realm `corp`). Measured with module 17, before
+  #15: for 4 minutes after its clean, namespace `envoy-17` stayed gone and the
+  Application said `OutOfSync` / `Missing`. Since #15 module 17's clean removes
+  namespace `envoy-17` and its `ReferenceGrant` only: module 16's `BackendTLSPolicy
+  keycloak-service` and ConfigMap `keycloak-ca` stay, because every Gateway that
+  calls Keycloak shares them. Each clean fails, with the step's own error, when a
+  deletion fails; an object already gone counts as deleted.
 - **`./run.sh deploy`** resumes its Application at the end, once the lab is up.
 
 Why this switch: `automated.enabled` exists for it (`oc explain

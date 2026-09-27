@@ -95,15 +95,19 @@ spec:
           claims:
           - { name: iss, values: ["https://keycloak.apps-crc.testing/realms/corp"] }
     # ...and reserve stock: POST /v1/items/{sku}:reserve, and no other POST. The
-    # expression is matched against the whole :path, query included (v1.9.1,
-    # authorization.go, buildPathPredicate), so the sku may hold no "/", "?", "#"
-    # or ";". Measured with "[^/]+": shop.alice's POST /v1/items/SKU-1001:restock?q=:reserve
-    # got past this Gateway to the shop (503 from the shop's Envoy, not 403 here).
+    # expression is matched against the whole :path as sent, query included and
+    # nothing decoded (v1.9.1, authorization.go, buildPathPredicate). So the sku
+    # is an allow-list: RFC 3986's unreserved characters, letters, digits and
+    # "._~-" - every sku the shop holds (SKU-1001 ...). No "%", so no encoded "/",
+    # "?" or ";"; no ":", so no second verb. A sku outside it, which the shop
+    # would let an admin create, is reserved by an admin only (README, step 9).
+    # Measured with "[^/]+" before: shop.alice's POST .../SKU-1001:restock?q=:reserve
+    # got past this Gateway to the shop (a 503 from the shop's Envoy, not 403).
     - name: signed-in-may-reserve
       action: Allow
       operation:
         methods: [POST]
-        path: { type: RegularExpression, value: "^/v1/items/[^/?#;]+:reserve$" }
+        path: { type: RegularExpression, value: "^/v1/items/[A-Za-z0-9._~-]+:reserve$" }
       principal:
         jwt:
           provider: corp

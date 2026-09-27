@@ -534,6 +534,7 @@ $ ./run.sh verify
   ✓ realm corp exists
   ✓ provider: test connection
   ✓ provider: test authentication (the bind account)
+  ✓ provider: cachePolicy NO_CACHE - the directory is read at every login
   ✓ client shop-kiosk (module 19): its secret is Secret shop-kiosk-client's
 
 3. who gets a corp token
@@ -574,7 +575,7 @@ all checks passed
 | `importEnabled` | `true` | copy users into Keycloak's database, linked to LDAP | `false` to look them up on every request |
 | `fullSyncPeriod`, `changedSyncPeriod` | `-1` | no periodic sync: users are imported as they are looked up | a sync interval, in seconds |
 | `connectionPooling` | not set (`true`) | reuse connections — measured not to be reused (step 12) | — |
-| `cachePolicy` | `NO_CACHE` | read the person and their groups from the directory at every login. Measured with the default (`DEFAULT`, Keycloak's user cache): a person taken out of `app-ocp-rbac-ocp-keycloak-admin` still got `admin` in the next tokens, until the realm's user cache was cleared (module 19, step 13) | `MAX_LIFESPAN`, with `maxLifespan` in milliseconds, to trade freshness for fewer directory searches |
+| `cachePolicy` | `NO_CACHE` | read the person and their groups from the directory at every login. Measured with the default (`DEFAULT`, Keycloak's user cache): a person taken out of `app-ocp-rbac-ocp-keycloak-admin` still got `admin` in the next tokens, until the realm's user cache was cleared (module 19, step 13) `./run.sh deploy` (fatal) and `verify` read the live value: an import only creates, so a realm imported before it keeps `DEFAULT` | `MAX_LIFESPAN`, with `maxLifespan` in milliseconds, to trade freshness for fewer directory searches |
 
 **The group mapper** (`subComponents`, `group-ldap-mapper`)
 
@@ -707,10 +708,16 @@ cluster without the Application.
 ## Clean up
 
 Leave `corp` in place if you go on: module 17's Gateway accepts its tokens beside
-realm `tutorial`'s (module 17, steps 8 to 10).
+realm `tutorial`'s (module 17, steps 8 to 10), and module 19's shop signs people in
+on it — it needs the realm, its LDAP provider, client `shop-kiosk` and Secret
+`shop-kiosk-client`, which module 19 copies for its Gateway. Cleaning this module
+breaks both until `./run.sh deploy` (re-importing `corp` if needed), then
+`../17-keycloak-jwt/run.sh deploy` and `../19-shop-gateway/run.sh deploy`, which
+copies the new client secret.
 On the permanent lab a clean-up is a deliberate reset: pause Argo CD first
-(`./run.sh pause`), or it puts the import and the bind Secret back as you delete
-them. To remove what this module added — the realm, its import, the three Secrets.
+(`./run.sh pause`, and `../19-shop-gateway/run.sh pause` once module 19's
+Application exists), or it puts the import and the bind Secret back as you delete
+them. `./run.sh clean` pauses both. To remove what this module added — the realm, its import, the three Secrets.
 Module 16's `Keycloak` keeps its `truststores` entry: it is optional. But the
 Secret it names is gone, so the operator **restarts Keycloak** — measured: it
 stopped `keycloak-0` 5 seconds after the delete, and the new Keycloak trusts the

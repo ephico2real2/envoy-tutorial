@@ -5,6 +5,13 @@ kind: HTTPRoute
 metadata:
   name: shop
   namespace: envoy-19
+  annotations:
+    # Argo CD applies this after everything else in the module (wave 0), the
+    # SecurityPolicy included, so the route never leads to a shop without it. Argo
+    # CD waits for a wave's objects to be healthy, and it has no health check for a
+    # SecurityPolicy (measured: no health on Application 17's two) - so this orders
+    # the two, it does not wait for Accepted. ./run.sh deploy does (README, step 6).
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   parentRefs: [{ name: eg }]
   rules:

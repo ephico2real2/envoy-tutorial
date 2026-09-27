@@ -1,4 +1,6 @@
-# The shop's MongoDB, its claim and Service (the app's layer 0).
+# The shop's MongoDB, its claim and Service (the app's layer 0). NOTE: the app's
+# comment below speaks of its demo.sh, which generates the password; this module commits a
+# published LAB value in 20-shop-db-secret.yaml instead, so Argo CD can keep the Secret.
 # Vendored by ../vendor.sh from github.com/ephico2real2/envoy-grpc-modernization
 # at 1e3ad13938f7ecef81d4a7717b18f7874384b4de. Do not edit here: change the app repository, then run vendor.sh.
 # Layer 0: the datastore the legacy service was always missing.

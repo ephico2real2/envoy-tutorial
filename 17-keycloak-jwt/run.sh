@@ -24,12 +24,23 @@ corp_state() {
 deploy() {
   need_keycloak
   say "deploying into $NS"
-  $KUBE apply -f ../12-gateway-api/manifests/20-envoyproxy.yaml -f ../12-gateway-api/manifests/10-gatewayclass.yaml >/dev/null
-  $KUBE wait gatewayclass/eg --for=condition=Accepted --timeout=60s >/dev/null
-  $KUBE apply -f manifests/10-gateway.yaml >/dev/null
+  $KUBE apply -f ../12-gateway-api/manifests/20-envoyproxy.yaml -f ../12-gateway-api/manifests/10-gatewayclass.yaml >/dev/null \
+    || { bad "module 12's GatewayClass eg and EnvoyProxy could not be applied"; exit 1; }
+  $KUBE wait gatewayclass/eg --for=condition=Accepted --timeout=60s >/dev/null \
+    || { bad "GatewayClass eg was not accepted - is Envoy Gateway running? (module 12)"; exit 1; }
+  ns_settle "$NS"
+  $KUBE apply -f manifests/10-gateway.yaml >/dev/null || { bad "could not create the Gateway in $NS"; exit 1; }
   gw_up "$NS" eg
-  $KUBE apply -n "$NS" -f ../_shared/client.yaml -f ../_shared/echo-app.yaml -f manifests/20-routes.yaml >/dev/null
-  $KUBE apply -f manifests/30-trust-keycloak.yaml -f manifests/40-jwt.yaml -f manifests/50-admin-only.yaml >/dev/null
+  $KUBE apply -n "$NS" -f ../_shared/client.yaml -f ../_shared/echo-app.yaml -f manifests/20-routes.yaml >/dev/null \
+    || { bad "the client pod, the echo app and the routes could not be applied"; exit 1; }
+  $KUBE apply -f manifests/30-trust-keycloak.yaml -f manifests/40-jwt.yaml -f manifests/50-admin-only.yaml >/dev/null \
+    || { bad "the ReferenceGrant and the SecurityPolicies could not be applied"; exit 1; }
+  local p
+  for p in keycloak-jwt admin-only; do
+    $KUBE wait "securitypolicy/$p" -n "$NS" --for=jsonpath='{.status.ancestors[0].conditions[?(@.type=="Accepted")].status}'=True \
+      --timeout=60s >/dev/null || { bad "SecurityPolicy $p not accepted - oc get securitypolicy $p -n $NS -o yaml"; exit 1; }
+  done
+  wait_keycloak_tls "$NS"
   wait_ready echo
   ok "Gateway eg programmed at $(gw_address "$NS" eg)"
   # Not fatal: tutorial's tokens work without corp. Steps 8 to 10 need it.
@@ -130,7 +141,7 @@ verify() {
   BOB=$(./token.sh bob)
 
   say "1. the policies"
-  assert "BackendTLSPolicy to keycloak-service accepted" "True" "$(condition backendtlspolicy/keycloak-service keycloak Accepted)"
+  assert "module 16's BackendTLSPolicy to keycloak-service accepts this Gateway's SecurityPolicies" "yes" "$(keycloak_tls "$NS")"
   assert "SecurityPolicy keycloak-jwt accepted"           "True" "$(condition securitypolicy/keycloak-jwt "$NS" Accepted)"
   assert "SecurityPolicy admin-only accepted"             "True" "$(condition securitypolicy/admin-only "$NS" Accepted)"
   assert "...and the Gateway's policy says it is overridden on /admin" "True" \
@@ -211,12 +222,13 @@ print(".".join([h, base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rst
 clean() {
   # Argo CD would put everything back as it is deleted.
   app_pause 17-keycloak-jwt
-  gw_down "$NS" eg
-  $KUBE delete -f manifests/10-gateway.yaml --ignore-not-found --wait=false >/dev/null 2>&1
+  gw_down "$NS" eg || exit 1
+  checked "delete namespace $NS" "$KUBE" delete -f manifests/10-gateway.yaml --ignore-not-found --wait=false
   # What this module added next to Keycloak - its ReferenceGrant. The BackendTLSPolicy
   # and its CA are module 16's, used by every Gateway that calls Keycloak.
-  $KUBE delete -f manifests/30-trust-keycloak.yaml --ignore-not-found >/dev/null 2>&1
-  ok "namespace $NS deleting; module 16's Keycloak lab is left running"
+  checked "delete the ReferenceGrant in keycloak" "$KUBE" delete -f manifests/30-trust-keycloak.yaml --ignore-not-found
+  gone "namespace $NS" "ns/$NS"
+  ok "namespace $NS deleted; module 16's Keycloak lab is left running"
 }
 
 case "${1:-deploy}" in

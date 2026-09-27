@@ -88,8 +88,9 @@ Keycloak documentation — and measured on CRC:
    discovery document itself, trusting the CA and the name of the provider's
    `BackendTLSPolicy` (`internal/gatewayapi/securitypolicy.go`,
    `buildOIDCProvider`) — measured: `Accepted=False`, `x509: certificate is valid
-   for *.apps-crc.testing, not keycloak-service.keycloak.svc`, and a `500` on
-   every route (Troubleshooting).
+   for *.apps-crc.testing, not keycloak-service.keycloak.svc`, and the controller's
+   log: `setting 500 direct response in routes due to errors in SecurityPolicy`
+   (Troubleshooting).
 2. **The API calls after sign-in: the session, turned into a bearer JWT.** The
    calls carry the session cookies; `forwardAccessToken: true` makes the `oauth2`
    filter send the access token on as `Authorization: Bearer`, and the `jwt`
@@ -156,7 +157,8 @@ Keycloak documentation — and measured on CRC:
    the Server Administration Guide: "operations that fetch a single user (for
    example during login) are usually cached").
 
-**The client secret is written nowhere.** Module 16's "Adding an integration"
+**The client secret is never committed, printed, logged, or put in a process
+argument.** Module 16's "Adding an integration"
 recipe: credentials reach a realm through `spec.placeholders` from a Secret,
 owned by whoever owns the import. Realm `corp`'s import is module 18's, so module
 18's `run.sh deploy` generates Secret `keycloak/shop-kiosk-client` once — a
@@ -260,7 +262,7 @@ $ oc wait gateway/eg -n envoy-19 --for=condition=Programmed --timeout=120s
 gateway.gateway.networking.k8s.io/eg condition met
 ```
 
-### Step 4 — the shop, from its own repository
+### Step 4 — the shop, from its own repository — and no way to it yet
 
 The shop is `envoy-grpc-modernization`'s own code and manifests, not a fork.
 [`vendor.sh`](vendor.sh) writes this module's copy from that repository at a
@@ -277,7 +279,10 @@ $ grep -h '^# at ' manifests/2[1-8]-shop-*.yaml | sort -u
 |---|---|
 | [`20-shop-db-secret.yaml`](manifests/20-shop-db-secret.yaml) | the database password — the app's `demo.sh` generates one; here a LAB value, so Argo CD can keep it |
 | `21` … `28` | MongoDB and its claim; the inventory service (gRPC only, three pods, a headless Service) and its source; the shop's Envoy, its configuration (`grpc_json_transcoder`) and the proto descriptor; the kiosk page and its web server |
-| [`40-route.yaml`](manifests/40-route.yaml) | the `HTTPRoute`: `/v1/…` and `/` to the shop's Envoy; `/oauth2/callback` and `/logout` for the sign-in; `/whoami` to the echo app (step 8) |
+
+No route leads to the shop yet: the route comes **last**, once the sign-in is in
+place (step 6). A route before its policy would publish the shop to anyone —
+reads and writes — until the policy arrived.
 
 ```console
 $ oc apply -f manifests/20-shop-db-secret.yaml -f manifests/21-shop-database.yaml -f manifests/22-shop-inventory-src.yaml -f manifests/23-shop-inventory.yaml -f manifests/24-shop-envoy-config.yaml -f manifests/25-shop-envoy-proto.yaml -f manifests/26-shop-envoy.yaml -f manifests/27-shop-kiosk-src.yaml -f manifests/28-shop-kiosk.yaml
@@ -295,12 +300,11 @@ deployment.apps/envoy created
 configmap/kiosk-src created
 service/kiosk created
 deployment.apps/kiosk created
-$ oc apply -n envoy-19 -f ../_shared/client.yaml -f ../_shared/echo-app.yaml -f manifests/40-route.yaml
+$ oc apply -n envoy-19 -f ../_shared/client.yaml -f ../_shared/echo-app.yaml
 pod/client created
 configmap/echo-src created
 service/echo created
 deployment.apps/echo created
-httproute.gateway.networking.k8s.io/shop created
 $ for d in inventory-db inventory envoy kiosk echo; do oc rollout status -n envoy-19 deploy/$d --timeout=300s; done
 Waiting for deployment "inventory-db" rollout to finish: 0 of 1 updated replicas are available...
 deployment "inventory-db" successfully rolled out
@@ -313,34 +317,12 @@ deployment "kiosk" successfully rolled out
 deployment "echo" successfully rolled out
 $ oc wait -n envoy-19 --for=condition=Ready pod/client --timeout=120s
 pod/client condition met
+$ oc exec -n envoy-19 client -- curl -s -o /dev/null -w 'the Gateway, GET /v1/items -> %{http_code}\n' "http://$(oc get gateway eg -n envoy-19 -o jsonpath='{.status.addresses[0].value}')/v1/items"
+the Gateway, GET /v1/items -> 404
 ```
 
-Is it answering through the Gateway yet? The inventory's pods take a while to
-start (they install their Python packages first), and the very first calls can
-fail: in this module's first run from scratch, both calls below answered `503`
-right after the rollouts. Ask until one answers — each attempt that does not
-prints the Gateway's answer:
-
-```console
-$ for i in $(seq 1 30); do r=$(oc exec -n envoy-19 client -- curl -s -w ' %{http_code}' "http://$(oc get gateway eg -n envoy-19 -o jsonpath='{.status.addresses[0].value}')/v1/items/SKU-1001"); case "$r" in *' 200') echo "attempt $i: 200"; break ;; *) echo "attempt $i: $r"; sleep 2 ;; esac; done
-attempt 1: no healthy upstream 503
-attempt 2: 200
-```
-
-In the run shown, the first attempt got Envoy's `no healthy upstream` — a cluster with no endpoint
-yet; which Envoy, the Gateway's or the shop's, the answer does not say — and
-the second the shop. The shop answers through the Gateway — to anyone, for
-anything:
-
-```console
-$ oc exec -n envoy-19 client -- curl -s -o /dev/null -w 'no token, GET /v1/items -> %{http_code}\n' "http://$(oc get gateway eg -n envoy-19 -o jsonpath='{.status.addresses[0].value}')/v1/items"
-no token, GET /v1/items -> 200
-$ oc exec -n envoy-19 client -- curl -s -o /dev/null -w 'no token, POST /v1/items/SKU-1001:reserve -> %{http_code}\n' -H 'content-type: application/json' -d '{"quantity":1,"orderId":"ANYONE"}' "http://$(oc get gateway eg -n envoy-19 -o jsonpath='{.status.addresses[0].value}')/v1/items/SKU-1001:reserve"
-no token, POST /v1/items/SKU-1001:reserve -> 200
-```
-
-**What just happened:** the Gateway sent both on — a read and a write, from
-nobody in particular. The rest of this module closes that.
+**What just happened:** the shop runs — MongoDB, three inventory pods, its own
+Envoy, the kiosk — and the Gateway answers **`404`**: it has no route to it.
 
 ### Step 5 — the Gateway is the only way in
 
@@ -348,7 +330,9 @@ A policy on the Gateway guards the Gateway, not the Services behind it: any pod
 in the cluster could call the shop's Envoy at `envoy.envoy-19.svc:8080` and skip
 it. [`manifests/30-network-policy.yaml`](manifests/30-network-policy.yaml) lets
 each layer accept only the one in front of it — this Gateway's Envoy, then the
-shop's Envoy, then the inventory, then MongoDB:
+shop's Envoy, then the inventory, then MongoDB. The client pod tries to open a
+connection to each, straight (curl's `telnet://`, 3 s), and to the Gateway as a
+control:
 
 ```console
 $ oc apply -f manifests/30-network-policy.yaml
@@ -357,20 +341,23 @@ networkpolicy.networking.k8s.io/echo-from-gateway created
 networkpolicy.networking.k8s.io/kiosk-from-shop-envoy created
 networkpolicy.networking.k8s.io/inventory-from-shop-envoy created
 networkpolicy.networking.k8s.io/database-from-inventory created
-$ sleep 5; oc exec -n envoy-19 client -- curl -s -m 5 -o /dev/null -w 'the shop Envoy, directly -> %{http_code}\n' http://envoy:8080/v1/items; echo "curl exit code $?"
-the shop Envoy, directly -> 000
-command terminated with exit code 28
-curl exit code 28
-$ oc exec -n envoy-19 client -- curl -s -o /dev/null -w 'through the Gateway -> %{http_code}\n' "http://$(oc get gateway eg -n envoy-19 -o jsonpath='{.status.addresses[0].value}')/v1/items"
-through the Gateway -> 200
+$ sleep 5; for ep in "$(oc get gateway eg -n envoy-19 -o jsonpath='{.status.addresses[0].value}'):80" envoy:8080 echo:8080 kiosk:8080 inventory:50051 inventory-db:27017; do printf '%-24s ' "$ep"; oc exec -n envoy-19 client -- sh -c "curl -sv --connect-timeout 3 -m 4 telnet://$ep </dev/null 2>&1 | grep -q 'Connected to' && echo reachable || echo blocked"; done
+192.168.127.102:80       reachable
+envoy:8080               blocked
+echo:8080                blocked
+kiosk:8080               blocked
+inventory:50051          blocked
+inventory-db:27017       blocked
 ```
 
-**What just happened:** straight to the shop's Envoy, **no answer** — `000`,
-`curl` gave up after 5 s (exit code 28): OVN-Kubernetes dropped the connection.
-Through the Gateway, `200`: the Gateway's Envoy is the one caller the policy
-admits.
+**What just happened:** the Gateway's address is **reachable**; every layer of
+the shop, straight from the client pod, is **blocked** — OVN-Kubernetes drops the
+connection. Only this Gateway's Envoy is admitted to the shop's Envoy, and only
+the shop's Envoy to the inventory and the kiosk, and only the inventory to MongoDB
+(`./run.sh verify` checks each). The probe's own `reachable` for the Gateway shows
+it can tell the two apart.
 
-### Step 6 — sign-in, the JWT and the permissions: one SecurityPolicy
+### Step 6 — sign-in first, then the route
 
 The client secret first. Module 18 generated it, in Secret `shop-kiosk-client`
 in `keycloak`, and the realm was imported with it (step 2); Envoy Gateway reads a
@@ -387,22 +374,64 @@ Then [`manifests/50-trust-keycloak.yaml`](manifests/50-trust-keycloak.yaml), a
 `ReferenceGrant` in `keycloak` — a policy in `envoy-19` may point at
 `keycloak-service` — and [`manifests/70-sign-in.yaml`](manifests/70-sign-in.yaml),
 the policy, on the whole Gateway — read it: every field has its reason beside
-it, and [The options](#the-options) lists them.
+it, and [The options](#the-options) lists them. Wait until it is accepted:
 
 ```console
 $ oc apply -f manifests/50-trust-keycloak.yaml -f manifests/70-sign-in.yaml
 referencegrant.gateway.networking.k8s.io/envoy-19-signs-in-with-keycloak created
 securitypolicy.gateway.envoyproxy.io/sign-in created
-$ sleep 20; oc get securitypolicy sign-in -n envoy-19 -o jsonpath='{range .status.ancestors[0].conditions[*]}{.type}={.status} {.message}{"\n"}{end}'
+$ oc wait securitypolicy/sign-in -n envoy-19 --for=jsonpath='{.status.ancestors[0].conditions[?(@.type=="Accepted")].status}'=True --timeout=60s
+securitypolicy.gateway.envoyproxy.io/sign-in condition met
+$ oc get securitypolicy sign-in -n envoy-19 -o jsonpath='{range .status.ancestors[0].conditions[*]}{.type}={.status} {.message}{"\n"}{end}'
 Accepted=True Policy has been accepted.
+```
+
+Only now the route, [`manifests/40-route.yaml`](manifests/40-route.yaml): `/v1/…`
+and `/` to the shop's Envoy; `/oauth2/callback` and `/logout` for the sign-in;
+`/whoami` to the echo app (step 8). Then a read and a write with no token — and
+module 16's `BackendTLSPolicy`, which now lists this Gateway's policy:
+
+```console
+$ oc apply -f manifests/40-route.yaml
+httproute.gateway.networking.k8s.io/shop created
+$ oc wait httproute/shop -n envoy-19 --for=jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}'=True --timeout=60s
+httproute.gateway.networking.k8s.io/shop condition met
 $ oc exec -n envoy-19 client -- curl -s -o /dev/null -w 'no token, GET /v1/items -> %{http_code}\n' "http://$(oc get gateway eg -n envoy-19 -o jsonpath='{.status.addresses[0].value}')/v1/items"
 no token, GET /v1/items -> 302
 $ oc exec -n envoy-19 client -- curl -s -o /dev/null -w 'no token, POST /v1/items/SKU-1001:reserve -> %{http_code}\n' -H 'content-type: application/json' -d '{"quantity":1,"orderId":"ANYONE"}' "http://$(oc get gateway eg -n envoy-19 -o jsonpath='{.status.addresses[0].value}')/v1/items/SKU-1001:reserve"
 no token, POST /v1/items/SKU-1001:reserve -> 302
+$ oc get backendtlspolicy keycloak-service -n keycloak -o jsonpath='{.status.ancestors[?(@.ancestorRef.namespace=="envoy-19")].conditions[?(@.type=="Accepted")].status}{"\n"}'
+True
 ```
 
-**What just happened:** the policy is accepted, and step 4's two requests now get
-**`302`** — a redirect, to sign in. Neither reached the shop.
+**What just happened:** from the moment the route exists, the shop asks for a
+sign-in: a read and a write with no token both get **`302`**, a redirect to
+`corp`'s login page, and neither reaches the shop. Module 16's `BackendTLSPolicy`
+accepts this Gateway's policy (`True`): its token and JWKS calls reach Keycloak
+over TLS. Had the route come first, the same two requests would have reached
+the shop until the policy arrived (measured in this module's first version:
+`200` for both). `./run.sh deploy` keeps this order and waits
+at each step — no route unless the policy is `Accepted`.
+
+Argo CD keeps the same order with a **sync wave**: `40-route.yaml` carries
+`argocd.argoproj.io/sync-wave: "1"`, the rest of the module wave 0, and Argo CD
+applies a wave once the one before is healthy. But Argo CD has no health check
+for a `SecurityPolicy` — measured: Application `17-keycloak-jwt` reports a health
+for its Gateway, routes and Deployment, and none for its two `SecurityPolicy`s —
+so the wave orders the two; it does not wait for `Accepted`. A policy Envoy
+Gateway rejects fails closed: its log says `setting 500 direct response in routes
+due to errors in SecurityPolicy` for every route it covers (measured,
+Troubleshooting). Run `./run.sh deploy` before Argo CD's first sync:
+it also writes the client secret, which is not in git.
+
+Is the shop answering yet? The inventory's pods take a while (they install their
+Python packages first), and the first signed-in call can fail. Ask, as
+`shop.alice`, until one gets the shop's answer:
+
+```console
+$ for i in $(seq 1 30); do r=$(../17-keycloak-jwt/token.sh shop.alice | ./request.sh GET /v1/items/SKU-1001 -o /dev/null -w '%{http_code}'); echo "attempt $i: $r"; [ "$r" = 200 ] && break; sleep 2; done
+attempt 1: 200
+```
 
 ### Step 7 — how your browser reaches a MetalLB address on CRC
 
@@ -558,14 +587,21 @@ wins:
 |---|---|---|
 | `admins` | anything | a token whose `realm_access.roles` holds `admin` |
 | `signed-in-may-read` | `GET` | any token `corp` signed |
-| `signed-in-may-reserve` | `POST` on `^/v1/items/[^/?#;]+:reserve$` | any token `corp` signed |
+| `signed-in-may-reserve` | `POST` on `^/v1/items/[A-Za-z0-9._~-]+:reserve$` | any token `corp` signed |
 | (default) | nothing: `403` | |
 
-The reserve rule's expression is matched against the whole `:path`, query
-string included (v1.9.1, `authorization.go`, `buildPathPredicate`), so the item
-may contain no `/`, `?`, `#` or `;` — measured with the looser `[^/]+`:
-`shop.alice`'s `POST /v1/items/SKU-1001:restock?q=:reserve` got past the Gateway
-to the shop (a `503` from the shop's Envoy, not a `403` here).
+The reserve rule's expression is matched against the whole `:path` as it is
+sent — query string included, nothing decoded (v1.9.1, `authorization.go`,
+`buildPathPredicate`). So the item's name is an **allow-list**: RFC 3986's
+unreserved characters, `A–Z a–z 0–9 . _ ~ -`. Every item the shop holds is named
+that way (`SKU-1001` … `SKU-5002`, and the ones these steps make); the shop itself
+accepts any non-empty name (`CreateItem` checks only that there is one), so an item
+an admin names outside that alphabet can be reserved by an admin only. No `%`
+means no encoded `/`, `?` or `;`; no `:` means no second verb. The first version
+excluded only `/ ? # ;` (`[^/?#;]+`), and before that `[^/]+` let `shop.alice`'s
+`POST /v1/items/SKU-1001:restock?q=:reserve` past the Gateway to the shop — a
+`503` from the shop's Envoy, not a `403` here (measured). Step 12 sends the
+requests shaped to slip past the rule.
 
 ### Step 10 — `shop.bob`: admin, from his LDAP group
 
@@ -634,16 +670,55 @@ $ ../17-keycloak-jwt/token.sh shop.alice | ./request.sh POST /v1/items:reset -H 
 shop.alice  POST   /v1/items:reset            -> 403
 $ ../17-keycloak-jwt/token.sh shop.bob | ./request.sh POST /v1/items -H 'content-type: application/json' -d '{"sku":"SKU-T19","name":"a test item","onHand":5,"warehouse":"LEEDS"}' -o /dev/null -w 'shop.bob    POST   /v1/items                  -> %{http_code}\n'
 shop.bob    POST   /v1/items                  -> 200
-$ ../17-keycloak-jwt/token.sh shop.bob | ./request.sh DELETE /v1/items/SKU-T19 -o /dev/null -w 'shop.bob    DELETE /v1/items/SKU-T19          -> %{http_code}\n'
-shop.bob    DELETE /v1/items/SKU-T19          -> 200
 ```
 
 **What just happened:** the same answers as in the browser. The token names
 another client — `azp: shop-cli` — and came another way, but the Gateway asks the
 same questions of it: who signed it, for whom, what roles. With a bearer token
-the sign-in is skipped (`passThroughAuthHeader`), not the check. Now the tokens
-that must not pass — one **edited** to add `admin`, one from realm **`tutorial`**
-(module 16's alice: a real token, for `shop-api`, from another issuer):
+the sign-in is skipped (`passThroughAuthHeader`), not the check.
+
+While `SKU-T19` exists, the requests shaped to slip past the reserve rule, as
+`shop.alice`, sent exactly as written (`curl --path-as-is`): an encoded `/`, `?`
+or `;` in the item, a trailing slash, a query, another verb, a `PATCH`, a method
+override header, and the method in lower case:
+
+```console
+$ for p in '/v1/items/SKU-T19%2Fx:reserve' '/v1/items/SKU-T19%3Fx:reserve' '/v1/items/SKU-T19%3Bx:reserve' '/v1/items/SKU-T19:reserve/' '/v1/items/SKU-T19:reserve?x=1' '/v1/items/SKU-T19:restock'; do printf '%-36s ' "POST $p"; ../17-keycloak-jwt/token.sh shop.alice | ./request.sh POST "$p" --path-as-is -H 'content-type: application/json' -d '{"quantity":1}' -o /dev/null -w '%{http_code}\n'; done
+POST /v1/items/SKU-T19%2Fx:reserve   307
+POST /v1/items/SKU-T19%3Fx:reserve   403
+POST /v1/items/SKU-T19%3Bx:reserve   403
+POST /v1/items/SKU-T19:reserve/      403
+POST /v1/items/SKU-T19:reserve?x=1   403
+POST /v1/items/SKU-T19:restock       403
+$ ../17-keycloak-jwt/token.sh shop.alice | ./request.sh PATCH /v1/items/SKU-T19 -H 'content-type: application/json' -d '{"onHand":99}' -o /dev/null -w 'PATCH /v1/items/SKU-T19                -> %{http_code}\n'
+PATCH /v1/items/SKU-T19                -> 403
+$ ../17-keycloak-jwt/token.sh shop.alice | ./request.sh POST /v1/items/SKU-T19 -H 'X-HTTP-Method-Override: DELETE' -o /dev/null -w 'POST + X-HTTP-Method-Override: DELETE -> %{http_code}\n'
+POST + X-HTTP-Method-Override: DELETE -> 403
+$ ../17-keycloak-jwt/token.sh shop.alice | ./request.sh POST /v1/items/SKU-T19:reserve -X post -H 'content-type: application/json' -d '{"quantity":1}' -w '  -> %{http_code} (the method sent as "post")\n'
+Bad Request  -> 400 (the method sent as "post")
+$ ../17-keycloak-jwt/token.sh shop.bob | ./request.sh GET /v1/items/SKU-T19 | python3 -c 'import json,sys; d = json.load(sys.stdin); print(d["sku"], "onHand", d["onHand"], "reserved", d["reserved"])'
+SKU-T19 onHand 5 reserved 0
+$ ../17-keycloak-jwt/token.sh shop.bob | ./request.sh DELETE /v1/items/SKU-T19 -o /dev/null -w 'shop.bob    DELETE /v1/items/SKU-T19          -> %{http_code}\n'
+shop.bob    DELETE /v1/items/SKU-T19          -> 200
+```
+
+**What just happened:** none got through. The encoded `/` got **`307`**: the
+Gateway's Envoy decodes an escaped slash and redirects to the decoded path
+(`path_with_escaped_slashes_action: UNESCAPE_AND_REDIRECT`, with `normalize_path`
+and `merge_slashes`, in its listener's config) — `/v1/items/SKU-T19/x:reserve`,
+which the rule refuses (`./run.sh verify` follows it: `403`). The rest got
+**`403 RBAC: access denied`**. The lower-case `post` got **`400 Bad Request`** from
+the Gateway's HTTP/1 codec before any filter — its access log says
+`response_code_details: http1.codec_error`, and measured, a lower-case `post`,
+`get` and `Post` ran no RPC: the item was unchanged and the inventory logged
+nothing. So the rules need no check on the method's case, though Envoy Gateway
+generates its method matchers case-insensitive (`ignore_case: true`,
+`generated/envoy-filters.yaml`). And `SKU-T19` was never touched — `onHand 5,
+reserved 0` — before `shop.bob` removed it.
+
+Now the tokens that must not pass — one **edited** to add `admin`, one from realm
+**`tutorial`** (module 16's alice: a real token, for `shop-api`, from another
+issuer):
 
 ```console
 $ ../17-keycloak-jwt/token.sh shop.alice | python3 -c 'import base64,json,sys; h, p, s = sys.stdin.read().strip().split("."); c = json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4))); c["realm_access"]["roles"].append("admin"); print(".".join([h, base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rstrip("="), s]))' | ./request.sh POST /v1/items:reset -H 'content-type: application/json' -d '{}' -w '  -> %{http_code}\n'
@@ -658,14 +733,12 @@ trusts one issuer, `…/realms/corp`. And a token that was good and has **expire
 — taken, then used 365 s later (`corp`'s tokens live 300 s; Envoy allows 60 s of
 clock skew, `jwt_verify_lib`'s `kClockSkewInSecond`):
 
-<!-- walkthrough: skip -->
 ```console
 $ t=$(../17-keycloak-jwt/token.sh shop.alice); sleep 365; printf '%s\n' "$t" | ./request.sh GET /v1/items -w '  -> %{http_code}\n'
 Jwt is expired  -> 401
 ```
 
-(Longer than the walkthrough runner's limit for one command, so it skips this
-block; it was run as written, and `./run.sh verify` checks the same.)
+(Six minutes: `./run.sh verify` checks the same.)
 
 ### Step 13 — the directory decides
 
@@ -704,11 +777,16 @@ its four members again. Two things make "at his next sign-in" true:
   the change, until the realm's user cache was cleared. Realm `corp`'s LDAP
   provider now has `cachePolicy: NO_CACHE` (step 2, "The choices", item 5).
 - **An open session follows at its next refresh.** Measured: `shop.bob` signed
-  in, then left the group; his same session could still reset — its access token
-  still said `admin` — until that token expired; 6 minutes later the Gateway had
-  refreshed it (`use_refresh_token`), the new token had no `admin`, and the same
-  session got `403`. So a change reaches everyone within one token lifetime,
-  300 s — the reason `corp`'s tokens are short-lived.
+  in, then left the group; his same browser session could still reset — its
+  access token still said `admin`. Six minutes later the Gateway had refreshed
+  that token (`use_refresh_token`), the new one had no `admin`, and the same
+  session got `403`. That is one observation, not a bound for every caller.
+- **A token already issued keeps its claims until it expires.** `NO_CACHE`
+  changes the tokens Keycloak issues next; it cannot change one it signed. A
+  bearer token taken just before the change still says `admin` for its 300 s,
+  and the Gateway accepts it for 60 s more (Envoy's clock skew; step 12's expired
+  token was refused at 365 s) — about 360 s from its issue, with the clocks in
+  step. Short-lived tokens keep that window short.
 
 The directory's own consumers see the change too: group sync mirrors this group
 into OpenShift (`group-sync-operator`), where it has no grants (the epic's access
@@ -747,9 +825,14 @@ rules by name: `admins`, `signed-in-may-read`, `signed-in-may-reserve`.
 ### Step 15 — check yourself
 
 `./run.sh verify` asks everything above again — the browser's sign-in, both
-users' answers, `bob.wilson`, the command line, the expired token (it waits for
-one to expire, about six minutes), the NetworkPolicy — and reads the API server's
-audit log to check that no token or password was in any `oc exec`'s arguments:
+users' answers, `bob.wilson`, the command line and the requests shaped to slip
+past the reserve rule, the expired token (it waits for one to expire, about six
+minutes), every layer of the shop blocked from the client pod — and reads the API
+server's audit log to check that no token or password was in any `oc exec`'s
+arguments. Its reservations are real ones, checked in the shop's answer (`ok`,
+`reserved`), on items `shop.bob` makes for the check and removes after it — never
+on the shop's own items. Its `shop.bob` reset checks clear every item's
+reservations, which is what `ResetStock` does:
 
 ```console
 $ ./run.sh verify
@@ -759,6 +842,7 @@ $ ./run.sh verify
   ✓ HTTPRoute shop accepted
   ✓ SecurityPolicy sign-in accepted
   ✓ the Gateway's client secret is module 18's (Secret shop-kiosk-oidc = keycloak/shop-kiosk-client)
+  ✓ module 16's BackendTLSPolicy to keycloak-service accepts this Gateway's SecurityPolicy
   ✓ realm corp's client shop-kiosk: its redirect URI, PKCE S256
   ✓ the Gateway's filter chain: oauth2, jwt_authn, rbac, router
 
@@ -778,9 +862,10 @@ $ ./run.sh verify
   ✓ ...as shop.alice, without admin
   ✓ GET /v1/items -> 200
   ✓ GET /v1/warehouses -> 200
-  ✓ POST /v1/items/SKU-1001:reserve -> 200
+  ✓ (shop.bob makes a disposable item, VERIFY-19-B-1790543971)
+  ✓ POST /v1/items/VERIFY-19-B-1790543971:reserve -> reserved (ok true, 1 reserved)
   ✓ POST /v1/items (create) -> 403
-  ✓ DELETE /v1/items/SKU-1001 -> 403
+  ✓ DELETE /v1/items/VERIFY-19-B-1790543971 -> 403
   ✓ POST /v1/items:reset -> 403
 
 4. shop.bob signs in: admin, from his LDAP group - he may create and delete
@@ -788,6 +873,8 @@ $ ./run.sh verify
   ✓ his JWT: issued by corp, for shop-api, with admin
   ✓ POST /v1/items (create SKU-V19) -> 200
   ✓ DELETE /v1/items/SKU-V19 -> 200
+  ✓ POST /v1/items:reset -> 200
+  ✓ DELETE /v1/items/VERIFY-19-B-1790543971 (the disposable item) -> 200
   ✓ shop.bob signs out: back to corp's logout, then the shop
 
 5. bob.wilson - in the directory, outside the login gate - cannot sign in
@@ -796,19 +883,38 @@ $ ./run.sh verify
 
 6. the command line: a bearer JWT, the same answers
   ✓ shop.alice: GET /v1/items -> 200
-  ✓ shop.alice: reserve -> 200
+  ✓ (shop.bob makes a disposable item, VERIFY-19-C-1790543974)
+  ✓ shop.alice: reserve -> reserved (ok true, 1 reserved)
   ✓ shop.alice: create -> 403 RBAC
   ✓ shop.alice: delete -> 403 RBAC
   ✓ shop.alice: reset -> 403 RBAC
   ✓ shop.bob: create -> 200
   ✓ shop.bob: delete -> 200
+  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790543974%2Fx:reserve -> 307
+  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790543974%3Fx:reserve -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790543974%3Bx:reserve -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790543974:reserve/ -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790543974:reserve?x=1 -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790543974:restock -> 403
+  ✓ shop.alice: PATCH /v1/items/VERIFY-19-C-1790543974 -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790543974 + X-HTTP-Method-Override: DELETE -> 403
+  ✓ shop.alice: post /v1/items/VERIFY-19-C-1790543974:reserve -> 400
+  ✓ ...and the %2F one's redirect, /v1/items/VERIFY-19-C-1790543974/x:reserve -> 403
+  ✓ ...and VERIFY-19-C-1790543974 holds only the one reservation made above
+  ✓ (shop.bob removes VERIFY-19-C-1790543974)
+  ✓ shop.bob: reset -> 200
   ✓ shop.alice's JWT edited to add admin -> 401
   ✓ a JWT from realm tutorial -> 401
-  (waiting 360 s for the token taken at the start to expire, plus Envoy's 60 s clock skew and 5 s for the clocks)
+  (waiting 357 s for the token taken at the start to expire, plus Envoy's 60 s clock skew and 5 s for the clocks)
   ✓ shop.alice's JWT once it has expired -> 401
 
 7. the Gateway is the only way in
-  ✓ the shop's Envoy, called directly from the client pod: no answer
+  ✓ the probe itself: the Gateway's address, port 80, from the client pod
+  ✓ the shop's Envoy (:8080), directly from the client pod
+  ✓ the echo app (:8080), directly
+  ✓ the kiosk (:8080), directly
+  ✓ the inventory, gRPC (:50051), directly
+  ✓ MongoDB (:27017), directly
   ✓ the same call through the Gateway, with a JWT -> 200
 
 8. no token or password in a process's arguments
@@ -847,8 +953,8 @@ all checks passed
 |---|---|---|
 | `defaultAction` | `Deny` | refuse unless a rule allows |
 | `rules[].principal.jwt` | provider `corp`, a claim | the verified token's claims: `realm_access.roles` holds `admin`; `iss` is `corp`'s |
-| `rules[].operation.methods` | `GET`; `POST` | the request's method |
-| `rules[].operation.path` | `RegularExpression`, `^/v1/items/[^/?#;]+:reserve$` | the whole `:path`, query included; also `Exact`, `PathPrefix` |
+| `rules[].operation.path` | `RegularExpression`, `^/v1/items/[A-Za-z0-9._~-]+:reserve$` | the whole `:path` as sent, query included, nothing decoded; also `Exact`, `PathPrefix` |
+| `rules[].operation.methods` | `GET`; `POST` | matched case-insensitive (`ignore_case: true`); a lower-case method never gets that far: `400`, the HTTP/1 codec (step 12) |
 
 ## What production does differently
 
@@ -865,9 +971,9 @@ all checks passed
 | You see | Why | Fix |
 |---|---|---|
 | the callback or `/logout` answers `404` | no route matches the path, and Envoy Gateway turns the `oauth2` filter on per route — measured with both paths left out of the `HTTPRoute` | keep `/oauth2/callback` and `/logout` in `40-route.yaml` |
-| the policy says `Accepted=False` `OIDC: Get "…/.well-known/openid-configuration": … x509: certificate is valid for *.apps-crc.testing, not keycloak-service.keycloak.svc`; every route `500` | the endpoints are not in the policy, so the controller fetches the discovery document from the issuer's host, expecting the name of the `BackendTLSPolicy` — measured | give `authorizationEndpoint` and `tokenEndpoint` (both) |
+| the policy says `Accepted=False` `OIDC: Get "…/.well-known/openid-configuration": … x509: certificate is valid for *.apps-crc.testing, not keycloak-service.keycloak.svc`; the controller's log: `setting 500 direct response in routes due to errors in SecurityPolicy` | the endpoints are not in the policy, so the controller fetches the discovery document from the issuer's host, expecting the name of the `BackendTLSPolicy` — measured | give `authorizationEndpoint` and `tokenEndpoint` (both) |
 | a request passes the reserve rule though it is not a reserve | the expression matched something in the query string — measured with `[^/]+` | exclude `/`, `?`, `#`, `;` from the item, anchor it (step 9) |
-| someone removed from an LDAP group keeps its role | Keycloak's user cache — measured before `cachePolicy: NO_CACHE`; an open session keeps its token up to 300 s | `NO_CACHE` (step 2); wait one token lifetime |
+| someone removed from an LDAP group keeps its role | Keycloak's user cache delays newly issued claims — measured before `cachePolicy: NO_CACHE`, which avoids it. A token already issued keeps its claims until it expires, and the Gateway accepts it 60 s beyond (step 13) | `NO_CACHE` (step 2); sign in again, or wait for the session's refresh; an old bearer token is refused about 360 s after its issue |
 | `401 Jwt is expired` | the token outlived `corp`'s 300 s (plus 60 s of skew) | a fresh token; a browser session refreshes by itself |
 | `401 Jwt issuer is not configured` | a token from another realm — `tutorial`'s | a `corp` token |
 | `401 Jwks doesn't have key to match kid` right after step 2 | realm `corp` was rebuilt, with new keys; the Gateway keeps the old ones up to 300 s | wait (module 18, step 13) |

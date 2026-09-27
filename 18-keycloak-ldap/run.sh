@@ -121,6 +121,15 @@ print("unknown: an empty value" if not realm or not secret else "same" if realm 
     || echo "unknown: unreadable"
 }
 
+# ldap_cache_policy - the live LDAP provider's cachePolicy in realm corp, or "unknown".
+# An import only creates the realm: a realm imported before 20-realm.yaml said
+# NO_CACHE keeps its old policy, and a directory change then waits for Keycloak's cache.
+ldap_cache_policy() {
+  ./admin.sh GET '/admin/realms/corp/components?type=org.keycloak.storage.UserStorageProvider&name=ldap' 2>/dev/null \
+    | python3 -c 'import json, sys; c = json.load(sys.stdin); print(c[0]["config"].get("cachePolicy", ["DEFAULT (not set)"])[0] if len(c) == 1 else "unknown")' 2>/dev/null \
+    || echo unknown
+}
+
 deploy() {
   need_keycloak
   say "deploying realm corp into $NS"
@@ -187,6 +196,10 @@ deploy() {
   state=$(kiosk_secret_state)
   [ "$state" = same ] || { bad "client shop-kiosk's secret in realm corp and Secret shop-kiosk-client: $state - re-import corp (README step 13)"; exit 1; }
   ok "client shop-kiosk's secret in realm corp is the one in Secret shop-kiosk-client"
+  state=$(ldap_cache_policy)
+  [ "$state" = NO_CACHE ] \
+    || { bad "realm corp's LDAP provider has cachePolicy $state, not NO_CACHE - the realm predates it: re-import corp (README step 13)"; exit 1; }
+  ok "the LDAP provider reads the directory at every login (cachePolicy NO_CACHE)"
   app_resume 18-keycloak-ldap
 }
 
@@ -247,6 +260,7 @@ verify() {
   assert "realm corp exists" "present" "$(realm_state)"
   assert "provider: test connection" "HTTP 204" "$(./admin.sh test-ldap connection | tail -n 1)"
   assert "provider: test authentication (the bind account)" "HTTP 204" "$(./admin.sh test-ldap authentication | tail -n 1)"
+  assert "provider: cachePolicy NO_CACHE - the directory is read at every login" "NO_CACHE" "$(ldap_cache_policy)"
   assert "client shop-kiosk (module 19): its secret is Secret shop-kiosk-client's" "same" "$(kiosk_secret_state)"
 
   say "3. who gets a corp token"
@@ -316,8 +330,10 @@ keycloak_restarted() {
 
 clean() {
   local out failed=0 pod root
-  # Argo CD would put the import and the bind Secret back as they are deleted.
-  app_pause 18-keycloak-ldap
+  # Argo CD would put the import and the bind Secret back as they are deleted. Module
+  # 19's shop signs in on this realm and copies Secret shop-kiosk-client: its
+  # Application pauses too, so it does not keep re-applying a shop that cannot sign in.
+  app_pause 18-keycloak-ldap 19-shop-gateway
   # The realm first: deleting the KeycloakRealmImport leaves the realm it made. If
   # the realm cannot be removed, stop - its import and Secrets stay, for a retry.
   out=$(./admin.sh DELETE /admin/realms/corp 2>&1) \

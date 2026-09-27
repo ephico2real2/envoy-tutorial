@@ -1,5 +1,9 @@
 # The HTTP filters Envoy Gateway v1.9.1 generated for Gateway eg in envoy-19, read from
 # its Envoy (b579d07d3ad7ee11d32b105e91a5a39ad24718d7/1.39.1/Clean/RELEASE/BoringSSL) by ../dump-filters.sh:
+#   image docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4
+#   (the image Envoy Gateway v1.9.1 pins. The shop's own Envoy, behind this one, runs
+#   the app's envoyproxy/envoy:v1.39-latest - measured 1.39.1 too; that tag tracks 1.39
+#   patches, so a later pull can be a newer 1.39.)
 #
 #   ./dump-filters.sh > generated/envoy-filters.yaml
 #
@@ -140,7 +144,7 @@ route:
                           value_match:
                             safe_regex:
                               google_re2: {}
-                              regex: "^/v1/items/[^/?#;]+:reserve$"
+                              regex: "^/v1/items/[A-Za-z0-9._~-]+:reserve$"
                       - single_predicate:
                           input:
                             name: claim
@@ -191,13 +195,13 @@ route:
               ads: {}
               resource_api_version: V3
           cookie_names:
-            bearer_token: AccessToken-1534c7de
-            oauth_hmac: OauthHMAC-1534c7de
-            oauth_expires: OauthExpires-1534c7de
-            id_token: IdToken-1534c7de
-            refresh_token: RefreshToken-1534c7de
-            oauth_nonce: OauthNonce-1534c7de
-            code_verifier: CodeVerifier-1534c7de
+            bearer_token: AccessToken-5ab99a4b
+            oauth_hmac: OauthHMAC-5ab99a4b
+            oauth_expires: OauthExpires-5ab99a4b
+            id_token: IdToken-5ab99a4b
+            refresh_token: RefreshToken-5ab99a4b
+            oauth_nonce: OauthNonce-5ab99a4b
+            code_verifier: CodeVerifier-5ab99a4b
         redirect_uri: "http://localhost:19080/oauth2/callback"
         redirect_path_matcher:
           path:

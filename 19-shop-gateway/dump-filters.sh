@@ -9,10 +9,13 @@
 # manifests. Secrets appear only as the names Envoy fetches them by (SDS), never as values.
 set -euo pipefail
 cd "$(dirname "$0")"
+KUBE=$(command -v oc >/dev/null 2>&1 && echo oc || echo kubectl)
 listeners=$(../_shared/eg-admin.sh envoy-19/eg 'config_dump?resource=dynamic_listeners')
 routes=$(../_shared/eg-admin.sh envoy-19/eg 'config_dump?resource=dynamic_route_configs')
 version=$(../_shared/eg-admin.sh envoy-19/eg server_info | python3 -c 'import json, sys; print(json.load(sys.stdin)["version"])')
-python3 - "$version" 3<<<"$listeners" 4<<<"$routes" <<'PY'
+image=$($KUBE get deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-namespace=envoy-19,gateway.envoyproxy.io/owning-gateway-name=eg \
+  -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="envoy")].image}')
+python3 - "$version" "$image" 3<<<"$listeners" 4<<<"$routes" <<'PY'
 import json, re, sys
 
 listeners = json.load(open(3))["configs"]
@@ -79,6 +82,10 @@ if chain is None or shop_route is None:
 
 print(f"# The HTTP filters Envoy Gateway v1.9.1 generated for Gateway eg in envoy-19, read from")
 print(f"# its Envoy ({sys.argv[1]}) by ../dump-filters.sh:")
+print(f"#   image {sys.argv[2]}")
+print(f"#   (the image Envoy Gateway v1.9.1 pins. The shop's own Envoy, behind this one, runs")
+print(f"#   the app's envoyproxy/envoy:v1.39-latest - measured 1.39.1 too; that tag tracks 1.39")
+print(f"#   patches, so a later pull can be a newer 1.39.)")
 print(f"#")
 print(f"#   ./dump-filters.sh > generated/envoy-filters.yaml")
 print(f"#")

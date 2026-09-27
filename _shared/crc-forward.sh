@@ -38,7 +38,7 @@ fail() { echo "crc-forward.sh: $*" >&2; exit 1; }
 # forwards - every forward gvproxy holds, one "<local> <remote>" per line.
 forwards() {
   curl -sf --unix-socket "$SOCK" "$API/all" \
-    | python3 -c 'import json, sys; [print(f["local"], f["remote"]) for f in json.load(sys.stdin)]' \
+    | python3 -c 'import json, sys; [print(f["local"], f["remote"]) for f in json.load(sys.stdin)]' 2>/dev/null \
     || fail "cannot read CRC's forwards from $SOCK"
 }
 # remote_of <local> - where <local> forwards to, or nothing.
@@ -55,7 +55,8 @@ remote_ok() { [[ $1 =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]{1,5}$ ]]; }
 case "${1:-}" in
   ensure)
     if [ $# -ne 3 ] || ! local_ok "$2" || ! remote_ok "$3"; then usage; fi
-    now=$(remote_of "$2")
+    # A failed read is a failure, never "not forwarded": the proxy's state is unknown.
+    now=$(remote_of "$2") || fail "cannot read CRC's forwards - nothing changed"
     if [ "$now" = "$3" ]; then echo "$2 -> $3: already forwarded"; exit 0; fi
     [ -z "$now" ] || fail "$2 already forwards to $now, not $3 - remove it first: crc-forward.sh remove $2"
     # Another program on the laptop listening on the port would take the connections.
@@ -64,14 +65,17 @@ case "${1:-}" in
     busy=$({ lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true; } | awk 'NR > 1 { print $1 " (pid " $2 ")" }' | sort -u | paste -sd' ' -)
     [ -z "$busy" ] || fail "port $port is taken on this laptop by $busy - pick another port"
     post expose "{\"local\":\"$2\",\"remote\":\"$3\",\"protocol\":\"tcp\"}"
-    [ "$(remote_of "$2")" = "$3" ] || fail "gvproxy accepted $2 -> $3, but does not list it"
+    now=$(remote_of "$2") || fail "forwarded $2 -> $3, but cannot read CRC's forwards to check it"
+    [ "$now" = "$3" ] || fail "gvproxy accepted $2 -> $3, but does not list it"
     echo "$2 -> $3: forwarded" ;;
   remove)
     if [ $# -ne 2 ] || ! local_ok "$2"; then usage; fi
     case "$BUILTIN" in (*" $2 "*) fail "$2 is one of CRC's own forwards - left alone" ;; esac
-    [ -n "$(remote_of "$2")" ] || { echo "$2: not forwarded"; exit 0; }
+    now=$(remote_of "$2") || fail "cannot read CRC's forwards - nothing removed"
+    [ -n "$now" ] || { echo "$2: not forwarded"; exit 0; }
     post unexpose "{\"local\":\"$2\",\"protocol\":\"tcp\"}"
-    [ -z "$(remote_of "$2")" ] || fail "gvproxy accepted the removal of $2, but still lists it"
+    now=$(remote_of "$2") || fail "asked to remove $2, but cannot read CRC's forwards to check it"
+    [ -z "$now" ] || fail "gvproxy accepted the removal of $2, but still lists it"
     echo "$2: forward removed" ;;
   list)
     [ $# -eq 1 ] || usage

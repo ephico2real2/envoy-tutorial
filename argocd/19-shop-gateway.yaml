@@ -1,10 +1,14 @@
 # Module 19 - the shop behind Gateway eg in envoy-19: the Gateway, the shop (its
 # database, inventory service, own Envoy and kiosk, vendored from
-# envoy-grpc-modernization), the NetworkPolicies, the HTTPRoute, the ReferenceGrant
-# in keycloak, the kiosk client's Secret and the SecurityPolicy
+# envoy-grpc-modernization), the NetworkPolicies, the ReferenceGrant in keycloak,
+# the SecurityPolicy and, in a later sync wave, the HTTPRoute
 # (../19-shop-gateway/manifests); and the echo app behind /whoami
 # (../_shared/echo-app.yaml, which run.sh applies with -n envoy-19; its objects carry
 # no namespace, so they take this destination's).
+#
+# Not the client Secret shop-kiosk-oidc: ../19-shop-gateway/run.sh deploy copies it
+# from keycloak/shop-kiosk-client, and must run before this Application's first sync -
+# without it the SecurityPolicy is not accepted.
 #
 # No resources-finalizer: deleting this Application leaves the shop running.
 apiVersion: argoproj.io/v1alpha1

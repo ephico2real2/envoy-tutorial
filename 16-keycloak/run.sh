@@ -20,7 +20,9 @@ gateway_trust() {
     | $KUBE apply -f - >/dev/null || { bad "ConfigMap keycloak-ca could not be written"; exit 1; }
   $KUBE apply -f manifests/70-backend-tls-policy.yaml >/dev/null \
     || { bad "the BackendTLSPolicy to keycloak-service could not be applied"; exit 1; }
-  ok "Gateways can reach keycloak-service over TLS: BackendTLSPolicy keycloak-service, CA in ConfigMap keycloak-ca"
+  # Not "accepted": the policy has no status until a Gateway's SecurityPolicy uses it
+  # (measured, #15). Modules 17 and 19 wait for their own acceptance.
+  ok "BackendTLSPolicy keycloak-service applied, trusting ConfigMap keycloak-ca - modules 17 and 19 check it accepts them"
 }
 
 # The operator version this Subscription installed. Not "every CSV in the
@@ -29,7 +31,8 @@ installed_csv() { $KUBE get subscription rhbk-operator -n "$NS" -o jsonpath='{.s
 
 deploy() {
   say "deploying the Keycloak lab into $NS"
-  $KUBE apply -f manifests/10-operator.yaml >/dev/null
+  $KUBE apply -f manifests/10-operator.yaml >/dev/null \
+    || { bad "manifests/10-operator.yaml could not be applied"; exit 1; }
   # Manual approval: approve the InstallPlan this Subscription is waiting on.
   local plan= phase=
   for _ in $(seq 1 60); do
@@ -37,20 +40,26 @@ deploy() {
     [ -n "$plan" ] && break; sleep 5
   done
   [ -n "$plan" ] || { bad "the Subscription never got an InstallPlan - is redhat-operators healthy?"; exit 1; }
-  $KUBE patch installplan "$plan" -n "$NS" --type=merge -p '{"spec":{"approved":true}}' >/dev/null
+  $KUBE patch installplan "$plan" -n "$NS" --type=merge -p '{"spec":{"approved":true}}' >/dev/null \
+    || { bad "InstallPlan $plan could not be approved"; exit 1; }
   for _ in $(seq 1 60); do
     phase=$($KUBE get csv "$(installed_csv)" -n "$NS" -o jsonpath='{.status.phase}' 2>/dev/null)
     [ "$phase" = Succeeded ] && break; sleep 5
   done
   [ "$phase" = Succeeded ] || { bad "the operator never installed (CSV phase: ${phase:-none})"; exit 1; }
   ok "operator installed"
-  $KUBE apply -f manifests/20-postgres.yaml -f manifests/30-certificate.yaml >/dev/null
-  $KUBE rollout status statefulset/postgres -n "$NS" --timeout=300s >/dev/null
-  $KUBE wait certificate/keycloak-tls -n "$NS" --for=condition=Ready --timeout=120s >/dev/null
-  $KUBE apply -f manifests/40-keycloak.yaml >/dev/null
+  $KUBE apply -f manifests/20-postgres.yaml -f manifests/30-certificate.yaml >/dev/null \
+    || { bad "PostgreSQL and the certificate could not be applied"; exit 1; }
+  $KUBE rollout status statefulset/postgres -n "$NS" --timeout=300s >/dev/null \
+    || { bad "PostgreSQL never ready - oc get pods -n $NS -l app=postgres"; exit 1; }
+  $KUBE wait certificate/keycloak-tls -n "$NS" --for=condition=Ready --timeout=120s >/dev/null \
+    || { bad "certificate keycloak-tls never Ready - oc describe certificate keycloak-tls -n $NS"; exit 1; }
+  $KUBE apply -f manifests/40-keycloak.yaml >/dev/null \
+    || { bad "manifests/40-keycloak.yaml could not be applied"; exit 1; }
   $KUBE wait keycloak/keycloak -n "$NS" --for=condition=Ready --timeout=600s >/dev/null \
     || { bad "Keycloak never Ready - oc get keycloak keycloak -n $NS -o yaml"; exit 1; }
-  $KUBE apply -f manifests/50-route.yaml -f manifests/60-realm.yaml >/dev/null
+  $KUBE apply -f manifests/50-route.yaml -f manifests/60-realm.yaml >/dev/null \
+    || { bad "the Route and realm import tutorial could not be applied"; exit 1; }
   $KUBE wait keycloakrealmimport/tutorial -n "$NS" --for=condition=Done --timeout=300s >/dev/null \
     || { bad "the realm import did not finish"; exit 1; }
   ok "Keycloak ready at https://keycloak.apps-crc.testing, realm tutorial imported"
@@ -148,7 +157,7 @@ clean() {
   fi
   if [ -n "$wipe" ]; then
     echo "  --delete-data: deleting namespace $NS - the database (realms tutorial and corp, their users and"
-    echo "  sessions), claim data-postgres-0${pv:+ and volume $pv}, and what modules 17 and 18 keep in $NS"
+    echo "  sessions), claim data-postgres-0${pv:+ and volume $pv}, and what modules 17, 18 and 19 keep in $NS"
     # The volume outlives its claim here: CRC's StorageClass has reclaimPolicy
     # Retain, and an earlier clean left a Released PV - and the data on the
     # node's disk - behind (measured). Mark it Delete while the claim exists.
@@ -158,27 +167,29 @@ clean() {
       return 1
     fi
   fi
-  $KUBE delete keycloakrealmimport tutorial -n "$NS" --ignore-not-found >/dev/null 2>&1
-  $KUBE delete keycloak keycloak -n "$NS" --ignore-not-found --wait=true >/dev/null 2>&1
+  checked "delete realm import tutorial" "$KUBE" delete keycloakrealmimport tutorial -n "$NS" --ignore-not-found
+  checked "delete Keycloak keycloak" "$KUBE" delete keycloak keycloak -n "$NS" --ignore-not-found --wait=true
   CSV=$(installed_csv)
-  $KUBE delete subscription rhbk-operator -n "$NS" --ignore-not-found >/dev/null 2>&1
-  [ -n "$CSV" ] && $KUBE delete csv "$CSV" -n "$NS" --ignore-not-found >/dev/null 2>&1
+  checked "delete Subscription rhbk-operator" "$KUBE" delete subscription rhbk-operator -n "$NS" --ignore-not-found
+  if [ -n "$CSV" ]; then
+    checked "delete the operator's CSV $CSV" "$KUBE" delete csv "$CSV" -n "$NS" --ignore-not-found
+  fi
   if [ -n "$wipe" ]; then
-    if ! $KUBE delete ns "$NS" --wait=false >/dev/null 2>&1; then
-      bad "namespace $NS could not be deleted; the full wipe did not complete"
-      return 1
-    fi
+    checked "delete namespace $NS (the full wipe did not complete)" "$KUBE" delete ns "$NS" --wait=false
     ok "namespace $NS deletion requested; it removes the database and claim data-postgres-0${pv:+, and volume $pv}"
   else
     # Everything else this module applied, but not the Namespace (10-operator.yaml
     # holds it). Deleting the StatefulSet leaves its claim: a StatefulSet's claims
     # are kept unless persistentVolumeClaimRetentionPolicy says otherwise, and
     # 20-postgres.yaml sets none.
-    $KUBE delete operatorgroup keycloak -n "$NS" --ignore-not-found >/dev/null 2>&1
-    $KUBE delete -f manifests/70-backend-tls-policy.yaml --ignore-not-found >/dev/null 2>&1
-    $KUBE delete configmap keycloak-ca -n "$NS" --ignore-not-found >/dev/null 2>&1
-    $KUBE delete -f manifests/50-route.yaml -f manifests/40-keycloak.yaml -f manifests/30-certificate.yaml \
-      -f manifests/20-postgres.yaml --ignore-not-found --wait=true >/dev/null 2>&1
+    checked "delete OperatorGroup keycloak" "$KUBE" delete operatorgroup keycloak -n "$NS" --ignore-not-found
+    if has_btp; then
+      checked "delete BackendTLSPolicy keycloak-service" "$KUBE" delete -f manifests/70-backend-tls-policy.yaml --ignore-not-found
+    fi
+    checked "delete ConfigMap keycloak-ca" "$KUBE" delete configmap keycloak-ca -n "$NS" --ignore-not-found
+    checked "delete the Route, the Keycloak resource, the certificate and PostgreSQL" \
+      "$KUBE" delete -f manifests/50-route.yaml -f manifests/40-keycloak.yaml -f manifests/30-certificate.yaml \
+      -f manifests/20-postgres.yaml --ignore-not-found --wait=true
     if [ -n "$pv" ] && [ "$($KUBE get pvc data-postgres-0 -n "$NS" -o jsonpath='{.spec.volumeName}' 2>/dev/null)" = "$pv" ]; then
       ok "Keycloak, its operator and PostgreSQL removed; namespace $NS and claim data-postgres-0 (volume $pv) kept - the database survives"
     else

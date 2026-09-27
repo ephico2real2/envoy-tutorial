@@ -13,10 +13,9 @@ KC_ADMIN=../18-keycloak-ldap/admin.sh
 # Where a browser on the laptop reaches the Gateway, and so what realm corp sends it
 # back to (the client's redirect URI, the policy's redirectURL).
 LOCAL=127.0.0.1:19080
-# What deploy applies after the Gateway, in this order: the shop, then the sign-in.
+# The shop and what walls it in - applied before any route leads to it.
 SHOP="20-shop-db-secret 21-shop-database 22-shop-inventory-src 23-shop-inventory 24-shop-envoy-config
-      25-shop-envoy-proto 26-shop-envoy 27-shop-kiosk-src 28-shop-kiosk 30-network-policy 40-route
-      50-trust-keycloak 70-sign-in"
+      25-shop-envoy-proto 26-shop-envoy 27-shop-kiosk-src 28-shop-kiosk 30-network-policy"
 
 # kiosk_client - realm corp's client shop-kiosk as "<redirect URIs> <PKCE method>", or
 # nothing when there is none.
@@ -35,8 +34,8 @@ need_lab() {
     || { bad "realm corp is not imported - ../18-keycloak-ldap/run.sh deploy"; exit 1; }
   [ -n "$(kiosk_client)" ] \
     || { bad "realm corp has no client shop-kiosk - README step 2 re-imports corp with it"; exit 1; }
-  [ "$($KUBE get backendtlspolicy keycloak-service -n keycloak -o jsonpath='{.status.ancestors[0].conditions[?(@.type=="Accepted")].status}' 2>/dev/null)" = True ] \
-    || { bad "no accepted BackendTLSPolicy keycloak/keycloak-service - ../16-keycloak/run.sh deploy makes it"; exit 1; }
+  $KUBE get backendtlspolicy keycloak-service -n keycloak >/dev/null 2>&1 \
+    || { bad "no BackendTLSPolicy keycloak/keycloak-service - ../16-keycloak/run.sh deploy makes it"; exit 1; }
 }
 
 # forward - on CRC, make the laptop's port 19080 reach the Gateway's MetalLB address,
@@ -70,24 +69,37 @@ kiosk_secret_copy() {
 deploy() {
   need_lab
   say "deploying into $NS"
-  $KUBE apply -f ../12-gateway-api/manifests/20-envoyproxy.yaml -f ../12-gateway-api/manifests/10-gatewayclass.yaml >/dev/null
-  $KUBE wait gatewayclass/eg --for=condition=Accepted --timeout=60s >/dev/null
+  $KUBE apply -f ../12-gateway-api/manifests/20-envoyproxy.yaml -f ../12-gateway-api/manifests/10-gatewayclass.yaml >/dev/null \
+    || { bad "module 12's GatewayClass eg and EnvoyProxy could not be applied"; exit 1; }
+  $KUBE wait gatewayclass/eg --for=condition=Accepted --timeout=60s >/dev/null \
+    || { bad "GatewayClass eg was not accepted - is Envoy Gateway running? (module 12)"; exit 1; }
   ns_settle "$NS"
   $KUBE apply -f manifests/10-gateway.yaml >/dev/null || { bad "could not create the Gateway in $NS"; exit 1; }
   gw_up "$NS" eg
-  kiosk_secret_copy || exit 1
+  # 1. The shop and its NetworkPolicies. No route leads to it yet.
   local f
   for f in $SHOP; do
     $KUBE apply -f "manifests/$f.yaml" >/dev/null || { bad "manifests/$f.yaml could not be applied"; exit 1; }
   done
-  $KUBE apply -n "$NS" -f ../_shared/client.yaml -f ../_shared/echo-app.yaml >/dev/null
+  $KUBE apply -n "$NS" -f ../_shared/client.yaml -f ../_shared/echo-app.yaml >/dev/null \
+    || { bad "the client pod and the echo app could not be applied"; exit 1; }
   # The inventory installs its Python packages at start (23-shop-inventory.yaml).
   wait_ready inventory-db 300s; wait_ready inventory 300s; wait_ready envoy; wait_ready kiosk; wait_ready echo
   client_ready
+  # 2. The sign-in, accepted, before anything can reach the shop through the Gateway.
+  kiosk_secret_copy || exit 1
+  $KUBE apply -f manifests/50-trust-keycloak.yaml -f manifests/70-sign-in.yaml >/dev/null \
+    || { bad "the ReferenceGrant and SecurityPolicy sign-in could not be applied - no route published"; exit 1; }
   $KUBE wait securitypolicy/sign-in -n "$NS" --for=jsonpath='{.status.ancestors[0].conditions[?(@.type=="Accepted")].status}'=True \
-    --timeout=60s >/dev/null || { bad "SecurityPolicy sign-in not accepted - oc get securitypolicy sign-in -n $NS -o yaml"; exit 1; }
-  # The first calls can fail while the inventory starts (README step 4): wait, a
-  # minute at most, until a signed-in call gets the shop's answer.
+    --timeout=60s >/dev/null \
+    || { bad "SecurityPolicy sign-in not accepted - no route published; oc get securitypolicy sign-in -n $NS -o yaml"; exit 1; }
+  # 3. Only now the route.
+  $KUBE apply -f manifests/40-route.yaml >/dev/null || { bad "HTTPRoute shop could not be applied"; exit 1; }
+  $KUBE wait httproute/shop -n "$NS" --for=jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}'=True \
+    --timeout=60s >/dev/null || { bad "HTTPRoute shop not accepted - oc get httproute shop -n $NS -o yaml"; exit 1; }
+  wait_keycloak_tls "$NS"
+  # The first calls can fail while the shop's Envoy finds the inventory (README step
+  # 6): wait, a minute at most, until a signed-in call gets the shop's answer.
   local tok code=
   tok=$($TOKEN shop.alice) || { bad "no token for shop.alice from realm corp"; exit 1; }
   for _ in $(seq 1 30); do
@@ -128,6 +140,28 @@ as_browser() { ./browser.sh "$@" -o /dev/null -w '%{http_code}'; }
 # token goes to request.sh on stdin (a shell function's arguments are no process's).
 with_token() { local t=$1; shift; printf '%s\n' "$t" | ./request.sh "$@" -w ' -> %{http_code}' 2>/dev/null; }
 JSON=(-H 'content-type: application/json')
+
+# item <create|delete> <sku> - a disposable item, made and removed by shop.bob (admin)
+# with a fresh bearer token. The checks reserve on these, never on the shop's own items.
+item() {
+  local body=
+  [ "$1" = create ] && body="{\"sku\":\"$2\",\"name\":\"verify\",\"onHand\":5,\"warehouse\":\"LEEDS\"}"
+  case "$1" in
+    create) with_token "$($TOKEN shop.bob)" POST /v1/items "${JSON[@]}" -d "$body" -o /dev/null ;;
+    delete) with_token "$($TOKEN shop.bob)" DELETE "/v1/items/$2" -o /dev/null ;;
+  esac
+}
+# reserved - "ok <ok> reserved <n>" from a ReserveStock answer on stdin: the shop says
+# whether it reserved (ok) and how many are now reserved - a 200 alone is not a reservation.
+reserved() {
+  python3 -c 'import json, sys; r = json.load(sys.stdin); print("ok", str(r.get("ok")).lower(), "reserved", r.get("reserved"))' 2>/dev/null \
+    || echo "not a ReserveStock answer"
+}
+# tcp_from_client <host:port> - "reachable" or "blocked": can the client pod open a TCP
+# connection there at all (curl's telnet://, 3 s)? For ports that do not speak HTTP.
+tcp_from_client() {
+  incluster_sh "curl -sv --connect-timeout 3 -m 4 telnet://$1 </dev/null 2>&1 | grep -q 'Connected to' && echo reachable || echo blocked"
+}
 
 # gate_refusal <since> <user> - why Keycloak refused <user>'s last sign-in to corp, from
 # its own log (the login page says the same for a wrong password).
@@ -184,6 +218,7 @@ verify() {
     "$([ -n "$($KUBE get secret shop-kiosk-oidc -n "$NS" -o jsonpath='{.data.client-secret}' 2>/dev/null)" ] \
        && [ "$($KUBE get secret shop-kiosk-oidc -n "$NS" -o jsonpath='{.data.client-secret}')" = "$($KUBE get secret shop-kiosk-client -n keycloak -o jsonpath='{.data.client-secret}')" ] \
        && echo same || echo differ)"
+  assert "module 16's BackendTLSPolicy to keycloak-service accepts this Gateway's SecurityPolicy" "yes" "$(keycloak_tls "$NS")"
   assert "realm corp's client shop-kiosk: its redirect URI, PKCE S256" \
     "http://localhost:19080/oauth2/callback S256" "$(kiosk_client)"
   assert "the Gateway's filter chain: oauth2, jwt_authn, rbac, router" \
@@ -212,9 +247,12 @@ verify() {
   assert "...as shop.alice, without admin"                     "shop.alice no" "$(claim preferred_username "$A") $(has admin "$(claim roles "$A")")"
   assert "GET /v1/items -> 200"                      "200" "$(as_browser shop.alice GET /v1/items)"
   assert "GET /v1/warehouses -> 200"                 "200" "$(as_browser shop.alice GET /v1/warehouses)"
-  assert "POST /v1/items/SKU-1001:reserve -> 200"    "200" "$(as_browser shop.alice POST /v1/items/SKU-1001:reserve "${JSON[@]}" -d '{"quantity":1,"orderId":"VERIFY-19"}')"
+  local SKU_B; SKU_B="VERIFY-19-B-$(date +%s)"
+  assert_contains "(shop.bob makes a disposable item, $SKU_B)" " -> 200" "$(item create "$SKU_B")"
+  assert "POST /v1/items/$SKU_B:reserve -> reserved (ok true, 1 reserved)" "ok true reserved 1" \
+    "$(./browser.sh shop.alice POST "/v1/items/$SKU_B:reserve" "${JSON[@]}" -d '{"quantity":1,"orderId":"VERIFY-19"}' | reserved)"
   assert "POST /v1/items (create) -> 403"            "403" "$(as_browser shop.alice POST /v1/items "${JSON[@]}" -d '{"sku":"SKU-V19","name":"verify","onHand":1,"warehouse":"LEEDS"}')"
-  assert "DELETE /v1/items/SKU-1001 -> 403"          "403" "$(as_browser shop.alice DELETE /v1/items/SKU-1001)"
+  assert "DELETE /v1/items/$SKU_B -> 403"            "403" "$(as_browser shop.alice DELETE "/v1/items/$SKU_B")"
   assert "POST /v1/items:reset -> 403"               "403" "$(as_browser shop.alice POST /v1/items:reset "${JSON[@]}" -d '{}')"
 
   say "4. shop.bob signs in: admin, from his LDAP group - he may create and delete"
@@ -224,6 +262,8 @@ verify() {
     "$(claim iss "$B") $(has shop-api "$(claim aud "$B")") $(has admin "$(claim roles "$B")")"
   assert "POST /v1/items (create SKU-V19) -> 200"    "200" "$(as_browser shop.bob POST /v1/items "${JSON[@]}" -d '{"sku":"SKU-V19","name":"verify","onHand":1,"warehouse":"LEEDS"}')"
   assert "DELETE /v1/items/SKU-V19 -> 200"           "200" "$(as_browser shop.bob DELETE /v1/items/SKU-V19)"
+  assert "POST /v1/items:reset -> 200"               "200" "$(as_browser shop.bob POST /v1/items:reset "${JSON[@]}" -d '{}')"
+  assert "DELETE /v1/items/$SKU_B (the disposable item) -> 200" "200" "$(as_browser shop.bob DELETE "/v1/items/$SKU_B")"
   assert "shop.bob signs out: back to corp's logout, then the shop" "2. corp logout -> 302, to http://localhost:19080/" \
     "$(./browser.sh sign-out shop.bob 2>/dev/null | grep '^2\.')"
 
@@ -237,12 +277,41 @@ verify() {
   local CA CB TUT TAMPERED
   CA=$($TOKEN shop.alice); CB=$($TOKEN shop.bob); TUT=$($TOKEN alice)
   assert_contains "shop.alice: GET /v1/items -> 200"           " -> 200" "$(with_token "$CA" GET /v1/items -o /dev/null)"
-  assert_contains "shop.alice: reserve -> 200"                 " -> 200" "$(with_token "$CA" POST /v1/items/SKU-1001:reserve "${JSON[@]}" -d '{"quantity":1,"orderId":"VERIFY-19"}' -o /dev/null)"
+  local SKU_C; SKU_C="VERIFY-19-C-$(date +%s)"
+  assert_contains "(shop.bob makes a disposable item, $SKU_C)" " -> 200" "$(item create "$SKU_C")"
+  assert "shop.alice: reserve -> reserved (ok true, 1 reserved)" "ok true reserved 1" \
+    "$(printf '%s\n' "$CA" | ./request.sh POST "/v1/items/$SKU_C:reserve" "${JSON[@]}" -d '{"quantity":1,"orderId":"VERIFY-19"}' 2>/dev/null | reserved)"
   assert_contains "shop.alice: create -> 403 RBAC"             "RBAC: access denied -> 403" "$(with_token "$CA" POST /v1/items "${JSON[@]}" -d '{"sku":"SKU-V19","name":"verify","onHand":1,"warehouse":"LEEDS"}')"
-  assert_contains "shop.alice: delete -> 403 RBAC"             "RBAC: access denied -> 403" "$(with_token "$CA" DELETE /v1/items/SKU-1001)"
+  assert_contains "shop.alice: delete -> 403 RBAC"             "RBAC: access denied -> 403" "$(with_token "$CA" DELETE "/v1/items/$SKU_C")"
   assert_contains "shop.alice: reset -> 403 RBAC"              "RBAC: access denied -> 403" "$(with_token "$CA" POST /v1/items:reset "${JSON[@]}" -d '{}')"
   assert_contains "shop.bob: create -> 200"                    " -> 200" "$(with_token "$CB" POST /v1/items "${JSON[@]}" -d '{"sku":"SKU-V19","name":"verify","onHand":1,"warehouse":"LEEDS"}' -o /dev/null)"
   assert_contains "shop.bob: delete -> 200"                    " -> 200" "$(with_token "$CB" DELETE /v1/items/SKU-V19 -o /dev/null)"
+  # Requests shaped to slip past the reserve rule, as shop.alice, sent exactly as
+  # written (--path-as-is). Each must stop at the Gateway (README, step 9).
+  # code|method|path|a header|the method as sent, when not in capitals. request.sh
+  # takes the method in capitals; curl's own -X, given after it, sends another case.
+  local code method path header sent_as
+  while IFS='|' read -r code method path header sent_as; do
+    assert "shop.alice: ${sent_as:-$method} $path${header:+ + $header} -> $code" "$code" \
+      "$(printf '%s\n' "$CA" | ./request.sh "$method" "$path" --path-as-is "${JSON[@]}" -d '{"quantity":1,"orderId":"ADV"}' \
+           ${header:+-H "$header"} ${sent_as:+-X "$sent_as"} -o /dev/null -w '%{http_code}' 2>/dev/null)"
+  done <<ADV
+307|POST|/v1/items/${SKU_C}%2Fx:reserve||
+403|POST|/v1/items/${SKU_C}%3Fx:reserve||
+403|POST|/v1/items/${SKU_C}%3Bx:reserve||
+403|POST|/v1/items/${SKU_C}:reserve/||
+403|POST|/v1/items/${SKU_C}:reserve?x=1||
+403|POST|/v1/items/${SKU_C}:restock||
+403|PATCH|/v1/items/${SKU_C}||
+403|POST|/v1/items/${SKU_C}|X-HTTP-Method-Override: DELETE|
+400|POST|/v1/items/${SKU_C}:reserve||post
+ADV
+  assert "...and the %2F one's redirect, /v1/items/$SKU_C/x:reserve -> 403" "403" \
+    "$(printf '%s\n' "$CA" | ./request.sh POST "/v1/items/$SKU_C/x:reserve" "${JSON[@]}" -d '{"quantity":1}' -o /dev/null -w '%{http_code}' 2>/dev/null)"
+  assert "...and $SKU_C holds only the one reservation made above" "ok true reserved 1" \
+    "$(printf '%s\n' "$CB" | ./request.sh GET "/v1/items/$SKU_C" 2>/dev/null | python3 -c 'import json, sys; r = json.load(sys.stdin); print("ok true reserved", r.get("reserved"))' 2>/dev/null)"
+  assert_contains "(shop.bob removes $SKU_C)" " -> 200" "$(item delete "$SKU_C")"
+  assert_contains "shop.bob: reset -> 200"                     " -> 200" "$(with_token "$CB" POST /v1/items:reset "${JSON[@]}" -d '{}' -o /dev/null)"
   TAMPERED=$(printf '%s' "$CA" | python3 -c '
 import base64, json, sys
 h, p, s = sys.stdin.read().strip().split(".")
@@ -256,8 +325,12 @@ print(".".join([h, base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rst
   assert_contains "shop.alice's JWT once it has expired -> 401" "Jwt is expired -> 401" "$(with_token "$OLD" GET /v1/items)"
 
   say "7. the Gateway is the only way in"
-  assert "the shop's Envoy, called directly from the client pod: no answer" "000" \
-    "$(incluster_curl -m 5 -o /dev/null -w '%{http_code}' http://envoy.$NS.svc:8080/v1/items)"
+  assert "the probe itself: the Gateway's address, port 80, from the client pod" "reachable" "$(tcp_from_client "$ADDR:80")"
+  assert "the shop's Envoy (:8080), directly from the client pod" "blocked" "$(tcp_from_client "envoy.$NS.svc:8080")"
+  assert "the echo app (:8080), directly"                          "blocked" "$(tcp_from_client "echo.$NS.svc:8080")"
+  assert "the kiosk (:8080), directly"                             "blocked" "$(tcp_from_client "kiosk.$NS.svc:8080")"
+  assert "the inventory, gRPC (:50051), directly"                  "blocked" "$(tcp_from_client "inventory.$NS.svc:50051")"
+  assert "MongoDB (:27017), directly"                              "blocked" "$(tcp_from_client "inventory-db.$NS.svc:27017")"
   # A fresh token: section 6's are older than their 300 s by now.
   assert_contains "the same call through the Gateway, with a JWT -> 200" " -> 200" \
     "$(with_token "$($TOKEN shop.alice)" GET /v1/items -o /dev/null)"
@@ -276,13 +349,20 @@ print(".".join([h, base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rst
 clean() {
   # Argo CD would put everything back as it is deleted.
   app_pause "$APP"
-  local rc=0
-  ../_shared/crc-forward.sh remove "$LOCAL" >/dev/null 2>&1 || rc=$?
-  case $rc in 0|3) ;; *) bad "the laptop's forward $LOCAL could not be removed - ../_shared/crc-forward.sh remove $LOCAL" ;; esac
-  gw_down "$NS" eg
-  $KUBE delete -f manifests/50-trust-keycloak.yaml --ignore-not-found >/dev/null 2>&1
-  $KUBE delete -f manifests/10-gateway.yaml --ignore-not-found --wait=false >/dev/null 2>&1
-  ok "namespace $NS deleting, with the shop and its database claim; the laptop's forward $LOCAL removed; realm corp and its client shop-kiosk stay (module 18)"
+  local rc=0 out forwarded="removed"
+  out=$(../_shared/crc-forward.sh remove "$LOCAL" 2>&1) || rc=$?
+  case $rc in
+    0) ;;
+    3) forwarded="not on this machine (not CRC)" ;;
+    *) bad "cannot remove the laptop's forward $LOCAL: $out"; exit 1 ;;
+  esac
+  gw_down "$NS" eg || exit 1
+  checked "delete the ReferenceGrant in keycloak" \
+    "$KUBE" delete -f manifests/50-trust-keycloak.yaml --ignore-not-found
+  checked "delete namespace $NS" \
+    "$KUBE" delete -f manifests/10-gateway.yaml --ignore-not-found --wait=false
+  gone "namespace $NS" "ns/$NS"
+  ok "namespace $NS deleted, with the shop and its database claim; the laptop's forward $LOCAL $forwarded; realm corp and its client shop-kiosk stay (module 18)"
 }
 
 case "${1:-deploy}" in
