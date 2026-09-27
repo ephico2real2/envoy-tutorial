@@ -44,7 +44,7 @@ Everything is declared in two Kubernetes resources — module 16's `Keycloak`, a
 ## The picture
 
 <!-- markdownlint-disable MD033 -->
-<img alt="A login in realm corp. A person, for example sarah.jones, sends a user name and password through client shop-cli to Keycloak (keycloak-0, realm corp), which a KeycloakRealmImport corp created once, with the LDAP provider, its mappers, the group-to-role mapping and the bind password from Secret keycloak-ldap-bind. Keycloak trusts the directory&#x27;s root CA from Secret ldap-root-ca, declared as an optional truststore in module 16&#x27;s Keycloak resource; the root was fetched from the route with openssl, and its SHA-256 fingerprint 0E:1F:4B:E3:...:A7:0E:14:26 matched openshift-config/ca-config-map before it was stored; a new Secret restarts Keycloak after about 45 seconds. Keycloak connects to ldaps://ldaps-ldap-testing.apps-crc.testing:443 with that name as SNI, checks the certificate&#x27;s CA and name, binds as keycloak-bind-serviceid and searches through the gate. The OpenShift router&#x27;s passthrough Route ldaps forwards the connection to OpenLDAP on 636, whose certificate from LDAP Enterprise Root CA names the public host and the Service. Keycloak then binds as the person to check the password, and reads the groups whose member is the person. Of the directory&#x27;s 9 people, the gate app-ssb-autobahnusers holds 7; bob.wilson and charlie.brown are outside it. Members of app-ocp-rbac-ocp-keycloak-admin - john.doe, alice.cooper, sarah.jones - get the realm role admin, and the token comes back with issuer .../realms/corp. Refusals: a root not yet trusted gives SSLHandshakeFailed, PKIX path building failed; a name not in the certificate gives No subject alternative DNS name; a person outside the gate gets invalid_grant, user_not_found. Keycloak never writes to the directory." src="../docs/diagrams/18-keycloak-ldap/federation.light.png">
+<img alt="A login in realm corp. A person, for example sarah.jones, sends a user name and password through client shop-cli to Keycloak (keycloak-0, realm corp), which a KeycloakRealmImport corp created once, with the LDAP provider, its mappers, the group-to-role mapping and the bind password from Secret keycloak-ldap-bind. Keycloak trusts the directory&#x27;s root CA from Secret ldap-root-ca, declared as an optional truststore in module 16&#x27;s Keycloak resource; the root was fetched from the route with openssl, and its SHA-256 fingerprint 0E:1F:4B:E3:...:A7:0E:14:26 matched openshift-config/ca-config-map before it was stored; a new Secret restarts Keycloak after about 45 seconds. Keycloak connects to ldaps://ldaps-ldap-testing.apps-crc.testing:443 with that name as SNI, checks the certificate&#x27;s CA and name, binds as keycloak-bind-serviceid and searches through the gate. The OpenShift router&#x27;s passthrough Route ldaps forwards the connection to OpenLDAP on 636, whose certificate from LDAP Enterprise Root CA names the public host and the Service. Keycloak then binds as the person to check the password, and reads the groups whose member is the person. Of the directory&#x27;s 11 people, the gate app-ssb-autobahnusers holds 9; bob.wilson and charlie.brown are outside it. Members of app-ocp-rbac-ocp-keycloak-admin - john.doe, alice.cooper, sarah.jones, shop.bob - get the realm role admin, and the token comes back with issuer .../realms/corp. Refusals: a root not yet trusted gives SSLHandshakeFailed, PKIX path building failed; a name not in the certificate gives No subject alternative DNS name; a person outside the gate gets invalid_grant, user_not_found. Keycloak never writes to the directory." src="../docs/diagrams/18-keycloak-ldap/federation.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ## Walkthrough
@@ -208,12 +208,12 @@ secret/ldap-root-ca created
 $ loaded=no; for i in $(seq 1 60); do secret=$(oc get secret ldap-root-ca -n keycloak -o jsonpath='{.data.ldap-root-ca\.pem}' | base64 -d | openssl x509 -noout -fingerprint -sha256 2>/dev/null); mounted=$(oc exec -n keycloak keycloak-0 -- cat /opt/keycloak/conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null); logged=$(oc logs keycloak-0 -n keycloak 2>/dev/null | grep TruststoreBuilder | grep -o 'secret-ldap-root-ca/\.\.20[^/]*' | tail -n 1); linked=$(oc exec -n keycloak keycloak-0 -- readlink -f /opt/keycloak/conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem 2>/dev/null | grep -o 'secret-ldap-root-ca/\.\.20[^/]*'); [ -n "$secret" ] && [ "$secret" = "$mounted" ] && [ -n "$logged" ] && [ "$logged" = "$linked" ] && { loaded=yes; break; }; sleep 5; done; [ "$loaded" = yes ] && oc wait pod/keycloak-0 -n keycloak --for=condition=Ready --timeout=300s || { echo "Keycloak has not loaded the Secret's root, or is not Ready - the root is NOT trusted"; false; }
 pod/keycloak-0 condition met
 $ oc logs keycloak-0 -n keycloak | grep TruststoreBuilder | grep -o 'secret-ldap-root-ca/\.\.20[^/]*' | tail -n 1; oc exec -n keycloak keycloak-0 -- readlink -f /opt/keycloak/conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem
-secret-ldap-root-ca/..2026_09_27_02_55_51.1233400631
-/opt/keycloak/conf/truststores/secret-ldap-root-ca/..2026_09_27_02_55_51.1233400631/ldap-root-ca.pem
+secret-ldap-root-ca/..2026_09_27_04_50_12.2373335208
+/opt/keycloak/conf/truststores/secret-ldap-root-ca/..2026_09_27_04_50_12.2373335208/ldap-root-ca.pem
 $ oc get pod keycloak-0 -n keycloak -o jsonpath='{.spec.containers[0].volumeMounts[?(@.name=="truststore-secret-ldap-root-ca")].mountPath}{"\n"}'
 /opt/keycloak/conf/truststores/secret-ldap-root-ca
 $ oc logs keycloak-0 -n keycloak | grep TruststoreBuilder | grep -o 'Found the following truststore files.*'
-Found the following truststore files in the truststore paths [/var/run/secrets/kubernetes.io/serviceaccount/ca.crt, /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..data/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..2026_09_27_02_55_51.1233400631/ldap-root-ca.pem]
+Found the following truststore files in the truststore paths [/var/run/secrets/kubernetes.io/serviceaccount/ca.crt, /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..data/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..2026_09_27_04_50_12.2373335208/ldap-root-ca.pem]
 ```
 
 **What just happened:** the operator restarted Keycloak with the Secret mounted
@@ -253,14 +253,15 @@ Plain `ldap://` to a port that speaks only TLS: "connected", yet no bind can wor
 
 ### Step 8 — two ways to decide who may log in
 
-The directory holds nine people. Who may log in to `corp` is one line in the
-realm file, the LDAP provider's `customUserSearchFilter`:
+The directory holds eleven people — module 17's two shop users, `shop.alice` and
+`shop.bob`, among them (the chart's `ldap-shop-users.ldif`). Who may log in to
+`corp` is one line in the realm file, the LDAP provider's `customUserSearchFilter`:
 
 | | Open | **Gated — used here** |
 |---|---|---|
 | who may log in | every person under `ou=People` | only members of `app-ssb-autobahnusers` |
 | configured by | no `customUserSearchFilter` | `customUserSearchFilter: ["(memberOf=cn=app-ssb-autobahnusers,ou=Groups,dc=ephico2real,dc=com)"]` |
-| who appears in `corp` | anyone who logs in or is listed — one user listing imported all 9 (measured on a throwaway realm, #7) | only gate members: the filter applies to every lookup and listing |
+| who appears in `corp` | anyone who logs in or is listed — one user listing imported every person, all 9 the directory then held (measured on a throwaway realm, #7) | only gate members: the filter applies to every lookup and listing |
 | roles | the `ocp` groups (step 10) | the same |
 | fits | a directory that holds only this application's people | a corporate directory |
 
@@ -277,14 +278,14 @@ the admin console's **Users** page does:
 $ ./admin.sh GET /admin/realms/corp/users/count; echo
 0
 $ ./admin.sh GET '/admin/realms/corp/users?briefRepresentation=true&max=100' | python3 -c 'import json,sys; print(sorted(u["username"] for u in json.load(sys.stdin)))'
-['alice.cooper', 'dana.lee', 'jane.smith', 'jeff', 'john.doe', 'lateef.o', 'sarah.jones']
+['alice.cooper', 'dana.lee', 'jane.smith', 'jeff', 'john.doe', 'lateef.o', 'sarah.jones', 'shop.alice', 'shop.bob']
 $ ./admin.sh GET /admin/realms/corp/users/count; echo
-7
+9
 ```
 
 **What just happened:** `corp` held nobody — users are imported when they are
 looked up. The listing searched the directory **through the gate** and imported
-the seven members; `bob.wilson` and `charlie.brown`, in the directory but not in
+the gate's members; `bob.wilson` and `charlie.brown`, in the directory but not in
 the gate, are not there.
 
 ### Step 9 — a token for a directory user
@@ -409,9 +410,9 @@ out of that window):
 
 ```console
 $ sleep 2; T=$(date -u +%Y-%m-%dT%H:%M:%SZ); sleep 1; ./token.sh sarah.jones >/dev/null; sleep 2; oc logs -n ldap-testing deploy/openldap-server -c openldap --since-time="$T" | grep -E 'BIND dn="(cn=keycloak-bind-serviceid|uid=sarah.jones)[^"]*" mech|SRCH base="ou=People|SRCH base="ou=Groups' | sed -E 's/^[0-9a-f]+ //; s/(filter=".{60}).*/\1.../'
-conn=7973 op=0 BIND dn="cn=keycloak-bind-serviceid,ou=TrustedApplications,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
-conn=7973 op=1 SRCH base="ou=People,dc=ephico2real,dc=com" scope=1 deref=3 filter="(&(entryUUID=499e85a4-480f-1041-84a7-371855b7826b)(memberOf=...
-conn=7974 op=0 BIND dn="uid=sarah.jones,ou=People,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
+conn=10454 op=0 BIND dn="cn=keycloak-bind-serviceid,ou=TrustedApplications,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
+conn=10454 op=1 SRCH base="ou=People,dc=ephico2real,dc=com" scope=1 deref=3 filter="(&(entryUUID=499e85a4-480f-1041-84a7-371855b7826b)(memberOf=...
+conn=10455 op=0 BIND dn="uid=sarah.jones,ou=People,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
 ```
 
 **What just happened:** Keycloak opened a connection, **bound as the bind
@@ -481,6 +482,13 @@ accessTokenLifespan 300
 it — the imported users, their sessions. That is safe here because nothing in
 `corp` is kept only in Keycloak: its people and groups come back from the
 directory as they log in. A realm whose users live in Keycloak would lose them.
+
+The rebuilt realm also has **new signing keys**, so anything that caches `corp`'s
+public keys rejects its tokens until that cache expires. Module 17's Gateway
+keeps them for `cache_duration: 300s` (its step 4): measured on this lab after a
+rebuild at 04:51:17Z, its `corp` checks answered `Jwks doesn't have key to match
+kid or alg from Jwt -> 401` until 04:54:49Z and passed again at 04:55:24Z — about
+four minutes. The `tutorial` realm's tokens were unaffected throughout.
 
 ### Step 14 — check yourself
 
@@ -570,6 +578,7 @@ the realm is replaced with the Secret's value inside the import Job.
 
 | You see | Why | Fix |
 |---|---|---|
+| `Jwks doesn't have key to match kid or alg from Jwt` at module 17's Gateway for `corp` tokens | realm `corp` was rebuilt (step 13) and has new signing keys; the Gateway still holds the old ones for up to `cache_duration: 300s` | wait — measured about four minutes after a rebuild; nothing to change |
 | `SSLHandshakeFailed`; the log says `PKIX path building failed` | Keycloak does not trust the certificate's CA — no Secret `ldap-root-ca`, or Keycloak has not restarted since it was created | steps 5–6; the restart comes about 45 s after the Secret (measured) |
 | `SSLHandshakeFailed`; the log says `No subject alternative DNS name matching` | the URL's host is not in the certificate | use a name the certificate carries (step 11) |
 | the router's `*.apps-crc.testing` certificate instead of slapd's | the client sent no SNI | send it: `openssl s_client -servername …` |
@@ -597,8 +606,8 @@ captures, zoomed, checked with `tooling/screenshot/verify.py`):
 
 ## Clean up
 
-Leave `corp` in place if you go on: module 17's Gateway accepts only realm
-`tutorial`'s tokens today, and #8 adds `corp`'s.
+Leave `corp` in place if you go on: module 17's Gateway accepts its tokens beside
+realm `tutorial`'s (module 17, steps 8 to 10).
 To remove what this module added — the realm, its import, the two Secrets.
 Module 16's `Keycloak` keeps its `truststores` entry: it is optional. But the
 Secret it names is gone, so the operator **restarts Keycloak** — measured: it

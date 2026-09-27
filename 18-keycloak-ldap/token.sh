@@ -4,12 +4,15 @@
 #   sarah.jones, john.doe, alice.cooper   gate members, in app-ocp-rbac-ocp-keycloak-admin (role admin)
 #   jane.smith, dana.lee, jeff            gate members
 #   lateef.o                              gate member, in app-ocp-rbac-ocp-ns-audit
+#   shop.alice                            gate member - module 17's shop reader
+#   shop.bob                              gate member, in app-ocp-rbac-ocp-keycloak-admin (role admin)
 #   bob.wilson, charlie.brown             in the directory, NOT in the gate: refused
 #   master-admin                          realm master, module 16's lab admin - for admin.sh
 #
 # The passwords are the directory's LAB values, published in the chart
-# repository (setup-local-ldap-testing) and measured with ldapwhoami on #7:
-# Ldap123! for everyone but lateef.o, whose is newuser123. bob.wilson's and
+# repository (setup-local-ldap-testing) and measured with ldapwhoami on #7 and
+# #8 (shop.alice, shop.bob: ldap-shop-users.ldif): Ldap123! for everyone but
+# lateef.o, whose is newuser123. bob.wilson's and
 # charlie.brown's are not known; they are asked with Ldap123! and refused
 # before any password is checked - Keycloak does not find them.
 #
@@ -38,10 +41,10 @@ secret() { $KUBE get secret keycloak-admin -n keycloak -o jsonpath="{.data.$1}" 
 person() { printf 'grant_type=password&client_id=shop-cli&username=%s&password=' "$1"; printf '%s' "$2" | urlencode; }
 
 case "${1:-}" in
-  sarah.jones|john.doe|alice.cooper|jane.smith|dana.lee|jeff|bob.wilson|charlie.brown)
+  sarah.jones|john.doe|alice.cooper|jane.smith|dana.lee|jeff|shop.alice|shop.bob|bob.wilson|charlie.brown)
                  person "$1" 'Ldap123!' | ask corp ;;
   lateef.o)      person "$1" newuser123 | ask corp ;;
   master-admin)  { printf 'grant_type=password&client_id=admin-cli&username='; secret username | urlencode
                    printf '&password=';                                        secret password | urlencode; } | ask master ;;
-  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
