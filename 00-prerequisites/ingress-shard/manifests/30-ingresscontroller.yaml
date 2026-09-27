@@ -25,7 +25,10 @@ spec:
       dnsManagementPolicy: Unmanaged
   # A Route joins the shard by its own label, not by its namespace: module 20
   # puts one Route here and nothing else of its namespace. The default router
-  # has no selector and admits these Routes too (the README, step 5).
+  # would admit these Routes too - it has no selector of its own - so
+  # ../run.sh deploy gives it routeSelector ingress-shard DoesNotExist (the
+  # README, step 5). That selector is run.sh's, not a manifest's: see
+  # ../../../argocd/ingress-shard.yaml.
   routeSelector:
     matchLabels:
       ingress-shard: metallb

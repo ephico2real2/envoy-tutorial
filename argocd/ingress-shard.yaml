@@ -5,8 +5,16 @@
 # applies with -n ingress-shard; its objects carry no namespace, so they take
 # this destination's). Every other object names its own namespace.
 #
-# The laptop's forward to the shard's address is not here: it lives in CRC's
-# network proxy, not in the cluster - ./run.sh deploy makes it.
+# Two things the shard needs are deliberately not here; ./run.sh deploy makes
+# both (../00-prerequisites/ingress-shard/README.md, "Permanent lab"):
+# - the default IngressController's routeSelector (ingress-shard DoesNotExist),
+#   which keeps the default router off the shard's Routes. The default
+#   IngressController is the platform's: an Application that owned it could
+#   prune it - deleting the router every Route depends on - and would force its
+#   whole copy of the object back over anyone else's change. run.sh sets the one
+#   field, and verify checks it;
+# - the laptop's forward to the shard's address, which lives in CRC's network
+#   proxy, not in the cluster.
 #
 # No resources-finalizer: deleting this Application leaves the shard running.
 apiVersion: argoproj.io/v1alpha1
