@@ -10,11 +10,14 @@ REALM=https://keycloak.apps-crc.testing/realms/corp
 GATE='(memberOf=cn=app-ssb-autobahnusers,ou=Groups,dc=ephico2real,dc=com)'
 BIND_DN=cn=keycloak-bind-serviceid,ou=TrustedApplications,dc=ephico2real,dc=com
 # The file Keycloak reads the root from, once the operator mounts Secret ldap-root-ca
-# (module 16's Keycloak resource, spec.truststores.ldap-root-ca), as Keycloak's
-# TruststoreBuilder names it at start-up: /opt/keycloak/bin/../conf/truststores/...
-# The checks below grep for it without -q: grep -q stops reading at the first
-# match, oc logs then dies of SIGPIPE, and pipefail (lib.sh) fails the pipeline.
-TRUSTED=conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem
+# (module 16's Keycloak resource, spec.truststores.ldap-root-ca). The kubelet
+# projects a Secret as a versioned directory, ..<timestamp>.<n>, which ..data and
+# this file link to; a change of the Secret's DATA makes a new one, a change of its
+# metadata does not (measured: an annotation write left the directory as it was).
+TRUSTED=/opt/keycloak/conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem
+# generation - the versioned part of the path on stdin, as
+# secret-ldap-root-ca/..20<...>/ldap-root-ca.pem; the last one when there are several.
+generation() { grep -o 'secret-ldap-root-ca/\.\.20[^/]*/ldap-root-ca\.pem' | tail -n 1; }
 
 # Module 16's lab must be up: this module adds a realm to that Keycloak.
 need_keycloak() {
@@ -56,26 +59,20 @@ fetch_root() {
   ok "the root from the wire matches openshift-config/ca-config-map: $wire"
 }
 
-# secret_data_changed - when Secret ldap-root-ca's data was last written: the newest
-# managedFields entry that owns f:data. An entry for metadata alone (the annotation
-# `oc apply` adds to a Secret made by `oc create`) is not a change of the root, and
-# measured, it does not restart Keycloak. Empty when the Secret cannot be read.
-secret_data_changed() {
-  $KUBE get secret ldap-root-ca -n "$NS" --show-managed-fields -o json 2>/dev/null | python3 -c '
-import json, sys
-m = json.load(sys.stdin)["metadata"].get("managedFields", [])
-print(max((f["time"] for f in m if "f:data" in f.get("fieldsV1", {})), default=""))' 2>/dev/null
-}
-# truststore_loaded - "yes" only when the running Keycloak container started AFTER
-# the Secret's data last changed AND its start-up log names the file. A log line
-# alone proves nothing: a pod started before a change names the same file, holding
-# the old root. Unreadable times count as "no".
+# truststore_loaded - "yes" only when Keycloak loaded the root the Secret holds now:
+#   - the Secret's certificate and the file mounted in keycloak-0 have the same
+#     fingerprint (the kubelet has projected the current data), and
+#   - the generation Keycloak's start-up log names (TruststoreBuilder lists the
+#     plain, ..data and ..20<...> paths) is the one the file links to now.
+# A Keycloak started before a data change logged an older generation; nothing here
+# compares clocks. Any unreadable value is "no". Certificates only - no credential.
 truststore_loaded() {
-  local changed started
-  changed=$(secret_data_changed)
-  started=$($KUBE get pod keycloak-0 -n "$NS" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}' 2>/dev/null)
-  if [ -n "$changed" ] && [ -n "$started" ] && [[ "$started" > "$changed" ]] \
-     && $KUBE logs keycloak-0 -n "$NS" 2>/dev/null | grep "TruststoreBuilder.*$TRUSTED" >/dev/null; then
+  local secret_fp mounted_fp loaded current
+  secret_fp=$($KUBE get secret ldap-root-ca -n "$NS" -o jsonpath='{.data.ldap-root-ca\.pem}' 2>/dev/null | base64 -d | fingerprint 2>/dev/null)
+  mounted_fp=$($KUBE exec -n "$NS" keycloak-0 -- cat "$TRUSTED" 2>/dev/null | fingerprint 2>/dev/null)
+  loaded=$($KUBE logs keycloak-0 -n "$NS" 2>/dev/null | grep TruststoreBuilder | generation)
+  current=$($KUBE exec -n "$NS" keycloak-0 -- readlink -f "$TRUSTED" 2>/dev/null | generation)
+  if [ -n "$secret_fp" ] && [ "$secret_fp" = "$mounted_fp" ] && [ -n "$loaded" ] && [ "$loaded" = "$current" ]; then
     echo yes
   else
     echo no
@@ -113,14 +110,14 @@ deploy() {
     ok "Secret ldap-root-ca written; waiting for the operator to restart Keycloak"
   fi
   rm -rf -- "$dir"; trap - EXIT
-  # Trusted only when a Keycloak that started after the root last changed has
-  # loaded it. Five minutes without that is a failure, never "trusted".
+  # Trusted only when Keycloak's start-up log names the generation of the Secret's
+  # current data. Five minutes without that is a failure, never "trusted".
   for _ in $(seq 1 60); do
     [ "$(truststore_loaded)" = yes ] && { loaded=yes; break; }
     sleep 5
   done
   [ "$loaded" = yes ] \
-    || { bad "no Keycloak started after Secret ldap-root-ca last changed ($(secret_data_changed)) has loaded it - oc get pod keycloak-0 -n $NS"; exit 1; }
+    || { bad "Keycloak has not loaded the current data of Secret ldap-root-ca - oc logs keycloak-0 -n $NS | grep TruststoreBuilder"; exit 1; }
   $KUBE wait pod/keycloak-0 -n "$NS" --for=condition=Ready --timeout=600s >/dev/null \
     || { bad "keycloak-0 never Ready after the truststore change - oc describe pod keycloak-0 -n $NS"; exit 1; }
   ok "Keycloak trusts the directory's root"
@@ -199,7 +196,7 @@ verify() {
     "$($KUBE get keycloak keycloak -n "$NS" -o jsonpath='{.spec.truststores.ldap-root-ca.secret.name}')"
   assert "...the operator mounts it into keycloak-0" "/opt/keycloak/conf/truststores/secret-ldap-root-ca" \
     "$($KUBE get pod keycloak-0 -n "$NS" -o jsonpath='{.spec.containers[0].volumeMounts[?(@.name=="truststore-secret-ldap-root-ca")].mountPath}')"
-  assert "...and a Keycloak started after its last change loaded it" "yes" "$(truststore_loaded)"
+  assert "...and Keycloak loaded the Secret's current data at start-up" "yes" "$(truststore_loaded)"
 
   say "2. realm corp and its LDAP provider"
   assert "realm import Done" "True" \

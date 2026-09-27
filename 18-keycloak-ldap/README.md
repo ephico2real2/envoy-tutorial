@@ -193,33 +193,38 @@ this module patched module 16's `Keycloak`, the next `oc apply` of module 16 wou
 take the truststore away again. (Ran module 16 before this field existed? Apply
 its `manifests/40-keycloak.yaml` again.) Now create the Secret, and wait: the
 operator notices the new Secret and **restarts Keycloak** — about 45 seconds
-later, measured — and the new Keycloak loads the root. Wait for exactly that: a
-Keycloak that **started after the Secret was created**. Its log line alone is no
-proof — a Keycloak started earlier names the same file, with whatever it held
-then. The wait gives up after five minutes, and then says the root is **not**
-trusted:
+later, measured — and the new Keycloak loads the root. Wait for exactly that,
+with no clock involved. The kubelet puts a Secret's data in a **versioned**
+directory, `..<date>.<n>`, and links the file to it; new data, new directory.
+Keycloak's start-up log names the versioned path it read. So the root is loaded
+when the Secret's certificate is the one mounted in the pod **and** the log names
+the directory the file links to now. The log line alone is no proof: a Keycloak
+started before the change names the same file, in an older directory. The wait
+gives up after five minutes, and then says the root is **not** trusted:
 
 <!-- output pending the from-scratch run.py --update pass: the wait loop's line is not yet measured as written -->
 ```console
 $ oc create secret generic ldap-root-ca -n keycloak --from-file=ldap-root-ca.pem
 secret/ldap-root-ca created
-$ restarted=no; for i in $(seq 1 60); do [[ "$(oc get pod keycloak-0 -n keycloak -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')" > "$(oc get secret ldap-root-ca -n keycloak -o jsonpath='{.metadata.creationTimestamp}')" ]] && { restarted=yes; break; }; sleep 5; done; [ "$restarted" = yes ] && oc wait pod/keycloak-0 -n keycloak --for=condition=Ready --timeout=300s || { echo "no Keycloak started after the Secret, or it is not Ready - the root is NOT trusted"; false; }
+$ loaded=no; for i in $(seq 1 60); do secret=$(oc get secret ldap-root-ca -n keycloak -o jsonpath='{.data.ldap-root-ca\.pem}' | base64 -d | openssl x509 -noout -fingerprint -sha256 2>/dev/null); mounted=$(oc exec -n keycloak keycloak-0 -- cat /opt/keycloak/conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null); logged=$(oc logs keycloak-0 -n keycloak 2>/dev/null | grep TruststoreBuilder | grep -o 'secret-ldap-root-ca/\.\.20[^/]*' | tail -n 1); linked=$(oc exec -n keycloak keycloak-0 -- readlink -f /opt/keycloak/conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem 2>/dev/null | grep -o 'secret-ldap-root-ca/\.\.20[^/]*'); [ -n "$secret" ] && [ "$secret" = "$mounted" ] && [ -n "$logged" ] && [ "$logged" = "$linked" ] && { loaded=yes; break; }; sleep 5; done; [ "$loaded" = yes ] && oc wait pod/keycloak-0 -n keycloak --for=condition=Ready --timeout=300s || { echo "Keycloak has not loaded the Secret's root, or is not Ready - the root is NOT trusted"; false; }
 pod/keycloak-0 condition met
-$ echo "Secret created $(oc get secret ldap-root-ca -n keycloak -o jsonpath='{.metadata.creationTimestamp}'), Keycloak started $(oc get pod keycloak-0 -n keycloak -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')"
-Secret created 2026-09-27T00:57:56Z, Keycloak started 2026-09-27T00:58:43Z
+$ oc logs keycloak-0 -n keycloak | grep TruststoreBuilder | grep -o 'secret-ldap-root-ca/\.\.20[^/]*' | tail -n 1; oc exec -n keycloak keycloak-0 -- readlink -f /opt/keycloak/conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem
+secret-ldap-root-ca/..2026_09_27_00_58_42.1229303664
+/opt/keycloak/conf/truststores/secret-ldap-root-ca/..2026_09_27_00_58_42.1229303664/ldap-root-ca.pem
 $ oc get pod keycloak-0 -n keycloak -o jsonpath='{.spec.containers[0].volumeMounts[?(@.name=="truststore-secret-ldap-root-ca")].mountPath}{"\n"}'
 /opt/keycloak/conf/truststores/secret-ldap-root-ca
 $ oc logs keycloak-0 -n keycloak | grep TruststoreBuilder | grep -o 'Found the following truststore files.*'
 Found the following truststore files in the truststore paths [/var/run/secrets/kubernetes.io/serviceaccount/ca.crt, /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..data/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..2026_09_27_00_58_42.1229303664/ldap-root-ca.pem]
 ```
 
-**What just happened:** a Keycloak started 47 seconds after the Secret was
-created; the operator mounted the Secret under `conf/truststores/`, and at
-start-up that Keycloak added every file there to the certificates it trusts,
-beside the service account's `ca.crt` and `service-ca.crt` it lists first.
-`./run.sh deploy` waits the same way, with one refinement for a root that
-**changes**: it compares with the time the Secret's **data** was last written
-(its `managedFields`), not its creation.
+**What just happened:** the operator restarted Keycloak with the Secret mounted
+under `conf/truststores/`, and at start-up Keycloak added every file there to the
+certificates it trusts, beside the service account's `ca.crt` and
+`service-ca.crt` it lists first. The directory its log names,
+`..2026_09_27_00_58_42.1229303664`, is the one the file links to now. A change
+of only the Secret's metadata (an annotation) makes no new directory — measured:
+after one at 01:12:48, the file still linked to this one — so it needs no
+restart. `./run.sh deploy` and `verify` use the same test.
 
 ### Step 7 — now it connects
 
@@ -488,7 +493,7 @@ $ ./run.sh verify
   ✓ Secret ldap-root-ca holds the PKI owner's root
   ✓ Keycloak declares the truststore (module 16's resource)
   ✓ ...the operator mounts it into keycloak-0
-  ✓ ...and a Keycloak started after its last change loaded it
+  ✓ ...and Keycloak loaded the Secret's current data at start-up
 
 2. realm corp and its LDAP provider
   ✓ realm import Done
