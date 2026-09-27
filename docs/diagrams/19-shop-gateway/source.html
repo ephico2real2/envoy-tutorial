@@ -1,0 +1,163 @@
+<title>Shop Gateway Sign-in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · module 19 · the shop behind the Gateway</div>
+    <h1>Sign in with the directory, checked at the Gateway</h1>
+    <p class="lede">Drawn from <code>19-shop-gateway/manifests/</code> and the filters Envoy Gateway generated (<code>generated/envoy-filters.yaml</code>); every answer was measured on CRC in namespace <code>envoy-19</code>.</p>
+  </header>
+
+  <section>
+    <h2>One policy, three filters, one contract: the JWT</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 1000 760" role="img" aria-label="Two callers reach Gateway eg in envoy-19. A browser on the laptop reaches it at http://localhost:19080, which CRC's network proxy forwards to the Gateway's MetalLB address; a command-line caller sends Authorization: Bearer with a JWT from client shop-cli. The Gateway runs one SecurityPolicy as three filters in order. First oauth2: a browser without a session gets a 302 to realm corp's login page at keycloak.apps-crc.testing, as client shop-kiosk with a PKCE S256 challenge; after the person signs in, Keycloak sends the browser back to /oauth2/callback with a code, which the Gateway swaps for tokens at keycloak-service:8443 and keeps in Secure, HttpOnly, SameSite=Lax cookies; on every later request it forwards the access token as Authorization: Bearer; a request that already carries a Bearer header skips this filter. Second jwt_authn: issuer realms/corp, audience shop-api, the signature with corp's public keys fetched from keycloak-service:8443 over TLS through module 17's BackendTLSPolicy and a ReferenceGrant, cached 300 seconds, and the expiry. Third rbac: the realm role admin may do anything; any corp token may GET and POST items/sku:reserve; everything else is denied with 403. Keycloak reads each person and their groups from the LDAP directory at every login: only members of app-ssb-autobahnusers may sign in, and app-ocp-rbac-ocp-keycloak-admin becomes the role admin. Allowed requests reach the shop vendored from envoy-grpc-modernization: its own Envoy turns REST and JSON into gRPC, then three inventory pods and MongoDB, and the kiosk page; NetworkPolicies let only this Gateway's Envoy call it. Measured answers, the same in the browser and on the command line: shop.alice lists and reserves, 200, and gets 403 RBAC access denied on create, delete and reset; shop.bob creates, deletes and resets, 200. An edited JWT gets 401 Jwt verification fails, a JWT from realm tutorial 401 Jwt issuer is not configured, an expired JWT 401 Jwt is expired; bob.wilson cannot sign in, Invalid username or password, user_not_found; the shop's Envoy called directly does not answer. Removing shop.bob from the admin group in LDAP takes admin away at his next sign-in, and from an open session at its next token refresh.">
+  <defs>
+    <marker id="f19" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    <marker id="f19g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker>
+    <marker id="f19t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--remote)"/></marker>
+  </defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+
+<!-- callers -->
+<rect x="20" y="12" width="270" height="84" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="34" y="33" font-weight="600">the command line</text>
+<text x="34" y="50" font-family="IBM Plex Mono, monospace" font-size="12">token.sh | request.sh</text>
+<text x="34" y="67" font-family="IBM Plex Mono, monospace" font-size="12">Authorization: Bearer &lt;JWT&gt;</text>
+<text x="34" y="84" fill="var(--muted)">client shop-cli, the token on stdin</text>
+
+<rect x="310" y="12" width="290" height="84" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="324" y="33" font-weight="600">a browser, on the laptop</text>
+<text x="324" y="50" font-family="IBM Plex Mono, monospace" font-size="12">http://localhost:19080</text>
+<text x="324" y="67">CRC forwards it to the MetalLB address</text>
+<text x="324" y="84" fill="var(--muted)">session: Secure, HttpOnly, Lax cookies</text>
+
+<line x1="155" y1="96" x2="155" y2="110" stroke="currentColor" stroke-width="1.3" marker-end="url(#f19)"/>
+<line x1="455" y1="96" x2="455" y2="110" stroke="currentColor" stroke-width="1.3" marker-end="url(#f19)"/>
+
+<!-- Keycloak, the login page -->
+<rect x="640" y="12" width="340" height="102" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="654" y="33" font-weight="600">Keycloak, realm corp (modules 16, 18)</text>
+<text x="654" y="50">login page at keycloak.apps-crc.testing</text>
+<text x="654" y="67" font-family="IBM Plex Mono, monospace" font-size="12">client shop-kiosk: confidential, PKCE S256</text>
+<text x="654" y="84" font-family="IBM Plex Mono, monospace" font-size="12">→ http://localhost:19080/oauth2/callback</text>
+<text x="654" y="101" fill="var(--muted)">tokens: iss …/realms/corp, aud shop-api</text>
+<line x1="602" y1="54" x2="638" y2="54" stroke="var(--host)" stroke-width="1.3" marker-start="url(#f19)" marker-end="url(#f19)"/>
+<text x="640" y="132" fill="var(--host)">② sign in on this page; ③ back with a code</text>
+
+<!-- the Gateway -->
+<rect x="20" y="112" width="580" height="258" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="34" y="133" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">GATEWAY eg · envoy-19 — SecurityPolicy sign-in</text>
+<text x="34" y="160" font-weight="600">① oauth2</text>
+<text x="120" y="160">no session: 302 to corp's login page, PKCE S256 challenge</text>
+<text x="120" y="177">/oauth2/callback: code → tokens at keycloak-service; cookies set</text>
+<text x="120" y="194">a session: its access token sent on as Authorization: Bearer</text>
+<text x="120" y="211" fill="var(--muted)">a request with its own Bearer header skips this filter</text>
+<line x1="34" y1="224" x2="586" y2="224" stroke="var(--remote)" stroke-width="0.8" stroke-dasharray="3 3"/>
+<text x="34" y="246" font-weight="600">④ jwt_authn</text>
+<text x="120" y="246" font-family="IBM Plex Mono, monospace" font-size="12">iss …/realms/corp · aud shop-api · signature · exp</text>
+<text x="120" y="263" fill="var(--muted)">the same check for both callers: the JWT is the contract</text>
+<line x1="34" y1="276" x2="586" y2="276" stroke="var(--remote)" stroke-width="0.8" stroke-dasharray="3 3"/>
+<text x="34" y="298" font-weight="600">⑤ rbac</text>
+<text x="120" y="298" font-family="IBM Plex Mono, monospace" font-size="12">realm role admin: anything</text>
+<text x="120" y="315" font-family="IBM Plex Mono, monospace" font-size="12">any corp token: GET, POST /v1/items/{sku}:reserve</text>
+<text x="120" y="332" font-family="IBM Plex Mono, monospace" font-size="12">anything else: 403</text>
+<text x="120" y="355" fill="var(--muted)">then to the shop, with x-user = the LDAP uid</text>
+
+<!-- keycloak-service -->
+<rect x="640" y="152" width="340" height="108" rx="7" fill="var(--host-wash)" stroke="var(--host)" stroke-width="1.3"/>
+<text x="654" y="173" font-weight="600">keycloak-service.keycloak.svc:8443</text>
+<text x="654" y="190">token endpoint: the code swapped for tokens</text>
+<text x="654" y="207">certs: corp's public keys, cached 300 s</text>
+<text x="654" y="224">TLS: module 17's BackendTLSPolicy</text>
+<text x="654" y="241" fill="var(--muted)">allowed by a ReferenceGrant in keycloak</text>
+<line x1="602" y1="206" x2="638" y2="206" stroke="currentColor" stroke-width="1.3" marker-end="url(#f19)"/>
+
+<!-- the directory -->
+<rect x="640" y="288" width="340" height="108" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="654" y="309" font-weight="600">the LDAP directory</text>
+<text x="654" y="326">sign in only if in app-ssb-autobahnusers</text>
+<text x="654" y="343">app-ocp-rbac-ocp-keycloak-admin → admin</text>
+<text x="654" y="360" fill="var(--muted)">read at every login (cachePolicy NO_CACHE)</text>
+<text x="654" y="377" fill="var(--muted)">shop.bob out: no admin at next sign-in</text>
+<line x1="810" y1="286" x2="810" y2="262" stroke="currentColor" stroke-width="1.3" marker-end="url(#f19)"/>
+<text x="818" y="279" fill="var(--muted)">Keycloak reads it</text>
+
+<!-- the shop -->
+<line x1="310" y1="370" x2="310" y2="402" stroke="var(--remote)" stroke-width="1.3" marker-end="url(#f19t)"/>
+<text x="318" y="392" fill="var(--remote)">allowed</text>
+<rect x="20" y="404" width="580" height="94" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="34" y="425" font-weight="600">the shop — envoy-grpc-modernization at 1e3ad13, vendored</text>
+<text x="34" y="442">its own Envoy: REST+JSON → gRPC (grpc_json_transcoder)</text>
+<text x="34" y="459">→ inventory ×3 → MongoDB; the kiosk page at /; /whoami → echo</text>
+<text x="34" y="476" fill="var(--muted)">NetworkPolicies: only this Gateway's Envoy may call it</text>
+
+<!-- outcomes -->
+<rect x="20" y="528" width="470" height="136" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="34" y="549" fill="var(--gap)" font-weight="600">refused — measured</text>
+<text x="34" y="566" font-family="IBM Plex Mono, monospace" font-size="12">shop.alice create/delete/reset → 403 RBAC</text>
+<text x="34" y="583" font-family="IBM Plex Mono, monospace" font-size="12">edited JWT → 401 Jwt verification fails</text>
+<text x="34" y="600" font-family="IBM Plex Mono, monospace" font-size="12">realm tutorial's JWT → 401 issuer not configured</text>
+<text x="34" y="617" font-family="IBM Plex Mono, monospace" font-size="12">expired JWT → 401 Jwt is expired</text>
+<text x="34" y="634" font-family="IBM Plex Mono, monospace" font-size="12">bob.wilson → no sign-in (user_not_found)</text>
+<text x="34" y="651" font-family="IBM Plex Mono, monospace" font-size="12">the shop's Envoy, called directly → no answer</text>
+<rect x="510" y="528" width="470" height="99" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="524" y="549" fill="var(--remote)" font-weight="600">allowed — measured, browser and command line alike</text>
+<text x="524" y="566" font-family="IBM Plex Mono, monospace" font-size="12">shop.alice list, reserve → 200</text>
+<text x="524" y="583" font-family="IBM Plex Mono, monospace" font-size="12">shop.bob (admin) create, delete, reset → 200</text>
+<text x="524" y="600" fill="var(--muted)">the browser's token: azp shop-kiosk;</text>
+<text x="524" y="617" fill="var(--muted)">the command line's: azp shop-cli</text>
+
+<text x="20" y="706" font-weight="600">The directory decides who signs in and who is admin; the Gateway checks the JWT on every call; the shop sees only what passed.</text>
+<text x="20" y="726" fill="var(--muted)">Measured on CRC in envoy-19 against realm corp (module 18); the Gateway is Envoy Gateway v1.9.1 (Envoy 1.39.1).</text>
+<text x="20" y="746" fill="var(--muted)">Module 20 builds the same shop with a standalone Envoy (oauth2, jwt_authn, rbac written by hand) behind an OpenShift Route.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>A browser signs in on realm corp's page and keeps its session in cookies; the Gateway turns the session into a bearer JWT and checks it exactly as it checks one from the command line; realm roles, the method and the path decide; LDAP groups decide the roles.</figcaption>
+    </figure>
+  </section>
+</div>

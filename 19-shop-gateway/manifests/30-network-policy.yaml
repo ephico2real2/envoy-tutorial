@@ -1,0 +1,104 @@
+# The Gateway is the only way in. Without these, any pod in the cluster could call
+# the shop's Envoy at envoy.envoy-19.svc:8080 and reach the inventory with no
+# sign-in at all: the SecurityPolicy guards the Gateway, not the Services behind it.
+#
+# A pod that one NetworkPolicy selects accepts only the traffic some policy allows
+# (Kubernetes NetworkPolicy; OVN-Kubernetes enforces it on this cluster). So each
+# layer admits only the layer in front of it:
+#
+#   this Gateway's Envoy (envoy-gateway-system) -> the shop's Envoy, the echo app
+#   the shop's Envoy                            -> the kiosk, the inventory
+#   the inventory                               -> MongoDB
+#
+# The client pod is selected by none of them: the README's step 5 shows it is
+# refused by the shop's Envoy directly, yet served through the Gateway.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: shop-envoy-from-gateway
+  namespace: envoy-19
+spec:
+  podSelector:
+    matchLabels: { app: envoy }
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    # One entry with both selectors: pods with these labels IN that namespace -
+    # the Envoy that Envoy Gateway runs for Gateway envoy-19/eg, and no other.
+    - namespaceSelector:
+        matchLabels: { kubernetes.io/metadata.name: envoy-gateway-system }
+      podSelector:
+        matchLabels:
+          gateway.envoyproxy.io/owning-gateway-namespace: envoy-19
+          gateway.envoyproxy.io/owning-gateway-name: eg
+    ports:
+    - { protocol: TCP, port: 8080 }
+---
+# /whoami (40-route.yaml) - the same Gateway only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: echo-from-gateway
+  namespace: envoy-19
+spec:
+  podSelector:
+    matchLabels: { app: echo }
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels: { kubernetes.io/metadata.name: envoy-gateway-system }
+      podSelector:
+        matchLabels:
+          gateway.envoyproxy.io/owning-gateway-namespace: envoy-19
+          gateway.envoyproxy.io/owning-gateway-name: eg
+    ports:
+    - { protocol: TCP, port: 8080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kiosk-from-shop-envoy
+  namespace: envoy-19
+spec:
+  podSelector:
+    matchLabels: { app: kiosk }
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: { app: envoy }
+    ports:
+    - { protocol: TCP, port: 8080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: inventory-from-shop-envoy
+  namespace: envoy-19
+spec:
+  podSelector:
+    matchLabels: { app: inventory }
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: { app: envoy }
+    ports:
+    - { protocol: TCP, port: 50051 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-from-inventory
+  namespace: envoy-19
+spec:
+  podSelector:
+    matchLabels: { app: inventory-db }
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: { app: inventory }
+    ports:
+    - { protocol: TCP, port: 27017 }

@@ -3,8 +3,9 @@
 Modules 16, 17 and 18 are not only lessons: on the operator's CRC they are a
 **standing Keycloak offering** that other work depends on
 ([#9](https://github.com/ephico2real2/envoy-tutorial/issues/9)). `./run.sh` in
-each module builds it and checks it; the three Argo CD **Applications** here keep
-it as git declares it. One per module, in OpenShift GitOps' instance
+each module builds it and checks it; the Argo CD **Applications** here keep
+it as git declares it — with module 19's shop, the first application integrated
+with it. One per module, in OpenShift GitOps' instance
 `openshift-gitops`, each on the `main` branch of this repository and on the
 **same files** that module's `./run.sh deploy` applies:
 
@@ -13,6 +14,7 @@ it as git declares it. One per module, in OpenShift GitOps' instance
 | [`16-keycloak`](16-keycloak.yaml) | `16-keycloak/manifests` | namespace `keycloak`, the operator's `Subscription`, PostgreSQL, the certificate, the `Keycloak` resource, its Route, realm import `tutorial` |
 | [`17-keycloak-jwt`](17-keycloak-jwt.yaml) | `17-keycloak-jwt/manifests`, and `_shared/echo-app.yaml` into `envoy-17` | namespace `envoy-17`, Gateway `eg`, its routes and SecurityPolicies, the `ReferenceGrant` and `BackendTLSPolicy` in `keycloak`, the echo app |
 | [`18-keycloak-ldap`](18-keycloak-ldap.yaml) | `18-keycloak-ldap/manifests` | the LDAP bind password's Secret, realm import `corp` |
+| [`19-shop-gateway`](19-shop-gateway.yaml) | `19-shop-gateway/manifests`, and `_shared/echo-app.yaml` into `envoy-19` | namespace `envoy-19`, Gateway `eg`, the shop (vendored from `envoy-grpc-modernization`), its NetworkPolicies, route, `SecurityPolicy` and client Secret, the `ReferenceGrant` in `keycloak`, the echo app behind `/whoami` — an integration of the offering (module 16's index) |
 
 Beside the Keycloak offering, one more Application keeps a piece of platform that
 module 20 builds on
@@ -34,7 +36,7 @@ object, an edited field. It does **not** run `run.sh`: what `deploy` does by han
 CA, fetching and checking the directory's root — stays `run.sh`'s, each with its
 reason in the module's "Permanent lab" section
 ([16](../16-keycloak/README.md#permanent-lab), [17](../17-keycloak-jwt/README.md#permanent-lab),
-[18](../18-keycloak-ldap/README.md#permanent-lab)).
+[18](../18-keycloak-ldap/README.md#permanent-lab), [19](../19-shop-gateway/README.md#permanent-lab)).
 
 ## Putting them on a cluster
 
@@ -42,7 +44,7 @@ reason in the module's "Permanent lab" section
 must pass. Then the Applications:
 
 ```bash
-16-keycloak/run.sh deploy && 18-keycloak-ldap/run.sh deploy && 17-keycloak-jwt/run.sh deploy
+16-keycloak/run.sh deploy && 18-keycloak-ldap/run.sh deploy && 17-keycloak-jwt/run.sh deploy && 19-shop-gateway/run.sh deploy
 oc apply -f argocd/
 ```
 

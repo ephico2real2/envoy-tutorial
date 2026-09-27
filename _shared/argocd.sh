@@ -1,4 +1,4 @@
-# Helpers for the modules Argo CD keeps (16, 17, 18). Source after lib.sh.
+# Helpers for the modules Argo CD keeps (16, 17, 18, 19). Source after lib.sh.
 #
 # Each of those modules has an Argo CD Application, named after its folder
 # (../argocd/), that applies the module's manifests from git and puts back

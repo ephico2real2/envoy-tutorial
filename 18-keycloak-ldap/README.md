@@ -80,7 +80,8 @@ nothing else. [`manifests/20-realm.yaml`](manifests/20-realm.yaml) is the realm:
 | **attribute mappers** | user name ← `uid`, email ← `mail`, first name ← `cn`, last name ← `sn` |
 | a **group mapper** | the groups `(cn=app-ocp-rbac-ocp-*)` under `ou=Groups`, read from each group's `member`, flat, read-only |
 | realm role **`admin`** | and the group `app-ocp-rbac-ocp-keycloak-admin` that grants it — step 10 |
-| clients | `shop-api` (the audience) and `shop-cli` (password grant), as in `tutorial` |
+| clients | `shop-api` (the audience) and `shop-cli` (password grant), as in `tutorial`; `shop-kiosk`, module 19's browser sign-in (confidential, authorization code with PKCE) |
+| **no user cache** | `cachePolicy: NO_CACHE` — each login reads the person and their groups from the directory, so a change there counts at the next login (module 19, step 13) |
 
 The realm file names the bind password only as `${LDAP_BIND_PASSWORD}`; the
 import's `placeholders` field fills it from the Secret, inside the import Job.
@@ -412,22 +413,27 @@ out of that window):
 
 ```console
 $ sleep 2; T=$(date -u +%Y-%m-%dT%H:%M:%SZ); sleep 1; ./token.sh sarah.jones >/dev/null; sleep 2; oc logs -n ldap-testing deploy/openldap-server -c openldap --since-time="$T" | grep -E 'BIND dn="(cn=keycloak-bind-serviceid|uid=sarah.jones)[^"]*" mech|SRCH base="ou=People|SRCH base="ou=Groups' | sed -E 's/^[0-9a-f]+ //; s/(filter=".{60}).*/\1.../'
-conn=10454 op=0 BIND dn="cn=keycloak-bind-serviceid,ou=TrustedApplications,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
-conn=10454 op=1 SRCH base="ou=People,dc=ephico2real,dc=com" scope=1 deref=3 filter="(&(entryUUID=499e85a4-480f-1041-84a7-371855b7826b)(memberOf=...
-conn=10455 op=0 BIND dn="uid=sarah.jones,ou=People,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
+conn=23241 op=0 BIND dn="cn=keycloak-bind-serviceid,ou=TrustedApplications,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
+conn=23241 op=1 SRCH base="ou=People,dc=ephico2real,dc=com" scope=1 deref=3 filter="(&(entryUUID=499e85a4-480f-1041-84a7-371855b7826b)(memberOf=...
+conn=23242 op=0 BIND dn="uid=sarah.jones,ou=People,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
+conn=23243 op=0 BIND dn="cn=keycloak-bind-serviceid,ou=TrustedApplications,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
+conn=23243 op=1 SRCH base="ou=Groups,dc=ephico2real,dc=com" scope=1 deref=3 filter="(&(cn=app-ocp-rbac-ocp-*)(member=uid=sarah.jones,ou=people,d...
 ```
 
 **What just happened:** Keycloak opened a connection, **bound as the bind
 account**, looked sarah up — by her `entryUUID`, through the gate — and then
-bound **as sarah** on a second connection: that bind is the password check. Each
-of the bind account's connections carries its bind and **one** search (`op=0`,
+bound **as sarah** on a second connection: that bind is the password check —
+and on a third, as the bind account again, read the groups whose `member` is
+sarah. Each of the bind account's connections carries its bind and **one** search (`op=0`,
 `op=1`), then is closed. Keycloak 26.7.0's release notes
 list a fix, #50201, "LDAP user federation re-binds the service account on every
 operation since 26.6.0 (connection pool not reused)"; this Keycloak is
 `26.6.7.redhat-00003`, its connection pooling is on (the default, `true`), and
 measured here the bind account binds once **per search**, on a new connection
-each time: 1 bind for a returning user's login, 2 for a first login (the user
-search and the group search). The pool is not reused — the behaviour that fix
+each time: 2 per login, the user search and the group search. (Before the LDAP
+provider got `cachePolicy: NO_CACHE` — module 19, the options below — a returning
+user's login needed only the first: Keycloak kept the rest in its user cache.)
+The pool is not reused — the behaviour that fix
 describes. It costs one TLS handshake and one bind per operation; it is not an
 error.
 
@@ -552,6 +558,7 @@ all checks passed
 | `importEnabled` | `true` | copy users into Keycloak's database, linked to LDAP | `false` to look them up on every request |
 | `fullSyncPeriod`, `changedSyncPeriod` | `-1` | no periodic sync: users are imported as they are looked up | a sync interval, in seconds |
 | `connectionPooling` | not set (`true`) | reuse connections — measured not to be reused (step 12) | — |
+| `cachePolicy` | `NO_CACHE` | read the person and their groups from the directory at every login. Measured with the default (`DEFAULT`, Keycloak's user cache): a person taken out of `app-ocp-rbac-ocp-keycloak-admin` still got `admin` in the next tokens, until the realm's user cache was cleared (module 19, step 13) | `MAX_LIFESPAN`, with `maxLifespan` in milliseconds, to trade freshness for fewer directory searches |
 
 **The group mapper** (`subComponents`, `group-ldap-mapper`)
 
@@ -592,6 +599,7 @@ the realm is replaced with the Secret's value inside the import Job.
 | Test connection `204`, Test authentication `CommunicationError` | no LDAP server answered — wrong scheme or port | `ldaps://` on 443, or on 636 in the cluster |
 | `invalid_grant`, `Invalid user credentials`; the log says `user_not_found` | the person is not in the gate, or not under `ou=People` | add them to `app-ssb-autobahnusers` in the directory |
 | an edited `20-realm.yaml`, applied, changes nothing | an import only creates | step 13 |
+| a change of group in the directory does not show in the next token | the LDAP provider's user cache | `cachePolicy: NO_CACHE`, as here (module 19, step 13) |
 | the import says `Done=True`, the realm is unchanged, its Job logs `Import skipped` | the realm already existed when the Job ran | delete the realm first (step 13) |
 | `zsh: no matches found: chain-*.pem` | step 4's `for` loop ran before the `awk` that writes the files | run the `awk` command first |
 | `unknown option -noservername` / `-verify_hostname` | macOS LibreSSL | OpenSSL 3 (`brew install openssl`) |

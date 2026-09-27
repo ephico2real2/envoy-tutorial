@@ -1,0 +1,43 @@
+# Module 19 - the shop behind Gateway eg in envoy-19: the Gateway, the shop (its
+# database, inventory service, own Envoy and kiosk, vendored from
+# envoy-grpc-modernization), the NetworkPolicies, the HTTPRoute, the ReferenceGrant
+# in keycloak, the kiosk client's Secret and the SecurityPolicy
+# (../19-shop-gateway/manifests); and the echo app behind /whoami
+# (../_shared/echo-app.yaml, which run.sh applies with -n envoy-19; its objects carry
+# no namespace, so they take this destination's).
+#
+# No resources-finalizer: deleting this Application leaves the shop running.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: 19-shop-gateway
+  namespace: openshift-gitops
+  annotations:
+    # Diff by a server-side dry run: the API server's defaults (an HTTPRoute's
+    # backendRefs weight, a SecurityPolicy's remoteJWKS cacheDuration) are then
+    # part of both sides, not a difference Argo CD would "heal" forever.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: default
+  sources:
+  - repoURL: https://github.com/ephico2real2/envoy-tutorial.git
+    targetRevision: main
+    path: 19-shop-gateway/manifests
+  - repoURL: https://github.com/ephico2real2/envoy-tutorial.git
+    targetRevision: main
+    path: _shared
+    directory:
+      include: echo-app.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: envoy-19
+  syncPolicy:
+    automated:
+      enabled: true
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff: { duration: 5s, factor: 2, maxDuration: 3m }
+    syncOptions:
+    - ServerSideApply=true

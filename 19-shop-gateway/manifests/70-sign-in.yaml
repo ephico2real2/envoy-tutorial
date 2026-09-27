@@ -1,0 +1,110 @@
+# Sign-in and permissions for everything behind Gateway eg, in one policy. Envoy
+# Gateway turns its three parts into three filters, run in this order (v1.9.1,
+# internal/xds/translator/httpfilters.go): oauth2, then jwt_authn, then rbac.
+#
+#   oidc           a browser without a session is sent to realm corp's login page;
+#                  after it, the session lives in cookies, and every request is
+#                  sent on with the access token as "Authorization: Bearer <JWT>"
+#   jwt            that JWT - or one a command-line caller sends itself - is checked:
+#                  corp's signature, issuer, audience, expiry
+#   authorization  what the checked JWT may do: its realm roles, the method, the path
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: sign-in
+  namespace: envoy-19
+spec:
+  targetRefs:
+  - { group: gateway.networking.k8s.io, kind: Gateway, name: eg }
+  oidc:
+    provider:
+      issuer: https://keycloak.apps-crc.testing/realms/corp
+      # Where the BROWSER goes to sign in: Keycloak's public name, through its
+      # Route (module 16) - the laptop reaches it, and its login page is corp's.
+      authorizationEndpoint: https://keycloak.apps-crc.testing/realms/corp/protocol/openid-connect/auth
+      # Where the GATEWAY swaps the code for tokens: Keycloak's Service, inside
+      # the cluster, over TLS (backendRefs, below). With both endpoints given,
+      # the Envoy Gateway controller fetches no discovery document itself.
+      tokenEndpoint: https://keycloak-service.keycloak.svc:8443/realms/corp/protocol/openid-connect/token
+      # Where /logout sends the browser, so Keycloak ends its session too.
+      endSessionEndpoint: https://keycloak.apps-crc.testing/realms/corp/protocol/openid-connect/logout
+      backendRefs:
+      - { group: "", kind: Service, name: keycloak-service, namespace: keycloak, port: 8443 }
+    # The confidential client in realm corp (../18-keycloak-ldap/manifests/20-realm.yaml)
+    # and its secret (60-kiosk-client-secret.yaml).
+    clientID: shop-kiosk
+    clientSecret: { name: shop-kiosk-oidc }
+    # Where Keycloak sends the browser back. Fixed, and registered as the client's
+    # only redirect URI: the browser reaches this Gateway's MetalLB address
+    # through CRC's forward from 127.0.0.1:19080 (README, step 7). Left out,
+    # Envoy Gateway builds it from each request's scheme and Host.
+    redirectURL: http://localhost:19080/oauth2/callback
+    logoutPath: /logout
+    # Send the access token on as "Authorization: Bearer <JWT>" - for the jwt
+    # check below, and for the app.
+    forwardAccessToken: true
+    # A request that already carries "Authorization: Bearer ..." skips the
+    # sign-in and goes straight to the jwt check: a command-line caller with a
+    # token is checked, not redirected to a login page (README, step 12).
+    passThroughAuthHeader: true
+    # The session cookies go back to the Gateway on the redirect from Keycloak
+    # (a top-level GET from another site) and on the kiosk's own calls, never on
+    # a cross-site POST. Lax is what browsers assume when a cookie says nothing.
+    cookieConfig: { sameSite: Lax }
+  jwt:
+    providers:
+    - name: corp
+      # Must equal the token's iss exactly: only realm corp's tokens pass.
+      issuer: https://keycloak.apps-crc.testing/realms/corp
+      # The token must be meant for the shop's API. shop-kiosk's tokens (a browser
+      # sign-in) and shop-cli's (the command line) both carry it.
+      audiences: [shop-api]
+      remoteJWKS:
+        uri: https://keycloak-service.keycloak.svc:8443/realms/corp/protocol/openid-connect/certs
+        backendRefs:
+        - { group: "", kind: Service, name: keycloak-service, namespace: keycloak, port: 8443 }
+      # Who is calling, as a header the app can trust: the Gateway checked it.
+      claimToHeaders:
+      - { claim: preferred_username, header: x-user }
+  authorization:
+    # Nothing is allowed unless a rule allows it. Rules are read in order; the
+    # first that matches decides.
+    defaultAction: Deny
+    rules:
+    # The shop's admins may do anything - create, delete, reset, and the rest.
+    # admin is the realm role corp gives the LDAP group app-ocp-rbac-ocp-keycloak-admin
+    # (module 18, step 10): the directory decides who has it.
+    - name: admins
+      action: Allow
+      principal:
+        jwt:
+          provider: corp
+          claims:
+          - { name: realm_access.roles, valueType: StringArray, values: [admin] }
+    # Everyone corp signs in - only the members of its login gate,
+    # app-ssb-autobahnusers, get a token at all - may read: the kiosk page, the
+    # items, the warehouses.
+    - name: signed-in-may-read
+      action: Allow
+      operation:
+        methods: [GET]
+      principal:
+        jwt:
+          provider: corp
+          claims:
+          - { name: iss, values: ["https://keycloak.apps-crc.testing/realms/corp"] }
+    # ...and reserve stock: POST /v1/items/{sku}:reserve, and no other POST. The
+    # expression is matched against the whole :path, query included (v1.9.1,
+    # authorization.go, buildPathPredicate), so the sku may hold no "/", "?", "#"
+    # or ";". Measured with "[^/]+": shop.alice's POST /v1/items/SKU-1001:restock?q=:reserve
+    # got past this Gateway to the shop (503 from the shop's Envoy, not 403 here).
+    - name: signed-in-may-reserve
+      action: Allow
+      operation:
+        methods: [POST]
+        path: { type: RegularExpression, value: "^/v1/items/[^/?#;]+:reserve$" }
+      principal:
+        jwt:
+          provider: corp
+          claims:
+          - { name: iss, values: ["https://keycloak.apps-crc.testing/realms/corp"] }
