@@ -44,7 +44,7 @@ Everything is declared in two Kubernetes resources — module 16's `Keycloak`, a
 ## The picture
 
 <!-- markdownlint-disable MD033 -->
-<img alt="A login in realm corp. A person, for example sarah.jones, sends a user name and password through client shop-cli to Keycloak (keycloak-0, realm corp), which a KeycloakRealmImport corp created once, with the LDAP provider, its mappers, the group-to-role mapping and the bind password from Secret keycloak-ldap-bind. Keycloak trusts the directory&#x27;s root CA from Secret ldap-root-ca, declared as an optional truststore in module 16&#x27;s Keycloak resource; the root was fetched from the route with openssl, and its SHA-256 fingerprint 0E:1F:4B:E3:...:A7:0E:14:26 matched openshift-config/ca-config-map before it was stored; a new Secret restarts Keycloak after about 45 seconds. Keycloak connects to ldaps://ldaps-ldap-testing.apps-crc.testing:443 with that name as SNI, checks the certificate&#x27;s CA and name, binds as keycloak-bind-serviceid and searches through the gate. The OpenShift router&#x27;s passthrough Route ldaps forwards the connection to OpenLDAP on 636, whose certificate from LDAP Enterprise Root CA names the public host and the Service. Keycloak then binds as the person to check the password, and reads the groups whose member is the person. Of the directory&#x27;s 9 people, the gate app-ssb-autobahnusers holds 7; bob.wilson and charlie.brown are outside it. Members of app-ocp-rbac-ocp-keycloak-admin - john.doe, alice.cooper, sarah.jones - get the realm role admin, and the token comes back with issuer .../realms/corp. Refusals: a root not yet trusted gives SSLHandshakeFailed, PKIX path building failed; a name not in the certificate gives No subject alternative DNS name; a person outside the gate gets invalid_grant, user_not_found. Keycloak never writes to the directory." src="../docs/diagrams/18-keycloak-ldap/federation.light.png">
+<img alt="A login in realm corp. A person, for example sarah.jones, sends a user name and password through client shop-cli to Keycloak (keycloak-0, realm corp), which a KeycloakRealmImport corp created once, with the LDAP provider, its mappers, the group-to-role mapping and the bind password from Secret keycloak-ldap-bind. Keycloak trusts the directory&#x27;s root CA from Secret ldap-root-ca, declared as an optional truststore in module 16&#x27;s Keycloak resource; the root was fetched from the route with openssl, and its SHA-256 fingerprint 0E:1F:4B:E3:...:A7:0E:14:26 matched openshift-config/ca-config-map before it was stored; a new Secret restarts Keycloak after about 45 seconds. Keycloak connects to ldaps://ldaps-ldap-testing.apps-crc.testing:443 with that name as SNI, checks the certificate&#x27;s CA and name, binds as keycloak-bind-serviceid and searches through the gate. The OpenShift router&#x27;s passthrough Route ldaps forwards the connection to OpenLDAP on 636, whose certificate from LDAP Enterprise Root CA names the public host and the Service. Keycloak then binds as the person to check the password, and reads the groups whose member is the person. Of the directory&#x27;s 11 people, the gate app-ssb-autobahnusers holds 9; bob.wilson and charlie.brown are outside it. Members of app-ocp-rbac-ocp-keycloak-admin - john.doe, alice.cooper, sarah.jones, shop.bob - get the realm role admin, and the token comes back with issuer .../realms/corp. Refusals: a root not yet trusted gives SSLHandshakeFailed, PKIX path building failed; a name not in the certificate gives No subject alternative DNS name; a person outside the gate gets invalid_grant, user_not_found. Keycloak never writes to the directory." src="../docs/diagrams/18-keycloak-ldap/federation.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ## Walkthrough
@@ -253,14 +253,15 @@ Plain `ldap://` to a port that speaks only TLS: "connected", yet no bind can wor
 
 ### Step 8 — two ways to decide who may log in
 
-The directory holds nine people. Who may log in to `corp` is one line in the
-realm file, the LDAP provider's `customUserSearchFilter`:
+The directory holds eleven people — module 17's two shop users, `shop.alice` and
+`shop.bob`, among them (the chart's `ldap-shop-users.ldif`). Who may log in to
+`corp` is one line in the realm file, the LDAP provider's `customUserSearchFilter`:
 
 | | Open | **Gated — used here** |
 |---|---|---|
 | who may log in | every person under `ou=People` | only members of `app-ssb-autobahnusers` |
 | configured by | no `customUserSearchFilter` | `customUserSearchFilter: ["(memberOf=cn=app-ssb-autobahnusers,ou=Groups,dc=ephico2real,dc=com)"]` |
-| who appears in `corp` | anyone who logs in or is listed — one user listing imported all 9 (measured on a throwaway realm, #7) | only gate members: the filter applies to every lookup and listing |
+| who appears in `corp` | anyone who logs in or is listed — one user listing imported every person, all 9 the directory then held (measured on a throwaway realm, #7) | only gate members: the filter applies to every lookup and listing |
 | roles | the `ocp` groups (step 10) | the same |
 | fits | a directory that holds only this application's people | a corporate directory |
 
@@ -273,6 +274,7 @@ The filter needs `memberOf`, and this directory keeps `memberOf` only for
 `groupOfUniqueNames` groups — which `app-ssb-autobahnusers` is. List the users, as
 the admin console's **Users** page does:
 
+<!-- output pending the from-scratch run.py --update pass: pasted before ldap-shop-users.ldif; measured since (2026-09-27) the gate holds 9 people and corp lists 9 users, shop.alice and shop.bob among them -->
 ```console
 $ ./admin.sh GET /admin/realms/corp/users/count; echo
 0
@@ -284,7 +286,7 @@ $ ./admin.sh GET /admin/realms/corp/users/count; echo
 
 **What just happened:** `corp` held nobody — users are imported when they are
 looked up. The listing searched the directory **through the gate** and imported
-the seven members; `bob.wilson` and `charlie.brown`, in the directory but not in
+the gate's members; `bob.wilson` and `charlie.brown`, in the directory but not in
 the gate, are not there.
 
 ### Step 9 — a token for a directory user
@@ -597,8 +599,8 @@ captures, zoomed, checked with `tooling/screenshot/verify.py`):
 
 ## Clean up
 
-Leave `corp` in place if you go on: module 17's Gateway accepts only realm
-`tutorial`'s tokens today, and #8 adds `corp`'s.
+Leave `corp` in place if you go on: module 17's Gateway accepts its tokens beside
+realm `tutorial`'s (module 17, steps 8 to 10).
 To remove what this module added — the realm, its import, the two Secrets.
 Module 16's `Keycloak` keeps its `truststores` entry: it is optional. But the
 Secret it names is gone, so the operator **restarts Keycloak** — measured: it

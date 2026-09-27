@@ -150,13 +150,17 @@ for one, from the `client` pod in the `keycloak` namespace — read it: it is th
 same request as module 16, step 10, except that the form goes to `curl` on its
 standard input. `oc exec` sends a command's arguments in the request URL, and the
 API server's audit log keeps that URL (measured) — a password passed as
-`-d password=…` would be stored there; on stdin it is not. Without a token, and
-with alice's:
+`-d password=…` would be stored there; on stdin it is not. The token is a
+credential too — whoever holds it is alice until it expires, 300 s later — so
+it gets the same treatment: [`request.sh`](request.sh) reads it on its standard
+input and gives `curl` the `authorization` header as a config file on curl's
+standard input (`curl -K -`), never as an argument. Without a token, and with
+alice's:
 
 ```console
 $ oc exec -n envoy-17 client -- curl -s -w '  -> %{http_code}\n' "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/api"
 Jwt is missing  -> 401
-$ oc exec -n envoy-17 client -- curl -s -H "authorization: Bearer $(./token.sh alice)" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/api" | grep -E '"(x-user|x-client)"'
+$ ./token.sh alice | ./request.sh /api | grep -E '"(x-user|x-client)"'
     "x-user": "alice",
     "x-client": "shop-cli"
 ```
@@ -222,7 +226,7 @@ Each check has its own answer. A token **edited** after Keycloak signed it — a
 giving herself the `admin` role:
 
 ```console
-$ oc exec -n envoy-17 client -- curl -s -w '  -> %{http_code}\n' -H "authorization: Bearer $(./token.sh alice | python3 -c 'import base64,json,sys; h, p, s = sys.stdin.read().strip().split("."); c = json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4))); c["realm_access"]["roles"].append("admin"); print(".".join([h, base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rstrip("="), s]))')" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/api"
+$ ./token.sh alice | python3 -c 'import base64,json,sys; h, p, s = sys.stdin.read().strip().split("."); c = json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4))); c["realm_access"]["roles"].append("admin"); print(".".join([h, base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rstrip("="), s]))' | ./request.sh /api -w '  -> %{http_code}\n'
 Jwt verification fails  -> 401
 ```
 
@@ -230,14 +234,14 @@ A real token from the right realm, but **meant for something else** — Keycloak
 built-in `admin-cli` client puts no `shop-api` audience in it:
 
 ```console
-$ oc exec -n envoy-17 client -- curl -s -w '  -> %{http_code}\n' -H "authorization: Bearer $(./token.sh alice-admin-cli)" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/api"
+$ ./token.sh alice-admin-cli | ./request.sh /api -w '  -> %{http_code}\n'
 Audiences in Jwt are not allowed  -> 403
 ```
 
 A real token from **another realm** — `master`, Keycloak's own admin realm:
 
 ```console
-$ oc exec -n envoy-17 client -- curl -s -w '  -> %{http_code}\n' -H "authorization: Bearer $(./token.sh master-admin)" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/api"
+$ ./token.sh master-admin | ./request.sh /api -w '  -> %{http_code}\n'
 Jwt issuer is not configured  -> 401
 ```
 
@@ -259,7 +263,7 @@ same `403`. Only a request that gets past `jwt_authn` — a `200`, or step 6's
 And a service with its own identity gets through as itself:
 
 ```console
-$ oc exec -n envoy-17 client -- curl -s -H "authorization: Bearer $(./token.sh orders-service)" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/api" | grep '"x-user"'
+$ ./token.sh orders-service | ./request.sh /api | grep '"x-user"'
     "x-user": "service-account-orders-service",
 ```
 
@@ -287,9 +291,9 @@ provider sets — with `x-client` left out, a caller's own `x-client` header wou
 reach the app on `/admin` (measured). Now alice, then bob:
 
 ```console
-$ oc exec -n envoy-17 client -- curl -s -w '  -> %{http_code}\n' -H "authorization: Bearer $(./token.sh alice)" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/admin"
+$ ./token.sh alice | ./request.sh /admin -w '  -> %{http_code}\n'
 RBAC: access denied  -> 403
-$ oc exec -n envoy-17 client -- curl -s -w '  -> %{http_code}\n' -H "authorization: Bearer $(./token.sh bob)" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/admin" | grep -E '"x-user"|->'
+$ ./token.sh bob | ./request.sh /admin -w '  -> %{http_code}\n' | grep -E '"x-user"|->'
     "x-user": "bob",
 }  -> 200
 ```
@@ -314,7 +318,7 @@ $ oc rollout status deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owni
 Waiting for deployment "envoy-envoy-17-eg-0d84cb63" rollout to finish: 1 old replicas are pending termination...
 Waiting for deployment "envoy-envoy-17-eg-0d84cb63" rollout to finish: 1 old replicas are pending termination...
 deployment "envoy-envoy-17-eg-0d84cb63" successfully rolled out
-$ sleep 5; oc exec -n envoy-17 client -- curl -s -w '  -> %{http_code}\n' -H "authorization: Bearer $(./token.sh alice)" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/api"
+$ sleep 5; ./token.sh alice | ./request.sh /api -w '  -> %{http_code}\n'
 Jwks remote fetch is failed  -> 401
 $ ../_shared/eg-admin.sh envoy-17/eg stats | grep -E 'jwt_authn\.jwks_fetch_(success|failed):|keycloak-jwt/jwt/0\.upstream_rq_503:'
 cluster.securitypolicy/envoy-17/keycloak-jwt/jwt/0.upstream_rq_503: 17
@@ -331,7 +335,7 @@ nothing through: it **fails closed**. The counters show every fetch failing, wit
 $ oc apply -f manifests/30-trust-keycloak.yaml
 referencegrant.gateway.networking.k8s.io/envoy-17-fetches-jwks unchanged
 backendtlspolicy.gateway.networking.k8s.io/keycloak-service created
-$ sleep 20; oc exec -n envoy-17 client -- curl -s -o /dev/null -w '%{http_code}\n' -H "authorization: Bearer $(./token.sh alice)" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/api"
+$ sleep 20; ./token.sh alice | ./request.sh /api -o /dev/null -w '%{http_code}\n'
 200
 ```
 
@@ -361,14 +365,14 @@ $ ../_shared/eg-admin.sh envoy-17/eg 'config_dump?resource=dynamic_route_configs
 /admin -> keycloak-or-corp_4415a9690c753596
 /api -> keycloak-or-corp_d89af36ae9adc751
 $ ../_shared/eg-admin.sh envoy-17/eg 'config_dump?resource=dynamic_listeners' | python3 -c 'import json,sys; [print(n + "\n  " + "".join(k for k in r) + ":" + "".join("\n    " + x["provider_name"] + "  " + p[x["provider_name"]]["issuer"] for x in r["requires_any"]["requirements"])) for l in json.load(sys.stdin)["configs"] for fc in [l["active_state"]["listener"].get("default_filter_chain")] + l["active_state"]["listener"].get("filter_chains", []) if fc for f in fc["filters"] for h in f["typed_config"].get("http_filters", []) if h["name"].startswith("envoy.filters.http.jwt_authn") for p in [h["typed_config"]["providers"]] for n, r in h["typed_config"]["requirement_map"].items()]'
-keycloak-or-corp_4415a9690c753596
-  requires_any:
-    keycloak_3bacc451fa4b4cc4  https://keycloak.apps-crc.testing/realms/tutorial
-    corp_63e132447cbdc778  https://keycloak.apps-crc.testing/realms/corp
 keycloak-or-corp_d89af36ae9adc751
   requires_any:
     keycloak_da84ee5a9f7b6799  https://keycloak.apps-crc.testing/realms/tutorial
     corp_486c8a95a22e8d31  https://keycloak.apps-crc.testing/realms/corp
+keycloak-or-corp_4415a9690c753596
+  requires_any:
+    keycloak_3bacc451fa4b4cc4  https://keycloak.apps-crc.testing/realms/tutorial
+    corp_63e132447cbdc778  https://keycloak.apps-crc.testing/realms/corp
 ```
 
 **What just happened:** each route's requirement is **`requires_any`** over two
@@ -393,7 +397,7 @@ shop.bob https://keycloak.apps-crc.testing/realms/corp ['admin', 'default-roles-
 Both from `corp`; only `shop.bob` has `admin`. Now `shop.alice` on `/api`:
 
 ```console
-$ oc exec -n envoy-17 client -- curl -s -w '  -> %{http_code}\n' -H "authorization: Bearer $(./token.sh shop.alice)" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/api" | grep -E '"(x-user|x-client)"|->'
+$ ./token.sh shop.alice | ./request.sh /api -w '  -> %{http_code}\n' | grep -E '"(x-user|x-client)"|->'
     "x-user": "shop.alice",
     "x-client": "shop-cli"
 }  -> 200
@@ -426,9 +430,9 @@ only `admins`, his token got `403 RBAC: access denied`. Now `shop.alice`, then
 `shop.bob`:
 
 ```console
-$ oc exec -n envoy-17 client -- curl -s -w '  -> %{http_code}\n' -H "authorization: Bearer $(./token.sh shop.alice)" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/admin"
+$ ./token.sh shop.alice | ./request.sh /admin -w '  -> %{http_code}\n'
 RBAC: access denied  -> 403
-$ oc exec -n envoy-17 client -- curl -s -w '  -> %{http_code}\n' -H "authorization: Bearer $(./token.sh shop.bob)" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')/admin" | grep -E '"x-user"|->'
+$ ./token.sh shop.bob | ./request.sh /admin -w '  -> %{http_code}\n' | grep -E '"x-user"|->'
     "x-user": "shop.bob",
 }  -> 200
 ```
@@ -437,7 +441,7 @@ And every user of both realms, on both paths — `tutorial`'s answers as in step
 and 6:
 
 ```console
-$ for u in alice bob shop.alice shop.bob; do for p in /api /admin; do printf '%-10s %-6s ' $u $p; oc exec -n envoy-17 client -- curl -s -o /dev/null -w '%{http_code}\n' -H "authorization: Bearer $(./token.sh $u)" "http://$(oc get gateway eg -n envoy-17 -o jsonpath='{.status.addresses[0].value}')$p"; done; done
+$ for u in alice bob shop.alice shop.bob; do for p in /api /admin; do printf '%-10s %-6s ' $u $p; ./token.sh $u | ./request.sh $p -o /dev/null -w '%{http_code}\n'; done; done
 alice      /api   200
 alice      /admin 403
 bob        /api   200
@@ -499,7 +503,10 @@ $ ./run.sh verify
   ✓ a token edited to add a role -> 401
   ✓ a token not meant for shop-api -> 403
   ✓ a token from another realm -> 401
-  ✓ orders-service -> 200, as itself
+  ✓ orders-service -> 200
+  ✓ ...as itself
+  ✓ bob -> 200
+  ✓ ...as bob
 
 3. who gets through /admin (realm role admin)
   ✓ alice (reader) -> 403
@@ -515,7 +522,11 @@ $ ./run.sh verify
   ✓ shop.bob (in keycloak-admin) -> /admin 200
   ✓ ...as himself
   ✓ ...and the app gets the token's client, not the caller's x-client
+  ✓ jeff (ns-developer): corp's default roles only
+  ✓ jeff -> /api 200
+  ✓ jeff -> /admin 403
   ✓ bob.wilson (outside the login gate): no corp token
+  ✓ ...because Keycloak does not find him (not a wrong password)
 
 all checks passed
 ```
@@ -530,7 +541,7 @@ all checks passed
 | `audiences` | `[shop-api]` | `audiences` — checked against `aud` |
 | `remoteJWKS.uri`, `backendRefs` | Keycloak's `certs`, via `keycloak-service` | `remote_jwks`, its own cluster, `cache_duration: 300s`, `async_fetch` |
 | `claimToHeaders` | `preferred_username`, `azp` | `claim_to_headers` |
-| more than one provider | `keycloak` (realm `tutorial`) and `corp` | one `requires_any` requirement over them: a token either accepts passes (step 8) |
+| more than one provider | `keycloak` (realm `tutorial`) and `corp` | one `requires_any` requirement over them: a token that either provider accepts passes (step 8) |
 
 **`SecurityPolicy` — `authorization`**
 

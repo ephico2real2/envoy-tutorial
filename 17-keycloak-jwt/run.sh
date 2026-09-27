@@ -38,10 +38,46 @@ deploy() {
 }
 
 # call <token|""> <path> [curl args...] - the response body and, last, " -> <status>".
+# A token goes to request.sh on standard input, never as an argument: the API server's
+# audit log records `oc exec` arguments (request.sh, top). A shell function's arguments
+# are not a process's, so passing it to call() is fine.
 call() {
   local tok=$1 path=$2; shift 2
-  if [ -n "$tok" ]; then incluster_curl -w ' -> %{http_code}' -H "authorization: Bearer $tok" "$@" "http://$ADDR$path"
+  if [ -n "$tok" ]; then printf '%s\n' "$tok" | ADDR="$ADDR" ./request.sh "$path" --max-time 10 -w ' -> %{http_code}' "$@" 2>/dev/null
   else incluster_curl -w ' -> %{http_code}' "$@" "http://$ADDR$path"; fi
+}
+# claims - the access token on stdin, as "name value" lines: preferred_username, and
+# roles (the realm roles, sorted). On stdin, never in python's argv.
+claims() {
+  python3 -c '
+import base64, json, sys
+p = sys.stdin.read().strip().split(".")[1]
+c = json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))
+print("preferred_username", c.get("preferred_username"))
+print("roles", " ".join(sorted(c.get("realm_access", {}).get("roles", []))))' 2>/dev/null
+}
+claim() { sed -n "s/^$1 //p" <<<"$2"; }
+# ready_client <namespace> <how to create it> - verify reads the lab, it does not build it:
+# a missing client pod is a failure that names the step creating it (an earlier
+# version applied one silently).
+ready_client() {
+  [ "$($KUBE get pod client -n "$1" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = True ] \
+    || { bad "pod/client in $1 is not Ready - $2"; exit 1; }
+}
+# gate_refusal <since> <user> - why Keycloak refused <user>'s last login in corp since
+# <since> (RFC 3339), from its own
+# log: invalid_grant alone is also the answer to a wrong password. Retries briefly,
+# because the event line is written as the request completes.
+gate_refusal() {
+  local since=$1 user=$2 why=
+  for _ in 1 2 3 4 5; do
+    why=$($KUBE logs keycloak-0 -n keycloak --since-time="$since" 2>/dev/null \
+      | grep LOGIN_ERROR | grep 'realmName="corp"' | grep "username=\"$user\"" | tail -n 1 \
+      | grep -o 'error="[^"]*"')
+    [ -n "$why" ] && break
+    sleep 1
+  done
+  echo "${why:-no LOGIN_ERROR for $user in the log of keycloak-0 since $since}"
 }
 condition() { $KUBE get "$1" -n "$2" -o jsonpath="{.status.ancestors[0].conditions[?(@.type==\"$3\")].status}"; }
 # requirements - from the running Envoy, one line per route: its path, how its JWT
@@ -79,9 +115,10 @@ PY
 
 verify() {
   need_keycloak
-  client_ready
-  $KUBE get pod client -n keycloak >/dev/null 2>&1 || $KUBE apply -n keycloak -f ../_shared/client.yaml >/dev/null
-  $KUBE wait -n keycloak pod/client --for=condition=Ready --timeout=120s >/dev/null
+  ready_client "$NS" "./run.sh deploy"
+  ready_client keycloak "module 16, step 6: oc apply -n keycloak -f ../_shared/client.yaml"
+  # Checked above; stops incluster_curl from creating the pod (lib.sh, client_ensure).
+  CLIENT_READY=1
   $KUBE get secret keycloak-tls -n keycloak -o jsonpath='{.data.ca\.crt}' | base64 -d \
     | $KUBE exec -i -n keycloak client -- sh -c 'cat > /tmp/ca.crt'
   ADDR=$(gw_address "$NS" eg)
@@ -113,21 +150,24 @@ verify() {
   R=$(call "$ALICE" /api)
   assert_contains "alice -> 200"                    " -> 200"                 "$R"
   assert_contains "...and the app is told who"      '"x-user": "alice"'       "$R"
-  TAMPERED=$(python3 - "$ALICE" <<'PY'
+  TAMPERED=$(printf '%s' "$ALICE" | python3 -c '
 import base64, json, sys
-h, p, s = sys.argv[1].split(".")
+h, p, s = sys.stdin.read().strip().split(".")
 c = json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))
 c["realm_access"]["roles"].append("admin")
-print(".".join([h, base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rstrip("="), s]))
-PY
-)
+print(".".join([h, base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rstrip("="), s]))')
   assert_contains "a token edited to add a role -> 401" "Jwt verification fails -> 401" "$(call "$TAMPERED" /api)"
   OTHER_AUD=$(./token.sh alice-admin-cli)
   assert_contains "a token not meant for shop-api -> 403" "Audiences in Jwt are not allowed -> 403" "$(call "$OTHER_AUD" /api)"
   MASTER=$(./token.sh master-admin)
   assert_contains "a token from another realm -> 401" "Jwt issuer is not configured -> 401" "$(call "$MASTER" /api)"
   SVC=$(./token.sh orders-service)
-  assert_contains "orders-service -> 200, as itself" '"x-user": "service-account-orders-service"' "$(call "$SVC" /api)"
+  R=$(call "$SVC" /api)
+  assert_contains "orders-service -> 200"           " -> 200"                 "$R"
+  assert_contains "...as itself" '"x-user": "service-account-orders-service"' "$R"
+  R=$(call "$BOB" /api)
+  assert_contains "bob -> 200"                      " -> 200"                 "$R"
+  assert_contains "...as bob"                       '"x-user": "bob"'         "$R"
 
   say "3. who gets through /admin (realm role admin)"
   assert_contains "alice (reader) -> 403" "RBAC: access denied -> 403" "$(call "$ALICE" /admin)"
@@ -150,9 +190,20 @@ PY
   assert_contains "shop.bob (in keycloak-admin) -> /admin 200" " -> 200"             "$R"
   assert_contains "...as himself"                       '"x-user": "shop.bob"'       "$R"
   assert_contains "...and the app gets the token's client, not the caller's x-client" '"x-client": "shop-cli"' "$R"
-  # Refused by Keycloak, before the Gateway: the gate is corp's user search.
+  # ns-developer is a gate group with no Keycloak role (#8): jeff gets only what corp
+  # gives every user, and so /api but not /admin.
+  JEFF=$(./token.sh jeff)
+  assert "jeff (ns-developer): corp's default roles only" "default-roles-corp offline_access uma_authorization" \
+    "$(claim roles "$(printf '%s' "$JEFF" | claims)")"
+  assert_contains "jeff -> /api 200"                     " -> 200"                    "$(call "$JEFF" /api)"
+  assert_contains "jeff -> /admin 403"                   "RBAC: access denied -> 403" "$(call "$JEFF" /admin)"
+  # Refused by Keycloak, before the Gateway: the gate is corp's user search. The
+  # caller hears invalid_grant for a wrong password too, so Keycloak's log decides.
+  SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   assert_contains "bob.wilson (outside the login gate): no corp token" "no token: {'error': 'invalid_grant'" \
     "$(./token.sh bob.wilson 2>&1)"
+  assert "...because Keycloak does not find him (not a wrong password)" 'error="user_not_found"' \
+    "$(gate_refusal "$SINCE" bob.wilson)"
   summary
 }
 
