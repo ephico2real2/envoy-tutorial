@@ -22,7 +22,8 @@ Everything is declared in two Kubernetes resources — module 16's `Keycloak`, a
 - how to fetch a server's CA from the TLS handshake, why that alone proves
   nothing, and how to check it against the PKI owner's copy before trusting it
 - how Keycloak federates LDAP: the provider, its attribute mappers, a group
-  mapper, and a bind password that never enters git
+  mapper, and a Secret placeholder that keeps the bind password out of the realm
+  file (this lab commits its published test password too, marked LAB ONLY)
 - how to decide who may log in — every person in the directory, or only the
   members of a gate group — and why the gate is the enterprise choice
 
@@ -160,18 +161,20 @@ sha256 Fingerprint=0E:1F:4B:E3:E3:05:86:8C:85:3B:FA:63:6E:B2:EB:8D:BC:06:1A:96:1
 $ oc extract configmap/ca-config-map -n openshift-config --keys=ca.crt --to=- 2>/dev/null | openssl x509 -noout -subject -fingerprint -sha256
 subject=O=Enterprise IT, OU=Directory Services, CN=LDAP Enterprise Root CA
 sha256 Fingerprint=0E:1F:4B:E3:E3:05:86:8C:85:3B:FA:63:6E:B2:EB:8D:BC:06:1A:96:13:37:54:66:D2:5F:AD:46:A7:0E:14:26
-$ if [ "$(openssl x509 -in ldap-root-ca.pem -noout -fingerprint -sha256)" = "$(oc extract configmap/ca-config-map -n openshift-config --keys=ca.crt --to=- 2>/dev/null | openssl x509 -noout -fingerprint -sha256)" ]; then echo "match - trust it"; else echo "MISMATCH - stop: trust nothing"; false; fi
+$ wire=$(openssl x509 -in ldap-root-ca.pem -noout -fingerprint -sha256); owner=$(oc extract configmap/ca-config-map -n openshift-config --keys=ca.crt --to=- 2>/dev/null | openssl x509 -noout -fingerprint -sha256); if [ -n "$wire" ] && [ "$wire" = "$owner" ]; then echo "match - trust it"; else echo "MISMATCH or unreadable - stop: trust nothing"; false; fi
 match - trust it
 $ openssl s_client -connect ldaps-ldap-testing.apps-crc.testing:443 -servername ldaps-ldap-testing.apps-crc.testing -CAfile ldap-root-ca.pem -verify_hostname ldaps-ldap-testing.apps-crc.testing -verify_return_error </dev/null 2>&1 | grep 'Verify return code'
 Verify return code: 0 (ok)
 ```
 
 **What just happened:** the two SHA-256 fingerprints are the same — the root
-the directory sent **is** the PKI owner's. Only now is it safe to trust. The last
+the directory sent **is** the PKI owner's. Only now is it safe to trust. The
+comparison also refuses two **empty** fingerprints: a file or a ConfigMap that
+cannot be read gives no fingerprint, and two blanks are equal strings. The last
 command checks the whole thing the way Keycloak will: the chain up to this root,
 **and** the name `ldaps-ldap-testing.apps-crc.testing` in the certificate.
 `./run.sh deploy` makes the same comparison and **stops**, trusting nothing, on a
-mismatch. If a server sends only its leaf there is no root to take: use the PKI
+mismatch or an unreadable fingerprint. If a server sends only its leaf there is no root to take: use the PKI
 owner's copy directly.
 
 ### Step 6 — trust it
@@ -190,24 +193,33 @@ this module patched module 16's `Keycloak`, the next `oc apply` of module 16 wou
 take the truststore away again. (Ran module 16 before this field existed? Apply
 its `manifests/40-keycloak.yaml` again.) Now create the Secret, and wait: the
 operator notices the new Secret and **restarts Keycloak** — about 45 seconds
-later, measured — and the new Keycloak loads the root:
+later, measured — and the new Keycloak loads the root. Wait for exactly that: a
+Keycloak that **started after the Secret was created**. Its log line alone is no
+proof — a Keycloak started earlier names the same file, with whatever it held
+then. The wait gives up after five minutes, and then says the root is **not**
+trusted:
 
 <!-- output pending the from-scratch run.py --update pass: the wait loop's line is not yet measured as written -->
 ```console
 $ oc create secret generic ldap-root-ca -n keycloak --from-file=ldap-root-ca.pem
 secret/ldap-root-ca created
-$ until oc logs keycloak-0 -n keycloak 2>/dev/null | grep TruststoreBuilder | grep ldap-root-ca >/dev/null; do sleep 5; done; oc wait pod/keycloak-0 -n keycloak --for=condition=Ready --timeout=300s
+$ restarted=no; for i in $(seq 1 60); do [[ "$(oc get pod keycloak-0 -n keycloak -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')" > "$(oc get secret ldap-root-ca -n keycloak -o jsonpath='{.metadata.creationTimestamp}')" ]] && { restarted=yes; break; }; sleep 5; done; [ "$restarted" = yes ] && oc wait pod/keycloak-0 -n keycloak --for=condition=Ready --timeout=300s || { echo "no Keycloak started after the Secret, or it is not Ready - the root is NOT trusted"; false; }
 pod/keycloak-0 condition met
+$ echo "Secret created $(oc get secret ldap-root-ca -n keycloak -o jsonpath='{.metadata.creationTimestamp}'), Keycloak started $(oc get pod keycloak-0 -n keycloak -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}')"
+Secret created 2026-09-27T00:57:56Z, Keycloak started 2026-09-27T00:58:43Z
 $ oc get pod keycloak-0 -n keycloak -o jsonpath='{.spec.containers[0].volumeMounts[?(@.name=="truststore-secret-ldap-root-ca")].mountPath}{"\n"}'
 /opt/keycloak/conf/truststores/secret-ldap-root-ca
 $ oc logs keycloak-0 -n keycloak | grep TruststoreBuilder | grep -o 'Found the following truststore files.*'
 Found the following truststore files in the truststore paths [/var/run/secrets/kubernetes.io/serviceaccount/ca.crt, /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..data/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..2026_09_27_00_58_42.1229303664/ldap-root-ca.pem]
 ```
 
-**What just happened:** the operator mounted the Secret under
-`conf/truststores/`, and at start-up Keycloak added every file there to the
-certificates it trusts, beside the service account's `ca.crt` and
-`service-ca.crt` it lists first.
+**What just happened:** a Keycloak started 47 seconds after the Secret was
+created; the operator mounted the Secret under `conf/truststores/`, and at
+start-up that Keycloak added every file there to the certificates it trusts,
+beside the service account's `ca.crt` and `service-ca.crt` it lists first.
+`./run.sh deploy` waits the same way, with one refinement for a root that
+**changes**: it compares with the time the Secret's **data** was last written
+(its `managedFields`), not its creation.
 
 ### Step 7 — now it connects
 
@@ -401,7 +413,8 @@ conn=5990 op=0 BIND dn="uid=sarah.jones,ou=People,dc=ephico2real,dc=com" mech=SI
 **What just happened:** Keycloak opened a connection, **bound as the bind
 account**, looked sarah up — by her `entryUUID`, through the gate — and then
 bound **as sarah** on a second connection: that bind is the password check. Each
-connection carries one operation and is closed. Keycloak 26.7.0's release notes
+of the bind account's connections carries its bind and **one** search (`op=0`,
+`op=1`), then is closed. Keycloak 26.7.0's release notes
 list a fix, #50201, "LDAP user federation re-binds the service account on every
 operation since 26.6.0 (connection pool not reused)"; this Keycloak is
 `26.6.7.redhat-00003`, its connection pooling is on (the default, `true`), and
@@ -423,6 +436,9 @@ An import only **creates** a realm. Measured, one change at a time:
 | **delete the realm, then delete and re-apply the import** | a new Job creates `corp` from the file |
 
 So a change is: change the file, delete the realm, delete the import, apply.
+`./run.sh deploy` repairs the second row by itself: when realm `corp` is missing
+and its import is not, it deletes the import and applies it again — and it only
+reports success once the realm exists.
 Here with a token lifespan of 600 s instead of 300 — first applied the wrong way:
 
 <!-- output pending the from-scratch run.py --update pass: "accessTokenLifespan 600" is not yet measured as written -->
@@ -472,10 +488,11 @@ $ ./run.sh verify
   ✓ Secret ldap-root-ca holds the PKI owner's root
   ✓ Keycloak declares the truststore (module 16's resource)
   ✓ ...the operator mounts it into keycloak-0
-  ✓ ...and Keycloak loaded it when it started
+  ✓ ...and a Keycloak started after its last change loaded it
 
 2. realm corp and its LDAP provider
   ✓ realm import Done
+  ✓ realm corp exists
   ✓ provider: test connection
   ✓ provider: test authentication (the bind account)
 
@@ -487,7 +504,9 @@ $ ./run.sh verify
   ✓ lateef.o: no admin (not in keycloak-admin)
   ✓ bob.wilson (outside the gate): no token
   ✓ ...because Keycloak does not find him
-  ✓ only gate members are in corp (7 of the directory's 9)
+  ✓ charlie.brown (outside the gate): no token
+  ✓ ...because Keycloak does not find him
+  ✓ corp's users are exactly the gate's members in the directory
 
 4. the name and the CA must both match
   ✓ the in-cluster Service name: its certificate names it too
@@ -575,7 +594,8 @@ captures, zoomed, checked with `tooling/screenshot/verify.py`):
 
 ## Clean up
 
-Leave `corp` in place if you go on — module 17 is extended to accept its tokens.
+Leave `corp` in place if you go on: module 17's Gateway accepts only realm
+`tutorial`'s tokens today, and #8 adds `corp`'s.
 To remove what this module added — the realm, its import, the two Secrets —
 Keycloak restarts once more, trusting the directory no longer. Module 16's
 `Keycloak` keeps its `truststores` entry: it is optional.
@@ -586,7 +606,7 @@ $ ./admin.sh DELETE /admin/realms/corp
 $ oc delete keycloakrealmimport corp -n keycloak
 $ oc delete -f manifests/10-bind-secret.yaml
 $ oc delete secret ldap-root-ca -n keycloak
-$ rm -f chain-*.pem ldap-root-ca.pem
+$ rm -f chain-1.pem chain-2.pem ldap-root-ca.pem
 ```
 
 ## The shortcut

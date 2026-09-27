@@ -118,22 +118,24 @@ a { color: var(--remote); }
 <text x="478" y="280" fill="var(--muted)">bind as keycloak-bind-serviceid, search through the gate</text>
 
 <!-- failures, west -->
-<line x1="468" y1="290" x2="262" y2="290" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#f18g)"/>
-<rect x="20" y="236" width="240" height="152" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
-<text x="34" y="257" font-weight="600" fill="var(--gap)">refused — SSLHandshakeFailed</text>
-<text x="34" y="276">root not trusted yet:</text>
-<text x="34" y="293" fill="var(--muted)">PKIX path building failed</text>
-<text x="34" y="314">a name not in the certificate:</text>
-<text x="34" y="331" fill="var(--muted)">No subject alternative DNS name</text>
-<text x="34" y="352">outside the gate (bob.wilson):</text>
-<text x="34" y="369" fill="var(--muted)">invalid_grant · user_not_found</text>
+<line x1="468" y1="290" x2="292" y2="290" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#f18g)"/>
+<rect x="20" y="236" width="270" height="178" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="34" y="257" font-weight="600" fill="var(--gap)">refused — what each one returns</text>
+<text x="34" y="277">root not trusted yet:</text>
+<text x="34" y="293" fill="var(--muted)">SSLHandshakeFailed</text>
+<text x="34" y="309" fill="var(--muted)">log: PKIX path building failed</text>
+<text x="34" y="331">a name not in the certificate:</text>
+<text x="34" y="347" fill="var(--muted)">SSLHandshakeFailed</text>
+<text x="34" y="363" fill="var(--muted)">log: No subject alternative DNS name</text>
+<text x="34" y="385">outside the gate (bob.wilson):</text>
+<text x="34" y="401" fill="var(--muted)">invalid_grant · log: user_not_found</text>
 
 <rect x="300" y="302" width="380" height="56" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
 <text x="314" y="323" font-weight="600">OpenShift router :443 · Route ldaps</text>
 <text x="314" y="340" fill="var(--muted)">passthrough: routes by SNI, never decrypts</text>
 <line x1="470" y1="358" x2="470" y2="394" stroke="currentColor" stroke-width="1.3" marker-end="url(#f18)"/>
 
-<text x="20" y="416" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">NAMESPACE ldap-testing</text>
+<text x="20" y="446" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">NAMESPACE ldap-testing</text>
 <rect x="300" y="396" width="380" height="110" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
 <text x="314" y="417" font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600" fill="var(--remote)">OpenLDAP (slapd) :636</text>
 <text x="314" y="436">certificate by LDAP Enterprise Root CA, names</text>
