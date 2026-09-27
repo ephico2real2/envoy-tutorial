@@ -36,6 +36,7 @@ Every command runs as written from your laptop.
 | [`15-backend-tls-policy`](15-backend-tls-policy/README.md) | `BackendTLSPolicy`: TLS from the Gateway to a TLS-only backend — SNI, SAN check and CA, the wrong-name and wrong-CA failures, and what Envoy got | **done** |
 | [`16-keycloak`](16-keycloak/README.md) | a lab: the Red Hat build of Keycloak by its operator — manual InstallPlan approval, PostgreSQL, TLS, a realm with users, roles and clients, and reading a token | **done** |
 | [`17-keycloak-jwt`](17-keycloak-jwt/README.md) | Keycloak's tokens checked at the Gateway: remoteJWKS over TLS with a ReferenceGrant and BackendTLSPolicy, issuer and audience, role-based `/admin`, and failing closed | **done** |
+| [`18-keycloak-ldap`](18-keycloak-ldap/README.md) | a realm federated from the cluster's LDAP: the directory's CA fetched from the wire and checked out of band, `spec.truststores`, the LDAP provider and group mapper by `KeycloakRealmImport`, a login gate, an LDAP group as a role | **in review** |
 
 Module 12 was written first because it was the immediate need. The numbering is
 the reading order, not the build order.

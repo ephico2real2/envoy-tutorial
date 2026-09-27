@@ -6,3 +6,5 @@ __pycache__/
 PLAN.md
 # written by module 08 - a copy of the CA from a Secret, not a tutorial file
 */ca.crt
+# written by module 18 - the chain fetched from the directory, not tutorial files
+18-keycloak-ldap/*.pem

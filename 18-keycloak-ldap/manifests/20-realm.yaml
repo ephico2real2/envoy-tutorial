@@ -1,0 +1,162 @@
+# The realm "corp": its users and groups are not in this file - they come from
+# the directory, over LDAPS, when Keycloak needs them. This file says where the
+# directory is, who may log in, how LDAP attributes and groups become Keycloak
+# ones, and which applications may ask for tokens.
+#
+# Like module 16's realm, it is imported once by a Job, and an import only
+# CREATES a realm: applying a changed file to an existing corp changes nothing
+# (the README's "Changing corp" has the measured procedure).
+apiVersion: k8s.keycloak.org/v2beta1
+kind: KeycloakRealmImport
+metadata:
+  name: corp
+  namespace: keycloak
+spec:
+  keycloakCRName: keycloak
+  # ${LDAP_BIND_PASSWORD} below is replaced, in the import Job only, with this
+  # Secret's value (10-bind-secret.yaml). The realm file holds no credential.
+  placeholders:
+    LDAP_BIND_PASSWORD:
+      secret: { name: keycloak-ldap-bind, key: password }
+  realm:
+    realm: corp
+    enabled: true
+    accessTokenLifespan: 300
+    # The one role this realm grants. An LDAP group grants it (groups, below).
+    roles:
+      realm:
+      - { name: admin, description: administers the shop - granted by LDAP group app-ocp-rbac-ocp-keycloak-admin }
+    # Declared here so it can carry a role. When the group mapper meets the LDAP
+    # group of the same name it ADOPTS this group instead of creating a new one
+    # (measured on #7), so its members get admin: the directory decides who is
+    # in the group, this file decides what the group may do.
+    groups:
+    - name: app-ocp-rbac-ocp-keycloak-admin
+      path: /app-ocp-rbac-ocp-keycloak-admin
+      realmRoles: [admin]
+    clients:
+    # The same two clients as realm tutorial (module 16): shop-api is the
+    # audience; shop-cli asks for tokens with a person's name and password.
+    - clientId: shop-api
+      enabled: true
+      publicClient: false
+      bearerOnly: false
+      standardFlowEnabled: false
+      directAccessGrantsEnabled: false
+      serviceAccountsEnabled: false
+    # The password grant: LAB ONLY, as in module 16 - a real app sends the
+    # person to Keycloak's login page. OAuth 2.1 drops this grant.
+    - clientId: shop-cli
+      enabled: true
+      publicClient: true
+      standardFlowEnabled: false
+      directAccessGrantsEnabled: true
+      protocolMappers:
+      - name: audience-shop-api
+        protocol: openid-connect
+        protocolMapper: oidc-audience-mapper
+        config:
+          included.client.audience: shop-api
+          access.token.claim: "true"
+          id.token.claim: "false"
+    components:
+      org.keycloak.storage.UserStorageProvider:
+      - name: ldap
+        providerId: ldap
+        config:
+          enabled: ["true"]
+          vendor: ["other"]
+          # The directory's PUBLIC name, through the OpenShift router on 443
+          # (a passthrough Route, so slapd's own certificate reaches Keycloak).
+          # This is how an identity provider outside the cluster reaches it.
+          connectionUrl: ["ldaps://ldaps-ldap-testing.apps-crc.testing:443"]
+          # Check the certificate against Keycloak's truststore - which holds
+          # the directory's root because module 16's Keycloak resource mounts
+          # Secret ldap-root-ca. LDAP connections always check the host name.
+          useTruststoreSpi: ["always"]
+          authType: ["simple"]
+          bindDn: ["cn=keycloak-bind-serviceid,ou=TrustedApplications,dc=ephico2real,dc=com"]
+          bindCredential: ["${LDAP_BIND_PASSWORD}"]
+          # Where people are, and how to recognise one. searchScope 1 = one
+          # level: people sit directly under ou=People.
+          usersDn: ["ou=People,dc=ephico2real,dc=com"]
+          searchScope: ["1"]
+          userObjectClasses: ["inetOrgPerson"]
+          usernameLDAPAttribute: ["uid"]
+          rdnLDAPAttribute: ["uid"]
+          # entryUUID never changes, even if a person is renamed - so Keycloak
+          # keeps linking the same person to the same Keycloak user.
+          uuidLDAPAttribute: ["entryUUID"]
+          # The login gate. Only members of app-ssb-autobahnusers - the gate
+          # OpenShift's ldap-local login already uses - can log in to corp or
+          # appear in it; the filter applies to every user lookup and listing.
+          # Remove this line and every person under ou=People may log in (the
+          # README's "Two ways to decide who may log in").
+          customUserSearchFilter: ["(memberOf=cn=app-ssb-autobahnusers,ou=Groups,dc=ephico2real,dc=com)"]
+          # Keycloak never writes to the directory; a password change or a new
+          # user must happen there. Users found in LDAP are copied into
+          # Keycloak's database (import) and linked back to their LDAP entry.
+          editMode: ["READ_ONLY"]
+          importEnabled: ["true"]
+          syncRegistrations: ["false"]
+          # No periodic sync of every user: people are imported when they log
+          # in or are looked up.
+          fullSyncPeriod: ["-1"]
+          changedSyncPeriod: ["-1"]
+        subComponents:
+          org.keycloak.storage.ldap.mappers.LDAPStorageMapper:
+          # Explicit mappers from LDAP attributes to the Keycloak user. The
+          # user profile wants a user name, first and last name and email
+          # before it lets a person log in with a password.
+          - name: username
+            providerId: user-attribute-ldap-mapper
+            config:
+              ldap.attribute: ["uid"]
+              user.model.attribute: ["username"]
+              read.only: ["true"]
+              is.mandatory.in.ldap: ["true"]
+              always.read.value.from.ldap: ["false"]
+          - name: email
+            providerId: user-attribute-ldap-mapper
+            config:
+              ldap.attribute: ["mail"]
+              user.model.attribute: ["email"]
+              read.only: ["true"]
+              is.mandatory.in.ldap: ["false"]
+              always.read.value.from.ldap: ["false"]
+          - name: first name
+            providerId: user-attribute-ldap-mapper
+            config:
+              ldap.attribute: ["cn"]
+              user.model.attribute: ["firstName"]
+              read.only: ["true"]
+              is.mandatory.in.ldap: ["true"]
+              always.read.value.from.ldap: ["true"]
+          - name: last name
+            providerId: user-attribute-ldap-mapper
+            config:
+              ldap.attribute: ["sn"]
+              user.model.attribute: ["lastName"]
+              read.only: ["true"]
+              is.mandatory.in.ldap: ["true"]
+              always.read.value.from.ldap: ["true"]
+          # LDAP groups become Keycloak groups - only the four ocp RBAC
+          # groups (the filter), flat (no nesting), read from each group's
+          # member attribute: this directory keeps memberOf only for
+          # groupOfUniqueNames, so it cannot say which groupOfNames a person
+          # is in (measured on #7).
+          - name: groups
+            providerId: group-ldap-mapper
+            config:
+              groups.dn: ["ou=Groups,dc=ephico2real,dc=com"]
+              group.name.ldap.attribute: ["cn"]
+              group.object.classes: ["groupOfNames"]
+              groups.ldap.filter: ["(cn=app-ocp-rbac-ocp-*)"]
+              preserve.group.inheritance: ["false"]
+              membership.ldap.attribute: ["member"]
+              membership.attribute.type: ["DN"]
+              membership.user.ldap.attribute: ["uid"]
+              user.roles.retrieve.strategy: ["LOAD_GROUPS_BY_MEMBER_ATTRIBUTE"]
+              mode: ["READ_ONLY"]
+              ignore.missing.groups: ["false"]
+              drop.non.existing.groups.during.sync: ["false"]
