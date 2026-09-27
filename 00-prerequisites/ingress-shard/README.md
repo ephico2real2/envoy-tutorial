@@ -43,10 +43,11 @@ CRC's network proxy.
 - You are a cluster admin. This adds an `IngressController`, a MetalLB pool and
   a certificate in `openshift-ingress`, and changes the **default**
   IngressController (step 5).
-- **Step 5 takes every Route down for about 30 seconds** on a single-node
-  cluster: the console, OAuth logins, Keycloak, every app. Pick a moment when
-  nobody depends on them. `./run.sh deploy` does the same, and so does the
-  clean-up when it reverses it.
+- **Step 5 takes every Route down for half a minute to a minute and a half** on a
+  single-node cluster: the console, OAuth logins, Keycloak, every app. Pick a
+  moment when nobody depends on them. `./run.sh deploy` does the same the first
+  time. The clean-up does not undo step 5, on purpose ([Clean up](#clean-up)
+  says why).
 - **OpenSSL 3** on your laptop (`brew install openssl`), as in module 18.
 - Work from this folder: `cd 00-prerequisites/ingress-shard`.
 - It uses the namespace **`ingress-shard`** for its canary Route and takes about
@@ -161,8 +162,11 @@ $ oc get routes -A -l ingress-shard --no-headers | wc -l
 >   them. Until the new pod is ready, **no Route answers**: console, OAuth,
 >   Keycloak, every app.
 > - **Measured on CRC** (2026-09-27, probing every second): console and Keycloak
->   answered `000` from 16:29:52 to 16:30:23 UTC, about **31 seconds**.
-> - **The same happens again** when the clean-up removes the selector.
+>   answered `000` from 16:29:52 to 16:30:23 UTC, about **31 seconds**. A later
+>   rollout of the same router was down **98 seconds** (16:38:08–16:39:46): the
+>   new pod waited 47 s to be scheduled (`FailedScheduling … didn't have free
+>   ports`) until the old one let go of 80 and 443.
+> - **It happens once.** The clean-up leaves the selector in place (below).
 
 The selector, and a wait for the new router pod. The operator passes the
 selector to the router as its `ROUTE_LABELS` variable, so the wait watches for
@@ -366,6 +370,7 @@ $ ./run.sh verify
 | You see | Why | Fix |
 |---|---|---|
 | console, OAuth, every Route answers `000` or refuses connections for about half a minute | the default router is rolling out after a change to its IngressController: step 5, `./run.sh deploy` the first time, or the clean-up | wait: `oc rollout status deploy/router-default -n openshift-ingress` |
+| after someone removes the default router's `routeSelector`, every Route shows no `Admitted` status for minutes, `kube-apiserver` rolls out new revisions, and `oc get routes` fails with `the server doesn't have a resource type "routes"` | a missing selector is read as "select nothing" when the operator clears status ([Clean up](#clean-up)) | wait: the router re-admits every Route once its new pod runs, and the API servers settle (about four minutes, measured). Don't remove the field. To reset it, set an empty selector `{}`, which the same code reads as "every Route". That is from the source, not measured here |
 | `IngressController default already has routeSelector … - left alone` from `./run.sh deploy` | someone gave the default router a selector of their own; `run.sh` does not merge selectors | decide with whoever set it; step 5's selector must be combined with theirs by hand |
 | a Route that should be on the default router stops answering after step 5 | it carries an `ingress-shard` label | remove the label, or move the Route to the shard's domain on purpose |
 | `admission webhook "ipaddresspoolvalidationwebhook.metallb.io" denied the request: CIDR … overlaps with already defined CIDR` | the address is in another pool (measured with `.120`) | pick an address outside every pool |
@@ -386,7 +391,7 @@ and no resources-finalizer.
 | What | Made by | Kept by | Why |
 |---|---|---|---|
 | pool and L2 advertisement, the certificate, `IngressController metallb`, namespace `ingress-shard`, Route `canary`, the echo app | `manifests/`, `../../_shared/echo-app.yaml` | Argo CD | manifests |
-| **the default router's `routeSelector`** (step 5) | `./run.sh deploy` | nobody: `run.sh` only | the default IngressController is the platform's, not this lab's. An Application that owned it could prune it, which would delete the router every Route depends on, and would put its own copy of the object back over any other change to it. `run.sh` adds the one field, only if the router has no selector yet, and `clean` removes it only if it is still exactly this one. `./run.sh verify` checks that it is there |
+| **the default router's `routeSelector`** (step 5) | `./run.sh deploy` | nobody: `run.sh` only | the default IngressController is the platform's, not this lab's. An Application that owned it could prune it, which would delete the router every Route depends on, and would put its own copy of the object back over any other change to it. `run.sh` adds the one field, only if the router has no selector yet; `clean` leaves it ([Clean up](#clean-up) says why). `./run.sh verify` checks that it is there |
 | Deployment and Service `router-metallb` | the ingress operator | the ingress operator | made from the IngressController |
 | the laptop's forward `127.0.0.1:20443 → 192.168.127.130:443` | `./run.sh deploy` | nobody: `run.sh` only | it lives in CRC's gvproxy, not in the cluster, and ends when the CRC VM stops. After `crc start`, run `./run.sh deploy` again |
 | `/etc/hosts` lines for the Route hosts | CRC's `routes-controller` | CRC | CRC's own |
@@ -398,11 +403,28 @@ work as in module 16's [Permanent lab](../../16-keycloak/README.md#permanent-lab
 ## Clean up
 
 This is a deliberate reset only: module 20 needs the shard. Pause Argo CD first,
-then remove what this page added, in reverse. The canary goes **before** the
-default router's selector does, so the default router never admits it.
+then remove what this page added, in reverse, **except the default router's
+selector from step 5**.
 
-> **Outage, again.** Removing the selector rolls out `router-default` the same way
-> step 5 did: expect every Route to be down for about 30 seconds.
+> **Why the selector stays.** With no Route labelled `ingress-shard` it changes
+> nothing. Removing it is what is unsafe:
+>
+> - When a router's selector changes, the ingress operator clears the `Admitted`
+>   status of every Route the new selector no longer picks
+>   (`clearRoutesNotAdmittedByIngress` in cluster-ingress-operator's
+>   `router_status.go`).
+> - It builds that selector with `LabelSelectorAsSelector`, which turns a
+>   **missing** selector into `labels.Nothing()`: it matches no Route
+>   (apimachinery `helpers.go`). The router itself treats "no selector" as "every
+>   Route"; only this clean-up step reads it the other way.
+> - So removing the field clears every Route on the default router. **Measured on
+>   CRC (2026-09-27):** the operator logged `Routes Status Cleared: 21` of 21. The
+>   image registry's Route lost its hostname, and that one change rolled out
+>   `kube-apiserver` twice (revisions 9 and 10: away, and back) and restarted
+>   `openshift-apiserver` twice. For about four minutes, `oc get routes` answered
+>   `the server doesn't have a resource type "routes"`.
+> - Adding the selector in step 5 cleared nothing (`Routes Status Cleared: 0`):
+>   every existing Route still matches it.
 
 <!-- walkthrough: skip -->
 ```console
@@ -414,14 +436,11 @@ $ oc wait svc/router-metallb -n openshift-ingress --for=delete --timeout=120s
 $ oc delete -f manifests/20-certificate.yaml
 $ oc delete secret router-metallb-default-cert -n openshift-ingress
 $ oc delete -f manifests/10-pool.yaml
-$ oc patch ingresscontroller default -n openshift-ingress-operator --type=json -p '[{"op":"remove","path":"/spec/routeSelector"}]'
-$ for i in $(seq 1 60); do [ -z "$(oc get deploy router-default -n openshift-ingress -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROUTE_LABELS")].value}')" ] && break; sleep 2; done; oc rollout status deploy/router-default -n openshift-ingress --timeout=300s
 $ rm -f enterprise-root-ca.pem
 ```
 
-`./run.sh clean` does all of this. It removes the selector only when it is still
-exactly step 5's, and leaves one set by someone else. `mongot-pool`,
-`mongot-l2` and CRC's own forwards are not touched.
+`./run.sh clean` does all of this. The default router, `mongot-pool`,
+`mongot-l2` and CRC's own forwards are not touched, so there is no outage.
 
 ## The shortcut
 
@@ -436,8 +455,8 @@ exactly step 5's, and leaves one set by someone else. `mongot-pool`,
   - the laptop's way in;
   - `503` on `:443`;
   - the default router's Routes.
-- `./run.sh clean` is the clean-up, with the Application paused first, and step
-  5's outage once more.
+- `./run.sh clean` is the clean-up, with the Application paused first. It leaves
+  the default router's selector, so it causes no outage.
 
 ## References
 

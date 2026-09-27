@@ -97,21 +97,6 @@ default_exclude() {
   default_rollout "$before"
   ok "the default router ignores Routes labelled ingress-shard (router-default rolled out)"
 }
-default_include() {
-  local now want before
-  now=$(default_selector) || exit 1
-  want=$(python3 -c 'import json, sys; print(json.dumps(json.loads(sys.argv[1]), sort_keys=True))' "$DEFAULT_SELECTOR")
-  [ -n "$now" ] || return 0
-  [ "$now" = "$want" ] || { bad "IngressController default has routeSelector $now, not this lab's - left alone"; exit 1; }
-  before=$($KUBE get deploy router-default -n openshift-ingress -o jsonpath='{.metadata.generation}') \
-    || { bad "cannot read deploy/router-default"; exit 1; }
-  $KUBE patch ingresscontroller default -n openshift-ingress-operator --type=json \
-    -p '[{"op":"remove","path":"/spec/routeSelector"}]' >/dev/null \
-    || { bad "cannot remove the default router's routeSelector"; exit 1; }
-  default_rollout "$before"
-  ok "the default router admits every Route again (router-default rolled out)"
-}
-
 # svc_address - the shard Service's load-balancer address, or nothing.
 svc_address() {
   $KUBE get svc router-metallb -n openshift-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null
@@ -234,8 +219,15 @@ clean() {
   $KUBE delete -f manifests/20-certificate.yaml --ignore-not-found >/dev/null 2>&1
   $KUBE delete secret router-metallb-default-cert -n openshift-ingress --ignore-not-found >/dev/null 2>&1
   $KUBE delete -f manifests/10-pool.yaml --ignore-not-found >/dev/null 2>&1
-  default_include
-  ok "ingress shard removed; mongot-pool and CRC's own forwards are untouched"
+  # The default router's selector stays: with no Route labelled ingress-shard it
+  # changes nothing. Removing it is not safe - the ingress operator reads a
+  # missing routeSelector as "select nothing" when it clears status
+  # (cluster-ingress-operator router_status.go, clearRoutesNotAdmittedByIngress;
+  # apimachinery LabelSelectorAsSelector(nil) = labels.Nothing()), so it clears
+  # the Admitted status of every Route on the default router. Measured
+  # 2026-09-27: 21 of 21 cleared; the image registry's route lost its hostname
+  # and kube-apiserver rolled out twice (revisions 9 and 10).
+  ok "ingress shard removed; the default router keeps its selector (a no-op now); mongot-pool and CRC's own forwards are untouched"
 }
 
 case "${1:-deploy}" in
