@@ -50,6 +50,68 @@ forward_remove() {
   ok "forward $LOCAL removed"
 }
 
+# The default router admits every Route unless it has a selector, so without one
+# a shard Route is served twice: by the shard on its MetalLB address, and by the
+# default router on CRC's :443. This selector - the operator's choice - makes the
+# default router ignore Routes labelled ingress-shard; none of the 21 Routes had
+# the label when it was added. It is set here, not by Argo CD: an Application
+# that owned the default IngressController could prune it.
+DEFAULT_SELECTOR='{"matchExpressions":[{"key":"ingress-shard","operator":"DoesNotExist"}]}'
+
+# default_selector - the default IngressController's routeSelector as canonical
+# JSON ("" when it has none). Fatal when it cannot be read.
+default_selector() {
+  local raw
+  raw=$($KUBE get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.spec.routeSelector}') \
+    || { bad "cannot read IngressController default" >&2; exit 1; }
+  [ -n "$raw" ] || return 0
+  python3 -c 'import json, sys; print(json.dumps(json.loads(sys.argv[1]), sort_keys=True))' "$raw"
+}
+# default_rollout <what> - after a change to the default IngressController: wait
+# until the ingress operator has rewritten router-default (its generation moves
+# past $1) and the new pod is serving. With one replica on HostNetwork the old pod
+# stops before the new one binds 80/443: every Route is down meanwhile.
+default_rollout() {
+  local before=$1 attempt gen
+  for attempt in $(seq 0 60); do
+    gen=$($KUBE get deploy router-default -n openshift-ingress -o jsonpath='{.metadata.generation}') \
+      || { bad "cannot read deploy/router-default"; exit 1; }
+    [ "$gen" -gt "$before" ] && break
+    [ "$attempt" -eq 60 ] || sleep 2
+  done
+  [ "$gen" -gt "$before" ] || { bad "the ingress operator did not update router-default in 2 minutes"; exit 1; }
+  $KUBE rollout status deploy/router-default -n openshift-ingress --timeout=300s >/dev/null \
+    || { bad "router-default did not roll out - oc get pods -n openshift-ingress"; exit 1; }
+}
+default_exclude() {
+  local now want before
+  now=$(default_selector) || exit 1
+  want=$(python3 -c 'import json, sys; print(json.dumps(json.loads(sys.argv[1]), sort_keys=True))' "$DEFAULT_SELECTOR")
+  if [ "$now" = "$want" ]; then ok "the default router already ignores Routes labelled ingress-shard"; return 0; fi
+  [ -z "$now" ] || { bad "IngressController default already has routeSelector $now - left alone"; exit 1; }
+  before=$($KUBE get deploy router-default -n openshift-ingress -o jsonpath='{.metadata.generation}') \
+    || { bad "cannot read deploy/router-default"; exit 1; }
+  $KUBE patch ingresscontroller default -n openshift-ingress-operator --type=merge \
+    -p "{\"spec\":{\"routeSelector\":$DEFAULT_SELECTOR}}" >/dev/null \
+    || { bad "cannot set the default router's routeSelector"; exit 1; }
+  default_rollout "$before"
+  ok "the default router ignores Routes labelled ingress-shard (router-default rolled out)"
+}
+default_include() {
+  local now want before
+  now=$(default_selector) || exit 1
+  want=$(python3 -c 'import json, sys; print(json.dumps(json.loads(sys.argv[1]), sort_keys=True))' "$DEFAULT_SELECTOR")
+  [ -n "$now" ] || return 0
+  [ "$now" = "$want" ] || { bad "IngressController default has routeSelector $now, not this lab's - left alone"; exit 1; }
+  before=$($KUBE get deploy router-default -n openshift-ingress -o jsonpath='{.metadata.generation}') \
+    || { bad "cannot read deploy/router-default"; exit 1; }
+  $KUBE patch ingresscontroller default -n openshift-ingress-operator --type=json \
+    -p '[{"op":"remove","path":"/spec/routeSelector"}]' >/dev/null \
+    || { bad "cannot remove the default router's routeSelector"; exit 1; }
+  default_rollout "$before"
+  ok "the default router admits every Route again (router-default rolled out)"
+}
+
 # svc_address - the shard Service's load-balancer address, or nothing.
 svc_address() {
   $KUBE get svc router-metallb -n openshift-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null
@@ -60,6 +122,8 @@ deploy() {
   $KUBE apply -f manifests/10-pool.yaml -f manifests/20-certificate.yaml >/dev/null || { bad "apply failed"; exit 1; }
   $KUBE wait certificate/router-metallb-default -n openshift-ingress --for=condition=Ready --timeout=120s >/dev/null \
     || { bad "certificate router-metallb-default is not Ready - oc describe certificate router-metallb-default -n openshift-ingress"; exit 1; }
+  # Before the canary exists, so the default router never admits it.
+  default_exclude
   $KUBE apply -f manifests/30-ingresscontroller.yaml -f manifests/40-canary.yaml >/dev/null || { bad "apply failed"; exit 1; }
   $KUBE apply -n "$NS" -f ../../_shared/echo-app.yaml >/dev/null || { bad "apply failed"; exit 1; }
   # Available needs the router's Deployment and LoadBalancerReady: the Service has
@@ -81,7 +145,8 @@ routers_of() {
 }
 # routes_not <check> - every Route, "<namespace>/<name>", that fails <check>:
 #   shard-label    admitted by the shard, but not labelled ingress-shard=metallb
-#   default        not admitted by the default router
+#   default        not labelled, and not admitted by the default router
+#   default-label  labelled, and admitted by the default router
 # Empty when every Route passes. Fatal when the Routes cannot be read.
 routes_not() {
   local json
@@ -94,7 +159,8 @@ for r in json.load(sys.stdin)["items"]:
                 for c in i.get("conditions", []) if c["type"] == "Admitted" and c["status"] == "True"}
     labelled = r["metadata"].get("labels", {}).get("ingress-shard") == "metallb"
     if (check == "shard-label" and "metallb" in admitted and not labelled) or \
-       (check == "default" and "default" not in admitted):
+       (check == "default" and not labelled and "default" not in admitted) or \
+       (check == "default-label" and labelled and "default" in admitted):
         print(r["metadata"]["namespace"] + "/" + r["metadata"]["name"])' "$1" <<<"$json" | sort | paste -sd' ' -
 }
 # cert_subject <host:port> <sni> - the subject of the certificate served there, as
@@ -119,10 +185,13 @@ verify() {
     "$($KUBE get svc -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {.metadata.annotations.metallb\.io/ip-allocated-from-pool}{"\n"}{end}' | awk '$2 == "ingress-shard-pool" { print $1 }' | paste -sd' ' -)"
 
   say "2. which router admits what"
-  # The default router has no selector: it admits the canary too (README, step 5).
-  assert "canary is admitted by the shard and by the default router" "default=True metallb=True" "$(routers_of canary "$NS")"
+  assert "the default router ignores Routes labelled ingress-shard" \
+    "$(python3 -c 'import json, sys; print(json.dumps(json.loads(sys.argv[1]), sort_keys=True))' "$DEFAULT_SELECTOR")" \
+    "$(default_selector)"
+  assert "canary is admitted by the shard alone" "metallb=True" "$(routers_of canary "$NS")"
   assert "the shard admits only Routes labelled ingress-shard=metallb" "" "$(routes_not shard-label)"
-  assert "every Route is still admitted by the default router" "" "$(routes_not default)"
+  assert "the default router admits no Route labelled ingress-shard" "" "$(routes_not default-label)"
+  assert "every other Route is still admitted by the default router" "" "$(routes_not default)"
 
   say "3. from this laptop"
   if [ -S "$SOCK" ]; then
@@ -138,13 +207,10 @@ verify() {
   assert_contains "https://$HOST:${LOCAL##*:}/ -> 200, the certificate checked against enterprise-ca" " -> 200" "$R"
   assert_contains "...answered by the echo app behind the canary Route" "\"host\": \"$HOST:${LOCAL##*:}\"" "$R"
   assert "...with the shard's certificate" "subject=CN=*.apps-metallb.crc.testing" "$(cert_subject "$LOCAL" "$HOST")"
-  # The leak, accepted and documented: CRC's :443 is the default router, which
-  # has no selector and so serves the canary too - with its own certificate, for
-  # another domain (hence -k). A host no router admits gets 503 there (measured).
-  R=$(curl -sk --max-time 10 --resolve "$HOST:443:127.0.0.1" -w ' -> %{http_code}' "https://$HOST/" 2>&1)
-  assert_contains "on :443 the default router serves the canary too" " -> 200" "$R"
-  assert_contains "...the same echo app"                              "\"host\": \"$HOST\"" "$R"
-  assert "...with its own certificate, not the shard's" "subject=CN=*.apps-crc.testing" "$(cert_subject 127.0.0.1:443 "$HOST")"
+  # CRC's :443 is the default router, which ignores the canary: it answers a host
+  # it does not admit with 503 (-k: its certificate is for another domain).
+  assert "on :443 the default router does not serve the canary" "503" \
+    "$(curl -sk -o /dev/null --max-time 10 --resolve "$HOST:443:127.0.0.1" -w '%{http_code}' "https://$HOST/")"
 
   say "4. the default router's Routes still answer from this laptop"
   assert "console"  "200" "$(curl -sk -o /dev/null --max-time 10 -w '%{http_code}' https://console-openshift-console.apps-crc.testing/)"
@@ -168,7 +234,8 @@ clean() {
   $KUBE delete -f manifests/20-certificate.yaml --ignore-not-found >/dev/null 2>&1
   $KUBE delete secret router-metallb-default-cert -n openshift-ingress --ignore-not-found >/dev/null 2>&1
   $KUBE delete -f manifests/10-pool.yaml --ignore-not-found >/dev/null 2>&1
-  ok "ingress shard removed; the default router, mongot-pool and CRC's own forwards are untouched"
+  default_include
+  ok "ingress shard removed; mongot-pool and CRC's own forwards are untouched"
 }
 
 case "${1:-deploy}" in
