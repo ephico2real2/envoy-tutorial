@@ -115,14 +115,23 @@ clean() {
   app_pause 16-keycloak 17-keycloak-jwt 18-keycloak-ldap
   warn=$($KUBE get securitypolicy -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {end}' 2>/dev/null)
   [ -n "$warn" ] && echo "  note: SecurityPolicies that may use this Keycloak: $warn"
-  pv=$($KUBE get pvc data-postgres-0 -n "$NS" -o jsonpath='{.spec.volumeName}' 2>/dev/null)
+  if ! pv=$($KUBE get pvc data-postgres-0 -n "$NS" -o jsonpath='{.spec.volumeName}' 2>&1); then
+    case "$pv" in
+      (*NotFound*) pv='' ;;
+      (*) bad "cannot read claim data-postgres-0 - nothing deleted: $pv"; return 1 ;;
+    esac
+  fi
   if [ -n "$wipe" ]; then
     echo "  --delete-data: deleting namespace $NS - the database (realms tutorial and corp, their users and"
     echo "  sessions), claim data-postgres-0${pv:+ and volume $pv}, and what modules 17 and 18 keep in $NS"
     # The volume outlives its claim here: CRC's StorageClass has reclaimPolicy
     # Retain, and an earlier clean left a Released PV - and the data on the
     # node's disk - behind (measured). Mark it Delete while the claim exists.
-    [ -n "$pv" ] && $KUBE patch pv "$pv" --type=merge -p '{"spec":{"persistentVolumeReclaimPolicy":"Delete"}}' >/dev/null
+    if [ -n "$pv" ] && ! $KUBE patch pv "$pv" --type=merge \
+         -p '{"spec":{"persistentVolumeReclaimPolicy":"Delete"}}' >/dev/null; then
+      bad "cannot mark volume $pv for deletion - nothing deleted"
+      return 1
+    fi
   fi
   $KUBE delete keycloakrealmimport tutorial -n "$NS" --ignore-not-found >/dev/null 2>&1
   $KUBE delete keycloak keycloak -n "$NS" --ignore-not-found --wait=true >/dev/null 2>&1
@@ -130,8 +139,11 @@ clean() {
   $KUBE delete subscription rhbk-operator -n "$NS" --ignore-not-found >/dev/null 2>&1
   [ -n "$CSV" ] && $KUBE delete csv "$CSV" -n "$NS" --ignore-not-found >/dev/null 2>&1
   if [ -n "$wipe" ]; then
-    $KUBE delete ns "$NS" --wait=false >/dev/null 2>&1
-    ok "namespace $NS deleting, with the operator, the database and its volume${pv:+ $pv}"
+    if ! $KUBE delete ns "$NS" --wait=false >/dev/null 2>&1; then
+      bad "namespace $NS could not be deleted; the full wipe did not complete"
+      return 1
+    fi
+    ok "namespace $NS deletion requested; it removes the database and claim data-postgres-0${pv:+, and volume $pv}"
   else
     # Everything else this module applied, but not the Namespace (10-operator.yaml
     # holds it). Deleting the StatefulSet leaves its claim: a StatefulSet's claims
