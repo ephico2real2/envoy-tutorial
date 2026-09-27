@@ -246,8 +246,32 @@ remove() {
   if [ -n "$out" ]; then ok "$out"; else ok "$1/$2 already absent"; fi
 }
 
+# keycloak_restarted <uid of keycloak-0 before> - wait, at most five minutes each,
+# for the operator to replace keycloak-0 and for the new Keycloak to be Ready.
+# Removing a Secret that Keycloak mounts restarts it - measured: the pod was
+# stopped 5 s after the delete. Until the old pod goes, the Keycloak resource can
+# still say Ready, so wait for a new pod first. A timeout is a failure.
+keycloak_restarted() {
+  local now=
+  for _ in $(seq 1 60); do
+    now=$($KUBE get pod keycloak-0 -n "$NS" -o jsonpath='{.metadata.uid}' 2>/dev/null)
+    [ -n "$now" ] && [ "$now" != "$1" ] && break
+    sleep 5
+  done
+  if [ -z "$now" ] || [ "$now" = "$1" ]; then
+    bad "keycloak-0 was not replaced within 5 minutes of removing Secret ldap-root-ca - oc get pod keycloak-0 -n $NS"
+    return 1
+  fi
+  if ! $KUBE wait pod/keycloak-0 -n "$NS" --for=condition=Ready --timeout=300s >/dev/null 2>&1 \
+     || ! $KUBE wait keycloak/keycloak -n "$NS" --for=condition=Ready --timeout=300s >/dev/null 2>&1; then
+    bad "the restarted Keycloak was not Ready within 5 minutes - oc get keycloak keycloak -n $NS -o yaml"
+    return 1
+  fi
+  ok "Keycloak restarted and is Ready: the operator replaced keycloak-0 because its optional truststore Secret ldap-root-ca was removed"
+}
+
 clean() {
-  local out failed=0
+  local out failed=0 pod root
   # The realm first: deleting the KeycloakRealmImport leaves the realm it made. If
   # the realm cannot be removed, stop - its import and Secrets stay, for a retry.
   out=$(./admin.sh DELETE /admin/realms/corp 2>&1) \
@@ -255,11 +279,18 @@ clean() {
   ok "realm corp: $out"
   remove keycloakrealmimport corp || failed=1
   remove secret keycloak-ldap-bind || failed=1
-  # Module 16's truststore stays declared (optional: true); without the Secret the
-  # operator restarts Keycloak once more, trusting the directory no longer.
-  remove secret ldap-root-ca || failed=1
+  # Module 16's truststore stays declared (optional: true). Removing the Secret it
+  # names restarts Keycloak, so module 16's Keycloak is "as it was" only once the
+  # restarted one is Ready - wait for it, unless the Secret was already gone.
+  root=$($KUBE get secret ldap-root-ca -n "$NS" -o name 2>/dev/null)
+  pod=$($KUBE get pod keycloak-0 -n "$NS" -o jsonpath='{.metadata.uid}' 2>/dev/null)
+  if remove secret ldap-root-ca; then
+    [ -z "$root" ] || keycloak_restarted "$pod" || failed=1
+  else
+    failed=1
+  fi
   [ "$failed" -eq 0 ] || return 1
-  ok "module 16's Keycloak and realm tutorial are left as they were"
+  ok "module 16's Keycloak resource and realm tutorial are unchanged"
 }
 
 case "${1:-deploy}" in

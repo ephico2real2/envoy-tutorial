@@ -53,7 +53,7 @@ Everything is declared in two Kubernetes resources — module 16's `Keycloak`, a
 
 ```console
 $ oc get keycloak keycloak -n keycloak -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'
-True
+False
 $ oc get route ldaps -n ldap-testing -o jsonpath='{.spec.host}  {.spec.tls.termination}  {.spec.port.targetPort}{"\n"}'
 ldaps-ldap-testing.apps-crc.testing  passthrough  ldaps
 ```
@@ -202,19 +202,18 @@ the directory the file links to now. The log line alone is no proof: a Keycloak
 started before the change names the same file, in an older directory. The wait
 gives up after five minutes, and then says the root is **not** trusted:
 
-<!-- output pending the from-scratch run.py --update pass: the wait loop's line is not yet measured as written -->
 ```console
 $ oc create secret generic ldap-root-ca -n keycloak --from-file=ldap-root-ca.pem
 secret/ldap-root-ca created
 $ loaded=no; for i in $(seq 1 60); do secret=$(oc get secret ldap-root-ca -n keycloak -o jsonpath='{.data.ldap-root-ca\.pem}' | base64 -d | openssl x509 -noout -fingerprint -sha256 2>/dev/null); mounted=$(oc exec -n keycloak keycloak-0 -- cat /opt/keycloak/conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null); logged=$(oc logs keycloak-0 -n keycloak 2>/dev/null | grep TruststoreBuilder | grep -o 'secret-ldap-root-ca/\.\.20[^/]*' | tail -n 1); linked=$(oc exec -n keycloak keycloak-0 -- readlink -f /opt/keycloak/conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem 2>/dev/null | grep -o 'secret-ldap-root-ca/\.\.20[^/]*'); [ -n "$secret" ] && [ "$secret" = "$mounted" ] && [ -n "$logged" ] && [ "$logged" = "$linked" ] && { loaded=yes; break; }; sleep 5; done; [ "$loaded" = yes ] && oc wait pod/keycloak-0 -n keycloak --for=condition=Ready --timeout=300s || { echo "Keycloak has not loaded the Secret's root, or is not Ready - the root is NOT trusted"; false; }
 pod/keycloak-0 condition met
 $ oc logs keycloak-0 -n keycloak | grep TruststoreBuilder | grep -o 'secret-ldap-root-ca/\.\.20[^/]*' | tail -n 1; oc exec -n keycloak keycloak-0 -- readlink -f /opt/keycloak/conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem
-secret-ldap-root-ca/..2026_09_27_00_58_42.1229303664
-/opt/keycloak/conf/truststores/secret-ldap-root-ca/..2026_09_27_00_58_42.1229303664/ldap-root-ca.pem
+secret-ldap-root-ca/..2026_09_27_02_48_13.2241723203
+/opt/keycloak/conf/truststores/secret-ldap-root-ca/..2026_09_27_02_48_13.2241723203/ldap-root-ca.pem
 $ oc get pod keycloak-0 -n keycloak -o jsonpath='{.spec.containers[0].volumeMounts[?(@.name=="truststore-secret-ldap-root-ca")].mountPath}{"\n"}'
 /opt/keycloak/conf/truststores/secret-ldap-root-ca
 $ oc logs keycloak-0 -n keycloak | grep TruststoreBuilder | grep -o 'Found the following truststore files.*'
-Found the following truststore files in the truststore paths [/var/run/secrets/kubernetes.io/serviceaccount/ca.crt, /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..data/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..2026_09_27_00_58_42.1229303664/ldap-root-ca.pem]
+Found the following truststore files in the truststore paths [/var/run/secrets/kubernetes.io/serviceaccount/ca.crt, /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..data/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..2026_09_27_02_48_13.2241723203/ldap-root-ca.pem]
 ```
 
 **What just happened:** the operator restarted Keycloak with the Secret mounted
@@ -410,9 +409,9 @@ out of that window):
 
 ```console
 $ sleep 2; T=$(date -u +%Y-%m-%dT%H:%M:%SZ); sleep 1; ./token.sh sarah.jones >/dev/null; sleep 2; oc logs -n ldap-testing deploy/openldap-server -c openldap --since-time="$T" | grep -E 'BIND dn="(cn=keycloak-bind-serviceid|uid=sarah.jones)[^"]*" mech|SRCH base="ou=People|SRCH base="ou=Groups' | sed -E 's/^[0-9a-f]+ //; s/(filter=".{60}).*/\1.../'
-conn=5989 op=0 BIND dn="cn=keycloak-bind-serviceid,ou=TrustedApplications,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
-conn=5989 op=1 SRCH base="ou=People,dc=ephico2real,dc=com" scope=1 deref=3 filter="(&(entryUUID=499e85a4-480f-1041-84a7-371855b7826b)(memberOf=...
-conn=5990 op=0 BIND dn="uid=sarah.jones,ou=People,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
+conn=7780 op=0 BIND dn="cn=keycloak-bind-serviceid,ou=TrustedApplications,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
+conn=7780 op=1 SRCH base="ou=People,dc=ephico2real,dc=com" scope=1 deref=3 filter="(&(entryUUID=499e85a4-480f-1041-84a7-371855b7826b)(memberOf=...
+conn=7781 op=0 BIND dn="uid=sarah.jones,ou=People,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
 ```
 
 **What just happened:** Keycloak opened a connection, **bound as the bind
@@ -446,7 +445,6 @@ and its import is not, it deletes the import and applies it again — and it onl
 reports success once the realm exists.
 Here with a token lifespan of 600 s instead of 300 — first applied the wrong way:
 
-<!-- output pending the from-scratch run.py --update pass: "accessTokenLifespan 600" is not yet measured as written -->
 ```console
 $ sed 's/accessTokenLifespan: 300/accessTokenLifespan: 600/' manifests/20-realm.yaml | oc apply -f -
 keycloakrealmimport.k8s.keycloak.org/corp configured
@@ -601,17 +599,21 @@ captures, zoomed, checked with `tooling/screenshot/verify.py`):
 
 Leave `corp` in place if you go on: module 17's Gateway accepts only realm
 `tutorial`'s tokens today, and #8 adds `corp`'s.
-To remove what this module added — the realm, its import, the two Secrets —
-Keycloak restarts once more, trusting the directory no longer. Module 16's
-`Keycloak` keeps its `truststores` entry: it is optional.
+To remove what this module added — the realm, its import, the two Secrets.
+Module 16's `Keycloak` keeps its `truststores` entry: it is optional. But the
+Secret it names is gone, so the operator **restarts Keycloak** — measured: it
+stopped `keycloak-0` 5 seconds after the delete, and the new Keycloak trusts the
+directory no longer. Until the new one is Ready, Keycloak answers nobody, so wait
+for it: the last command below waits for a new pod, then for Ready — five minutes
+at most, each — as `./run.sh clean` does:
 
 <!-- walkthrough: skip -->
 ```console
 $ ./admin.sh DELETE /admin/realms/corp
 $ oc delete keycloakrealmimport corp -n keycloak
 $ oc delete -f manifests/10-bind-secret.yaml
-$ oc delete secret ldap-root-ca -n keycloak
 $ rm -f chain-1.pem chain-2.pem ldap-root-ca.pem
+$ old=$(oc get pod keycloak-0 -n keycloak -o jsonpath='{.metadata.uid}'); new=$old; oc delete secret ldap-root-ca -n keycloak && for i in $(seq 1 60); do new=$(oc get pod keycloak-0 -n keycloak -o jsonpath='{.metadata.uid}'); [ -n "$new" ] && [ "$new" != "$old" ] && break; sleep 5; done; [ -n "$new" ] && [ "$new" != "$old" ] && oc wait pod/keycloak-0 -n keycloak --for=condition=Ready --timeout=300s && oc wait keycloak/keycloak -n keycloak --for=condition=Ready --timeout=300s || { echo "Keycloak has not restarted and become Ready - oc get pod keycloak-0 -n keycloak"; false; }
 ```
 
 ## The shortcut
