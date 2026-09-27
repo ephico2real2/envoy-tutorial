@@ -1,0 +1,33 @@
+# A second router - a shard - beside the default one. The ingress operator
+# makes Deployment and Service router-metallb in openshift-ingress from it.
+#
+# The default IngressController is not changed: it keeps the console, OAuth,
+# Keycloak and every other Route on the node's ports 80 and 443 (HostNetwork).
+# This one is published as a LoadBalancer Service, which MetalLB gives
+# 192.168.127.130 (10-pool.yaml): its own address, so it needs no node port.
+apiVersion: operator.openshift.io/v1
+kind: IngressController
+metadata:
+  name: metallb
+  namespace: openshift-ingress-operator
+spec:
+  # Its own domain, not a subdomain of apps-crc.testing: inside the cluster
+  # *.apps-crc.testing resolves to the default router, *.apps-metallb.crc.testing
+  # to nothing. It ends in .crc.testing, which CRC writes into the laptop's
+  # /etc/hosts for every Route host (crc-org/routes-controller, admin-helper).
+  domain: apps-metallb.crc.testing
+  replicas: 1
+  endpointPublishingStrategy:
+    type: LoadBalancerService
+    loadBalancer:
+      scope: External
+      # No cloud DNS here: nothing for the operator to manage.
+      dnsManagementPolicy: Unmanaged
+  # A Route joins the shard by its own label, not by its namespace: module 20
+  # puts one Route here and nothing else of its namespace. The default router
+  # has no selector and admits these Routes too (the README, step 5).
+  routeSelector:
+    matchLabels:
+      ingress-shard: metallb
+  defaultCertificate:
+    name: router-metallb-default-cert

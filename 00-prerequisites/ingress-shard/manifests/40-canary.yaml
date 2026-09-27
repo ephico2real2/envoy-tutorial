@@ -1,0 +1,23 @@
+# The shard's canary: a Route on the shard, to the echo app
+# (../../../_shared/echo-app.yaml, applied into this namespace). ./run.sh verify
+# calls it from the laptop, through the forward to 192.168.127.130.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-shard
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: canary
+  namespace: ingress-shard
+  labels:
+    # What the shard's routeSelector matches (30-ingresscontroller.yaml).
+    ingress-shard: metallb
+spec:
+  host: canary.apps-metallb.crc.testing
+  to: { kind: Service, name: echo }
+  port: { targetPort: http }
+  # Edge: the router ends TLS with its default certificate (20-certificate.yaml)
+  # and speaks plain HTTP to the app.
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }

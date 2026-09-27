@@ -8,3 +8,5 @@ PLAN.md
 */ca.crt
 # written by module 18 - the chain fetched from the directory, not tutorial files
 18-keycloak-ldap/*.pem
+# written by the ingress shard walkthrough - enterprise-ca's root, fetched from the cluster
+00-prerequisites/ingress-shard/*.pem

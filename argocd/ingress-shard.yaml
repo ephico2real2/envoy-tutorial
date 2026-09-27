@@ -1,0 +1,45 @@
+# The MetalLB ingress shard (../00-prerequisites/ingress-shard/manifests): the
+# address pool and its L2 advertisement in metallb-system, the shard's default
+# certificate in openshift-ingress, IngressController metallb, and the canary
+# Route with the echo app behind it (../_shared/echo-app.yaml, which run.sh
+# applies with -n ingress-shard; its objects carry no namespace, so they take
+# this destination's). Every other object names its own namespace.
+#
+# The laptop's forward to the shard's address is not here: it lives in CRC's
+# network proxy, not in the cluster - ./run.sh deploy makes it.
+#
+# No resources-finalizer: deleting this Application leaves the shard running.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ingress-shard
+  namespace: openshift-gitops
+  annotations:
+    # Diff by a server-side dry run: the API server's defaults (an
+    # IngressController's tuningOptions and policies, a Route's weight) are then
+    # part of both sides, not a difference Argo CD would "heal" forever.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: default
+  sources:
+  - repoURL: https://github.com/ephico2real2/envoy-tutorial.git
+    targetRevision: main
+    path: 00-prerequisites/ingress-shard/manifests
+  - repoURL: https://github.com/ephico2real2/envoy-tutorial.git
+    targetRevision: main
+    path: _shared
+    directory:
+      include: echo-app.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ingress-shard
+  syncPolicy:
+    automated:
+      enabled: true
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff: { duration: 5s, factor: 2, maxDuration: 3m }
+    syncOptions:
+    - ServerSideApply=true
