@@ -1,11 +1,5 @@
 # A second router on a MetalLB address — an IngressController shard
 
-> **Output blocks not pasted yet.** `./run.sh deploy` and `./run.sh verify` were
-> walked on CRC on 2026-09-27; the measurements this page quotes come from that
-> walk. The commands below are those steps, one by one. Their output is pasted by
-> `python3 tooling/walkthrough/run.py 00-prerequisites/ingress-shard/README.md --update`,
-> run from a clean shard (`./run.sh clean` first).
-
 OpenShift's own router, the **default IngressController**, carries every Route on
 this cluster: the console, OAuth, Keycloak, the kiosk. On CRC it listens on the
 node's own ports 80 and 443 (`HostNetwork`).
@@ -56,13 +50,14 @@ CRC's network proxy.
 
 ## The picture
 
-<!-- Figure to come (the /visual skill): the laptop's 127.0.0.1:20443 and CRC's :443
-     at the top; gvproxy; 192.168.127.130 (router-metallb, MetalLB L2 on br-ex) and
-     192.168.127.2 (router-default, HostNetwork, routeSelector ingress-shard
-     DoesNotExist) side by side; Route canary admitted by router-metallb only, 503
-     on :443; the echo app at the bottom. -->
+<!-- markdownlint-disable MD033 -->
+<img alt="The laptop reaches two routers through CRC&#x27;s network proxy, gvproxy, because it has no route to the CRC network 192.168.127.0/24. Port 443 is CRC&#x27;s own forward to 192.168.127.2, the node, where router-default of IngressController default listens on the node&#x27;s ports 80 and 443 (HostNetwork). 127.0.0.1:20443 is a forward that ./run.sh deploy adds through gvproxy&#x27;s forwarder API, to 192.168.127.130:443, which MetalLB announces at layer 2 on br-ex: the LoadBalancer Service of router-metallb, IngressController metallb, a pod on the pod network, domain apps-metallb.crc.testing. Beside each router, what configures it: on default, routeSelector ingress-shard DoesNotExist, set by ./run.sh deploy and not by Argo CD, kept by clean, and setting it took every Route down for 31 seconds, and for 98 seconds on a later rollout; on metallb, IPAddressPool ingress-shard-pool with the single address 192.168.127.130/32, autoAssign true, and a serviceAllocation that selects the label the ingress operator puts on the router&#x27;s Service, owning-ingresscontroller metallb, plus L2Advertisement ingress-shard-l2 on br-ex; routeSelector ingress-shard: metallb; and Certificate router-metallb-default for *.apps-metallb.crc.testing from ClusterIssuer enterprise-ca, the router&#x27;s default certificate. router-default admits every Route without an ingress-shard label: 21 Routes, among them console 200, oauth 403, keycloak 302, kiosk 200 and ldaps by SNI. The canary&#x27;s host sent to port 443 gets 503: the default router has not admitted it, and its certificate is for *.apps-crc.testing. router-metallb admits only Routes labelled ingress-shard=metallb: Route canary in namespace ingress-shard, edge TLS, admitted by metallb only, to the echo app, which answers 200. The laptop finds canary.apps-metallb.crc.testing as 127.0.0.1 in /etc/hosts, written by CRC&#x27;s routes-controller. All measured on CRC on 2026-09-27." src="../../docs/diagrams/ingress-shard/shard.light.png">
+<!-- markdownlint-enable MD033 -->
 
-*Figure to come.*
+*The laptop reaches the default router on CRC's `:443` and the shard on
+`127.0.0.1:20443`, both through gvproxy. The label `ingress-shard=metallb` puts
+a Route on the shard, at its MetalLB address, and takes it off the default
+router. The grey boxes are the objects that configure the box they point at.*
 
 ## Walkthrough
 
@@ -601,3 +596,9 @@ $ rm -f enterprise-root-ca.pem
   [`internal/allocator/allocator.go`](https://github.com/openshift/metallb/blob/42b0bfe05fecebde1cf1ed6ef0640c35bb3cb3e7/internal/allocator/allocator.go).
 - CRC [`routes-controller`](https://github.com/crc-org/routes-controller/blob/8bd46c59f96cf334c689856f1adddc248d544ffb/pkg/routes-handler/routes-handler.go)
   and [`admin-helper` hosts filter](https://github.com/crc-org/admin-helper/blob/c95d01e82bcfe22db5095018eb57f4d692cfa55a/pkg/hosts/hosts.go).
+
+## Diagram sources
+
+The figure is rendered from [`docs/diagrams/ingress-shard/source.html`](../../docs/diagrams/ingress-shard/source.html)
+(inline SVG, light and dark). Change the page and re-render the PNGs together,
+with the `/visual` skill's `render.py`.
