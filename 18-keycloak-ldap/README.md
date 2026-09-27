@@ -483,6 +483,13 @@ it — the imported users, their sessions. That is safe here because nothing in
 `corp` is kept only in Keycloak: its people and groups come back from the
 directory as they log in. A realm whose users live in Keycloak would lose them.
 
+The rebuilt realm also has **new signing keys**, so anything that caches `corp`'s
+public keys rejects its tokens until that cache expires. Module 17's Gateway
+keeps them for `cache_duration: 300s` (its step 5): measured on this lab after a
+rebuild at 04:51:17Z, its `corp` checks answered `Jwks doesn't have key to match
+kid or alg from Jwt -> 401` until 04:54:49Z and passed again at 04:55:24Z — about
+four minutes. The `tutorial` realm's tokens were unaffected throughout.
+
 ### Step 14 — check yourself
 
 ```console
@@ -571,6 +578,7 @@ the realm is replaced with the Secret's value inside the import Job.
 
 | You see | Why | Fix |
 |---|---|---|
+| `Jwks doesn't have key to match kid or alg from Jwt` at module 17's Gateway for `corp` tokens | realm `corp` was rebuilt (step 13) and has new signing keys; the Gateway still holds the old ones for up to `cache_duration: 300s` | wait — measured about four minutes after a rebuild; nothing to change |
 | `SSLHandshakeFailed`; the log says `PKIX path building failed` | Keycloak does not trust the certificate's CA — no Secret `ldap-root-ca`, or Keycloak has not restarted since it was created | steps 5–6; the restart comes about 45 s after the Secret (measured) |
 | `SSLHandshakeFailed`; the log says `No subject alternative DNS name matching` | the URL's host is not in the certificate | use a name the certificate carries (step 11) |
 | the router's `*.apps-crc.testing` certificate instead of slapd's | the client sent no SNI | send it: `openssl s_client -servername …` |
