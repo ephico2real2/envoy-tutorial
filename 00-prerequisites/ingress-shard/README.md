@@ -294,13 +294,17 @@ step 5. Without step 5 the Route would list `default` as well.
 The laptop does not route to the CRC network, `192.168.127.0/24`. CRC's network
 proxy, gvproxy, carries the laptop's connections into it. It already forwards
 `:80` and `:443` to the node, which is the default router, plus the API server
-and ssh. Its API, on a unix socket, adds more. Forward a laptop port to the
-shard's HTTPS port; the laptop's `:443` is taken, so this uses `20443`:
+and ssh. Its API, on a unix socket, adds more;
+[`../../_shared/crc-forward.sh`](../../_shared/crc-forward.sh) asks it (#15): it
+checks nothing on the laptop listens on the port first, does nothing when the same
+forward is there, refuses one that points elsewhere, and never touches CRC's own.
+Forward a laptop port to the shard's HTTPS port; the laptop's `:443` is taken, so
+this uses `20443`:
 
 ```console
-$ curl -s --unix-socket ~/.crc/sockets/crc-http.sock -X POST -d '{"local":"127.0.0.1:20443","remote":"192.168.127.130:443","protocol":"tcp"}' -w '%{http_code}\n' http://crc/network/services/forwarder/expose
-200
-$ curl -s --unix-socket ~/.crc/sockets/crc-http.sock http://crc/network/services/forwarder/all | python3 -c 'import json, sys; [print(f["local"], "->", f["remote"]) for f in json.load(sys.stdin)]'
+$ ../../_shared/crc-forward.sh ensure 127.0.0.1:20443 192.168.127.130:443
+127.0.0.1:20443 -> 192.168.127.130:443: forwarded
+$ ../../_shared/crc-forward.sh list
 /Users/olasumbo/.crc/machines/crc/docker.sock -> ssh-tunnel://core@192.168.127.2:22/run/podman/podman.sock?key=%2FUsers%2Folasumbo%2F.crc%2Fmachines%2Fcrc%2Fid_ed25519
 127.0.0.1:19080 -> 192.168.127.102:80
 127.0.0.1:20443 -> 192.168.127.130:443
@@ -309,9 +313,6 @@ $ curl -s --unix-socket ~/.crc/sockets/crc-http.sock http://crc/network/services
 :443 -> 192.168.127.2:443
 :80 -> 192.168.127.2:80
 ```
-
-(Once [#15](https://github.com/ephico2real2/envoy-tutorial/issues/15) is merged,
-this is `../../_shared/crc-forward.sh ensure 127.0.0.1:20443 192.168.127.130:443`.)
 
 **The name.** CRC's `routes-controller` pod in `openshift-ingress` writes Route
 hosts into the laptop's `/etc/hosts` as `127.0.0.1`, through CRC's admin helper,
@@ -538,7 +539,8 @@ all checks passed
 | `router-metallb` stays `<pending>`, the IngressController not `Available` | no pool gives it an address: a selecting pool with `autoAssign: false` is skipped (`allocator.go`, `pinnedPoolsForService`) | `autoAssign: true` on the selecting pool |
 | `503` on `https://canary.apps-metallb.crc.testing/` | port 443 is the default router, which ignores the shard's Routes (step 9) | use port `20443` (step 8) |
 | `Failed to connect … port 20443` | no forward | step 8, or `./run.sh deploy` |
-| gvproxy answers the forward with an error | another program listens on the port | `lsof -nP -iTCP:20443 -sTCP:LISTEN`; pick another port |
+| `crc-forward.sh: port 20443 is taken on this laptop by …` | another program listens on the port (the helper checks with `lsof -nP -iTCP:20443 -sTCP:LISTEN` before it asks gvproxy) | stop it, or pick another port |
+| `crc-forward.sh: 127.0.0.1:20443 already forwards to …` | a forward of the same port to another address — someone else's | remove it with `../../_shared/crc-forward.sh remove 127.0.0.1:20443 <that address>` if it is yours |
 
 ## Permanent lab
 
@@ -590,8 +592,7 @@ selector from step 5**.
 <!-- walkthrough: skip -->
 ```console
 $ ./run.sh pause
-$ curl -s --unix-socket ~/.crc/sockets/crc-http.sock http://crc/network/services/forwarder/all | python3 -c 'import json, sys; [print(f["local"], "->", f["remote"]) for f in json.load(sys.stdin) if f["local"] == "127.0.0.1:20443"]'
-$ curl -s --unix-socket ~/.crc/sockets/crc-http.sock -X POST -d '{"local":"127.0.0.1:20443","protocol":"tcp"}' -w '%{http_code}\n' http://crc/network/services/forwarder/unexpose
+$ ../../_shared/crc-forward.sh remove 127.0.0.1:20443 192.168.127.130:443
 $ oc delete -f manifests/40-canary.yaml --wait=false
 $ oc delete -f manifests/30-ingresscontroller.yaml --wait=false
 $ oc wait ingresscontroller/metallb -n openshift-ingress-operator --for=delete --timeout=180s
@@ -603,8 +604,11 @@ $ oc wait ns/ingress-shard --for=delete --timeout=180s
 $ rm -f enterprise-root-ca.pem
 ```
 
-Remove the forward only when the first command shows it going to
-`192.168.127.130:443`: another forward of the same port is someone else's.
+The forward goes only when it leads to `192.168.127.130:443`: with that address
+given, `crc-forward.sh remove` leaves another forward of the same port alone and
+fails — someone else's (measured: a hand-made `127.0.0.1:20443 →
+192.168.127.102:80` stopped `./run.sh clean` before it deleted anything, exit 1,
+and `./run.sh deploy` refused to replace it).
 `./run.sh clean` does all of this, checks every step, and stops at the first
 that fails, before it says the shard is gone. It removes the forward only when it
 is this lab's, and fails otherwise. The default router, `mongot-pool`,

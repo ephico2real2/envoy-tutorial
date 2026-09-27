@@ -11,62 +11,49 @@ HOST=canary.apps-metallb.crc.testing # the canary Route (manifests/40-canary.yam
 LOCAL=127.0.0.1:20443                # the laptop's way in; CRC's own :443 is the default router's
 
 # The laptop does not route to the CRC network (192.168.127.0/24); CRC's network
-# proxy, gvproxy, carries a laptop port there. Its forwarder API is used raw here
-# until ../../_shared/crc-forward.sh (#15) is merged; then this block becomes
-# calls to that helper. Where clients can route to the MetalLB address, no
-# forward is needed.
-SOCK=$HOME/.crc/sockets/crc-http.sock
-FWD=http://crc/network/services/forwarder
+# proxy, gvproxy, carries a laptop port there, through ../../_shared/crc-forward.sh:
+# a forward list it cannot read is a failure, never "no forward"; it never touches
+# CRC's own forwards; exit 3 means no CRC. Where clients can route to the MetalLB
+# address, no forward is needed.
+FORWARD=../../_shared/crc-forward.sh
 
-# forward_target - where $LOCAL forwards now ("<ip>:<port>"), or nothing. Fails
-# when gvproxy cannot be asked: callers run it in $(...), where its exit ends only
-# the subshell, so every caller must add `|| exit 1` - an unreadable list is not
-# "no forward". The error goes to stderr, which $(...) does not capture.
-forward_target() {
-  local all
-  all=$(curl -sf --unix-socket "$SOCK" "$FWD/all") \
-    || { bad "cannot read CRC's forwards from $SOCK" >&2; exit 1; }
-  python3 -c 'import json, sys
-print("".join(f["remote"] for f in json.load(sys.stdin) if f["local"] == sys.argv[1]))' "$LOCAL" <<<"$all"
-}
-# forward_post <expose|unexpose> <json> - one request to gvproxy; fatal unless it answers 200.
-forward_post() {
-  local code
-  code=$(curl -s -o /dev/null -w '%{http_code}' --unix-socket "$SOCK" -X POST -d "$2" "$FWD/$1") || code=000
-  [ "$code" = 200 ] || { bad "gvproxy refused $1 $2 (HTTP $code) - is port ${LOCAL##*:} taken? lsof -nP -iTCP:${LOCAL##*:} -sTCP:LISTEN"; exit 1; }
+# on_crc - 0 on CRC (its network socket answers), 1 where there is no CRC; fatal when
+# CRC's forwards cannot be read. Run it in this shell, not in $(...).
+on_crc() {
+  local rc=0 out
+  out=$($FORWARD list 2>&1) || rc=$?
+  case $rc in
+    0) return 0 ;;
+    3) return 1 ;;
+    *) bad "cannot read CRC's forwards: $out"; exit 1 ;;
+  esac
 }
 forward_ensure() {
-  local now
-  [ -S "$SOCK" ] || { echo "  note: no CRC socket at $SOCK - not CRC: reach $ADDR:443 directly"; return 0; }
-  now=$(forward_target) || exit 1
-  if [ "$now" = "$ADDR:443" ]; then ok "$LOCAL already forwards to $ADDR:443"; return 0; fi
-  [ -z "$now" ] || { bad "$LOCAL already forwards to $now, not $ADDR:443 - left alone"; exit 1; }
-  forward_post expose "{\"local\":\"$LOCAL\",\"remote\":\"$ADDR:443\",\"protocol\":\"tcp\"}"
-  now=$(forward_target) || exit 1
-  [ "$now" = "$ADDR:443" ] || { bad "gvproxy accepted $LOCAL -> $ADDR:443 but lists [$now]"; exit 1; }
-  ok "$LOCAL forwards to $ADDR:443"
+  local rc=0 out
+  out=$($FORWARD ensure "$LOCAL" "$ADDR:443" 2>&1) || rc=$?
+  case $rc in
+    0) ok "$out" ;;
+    3) echo "  note: not CRC - reach $ADDR:443 directly" ;;
+    *) bad "$out"; exit 1 ;;
+  esac
 }
 # forward_remove - remove this lab's forward, and only it: $LOCAL to $ADDR:443.
-# A forward of the same port somewhere else is someone else's - reported and
-# left alone, and the caller stops.
+# A forward of the same port somewhere else is someone else's: the helper leaves it
+# and fails, and so does the caller.
 forward_remove() {
-  local now
-  [ -S "$SOCK" ] || return 0
-  now=$(forward_target) || exit 1
-  case "$now" in
-    "") return 0 ;;
-    "$ADDR:443") ;;
-    *) bad "$LOCAL forwards to $now, not $ADDR:443 - not this lab's, left alone"; exit 1 ;;
+  local rc=0 out
+  out=$($FORWARD remove "$LOCAL" "$ADDR:443" 2>&1) || rc=$?
+  case $rc in
+    0) ok "$out" ;;
+    3) ;;
+    *) bad "$out"; exit 1 ;;
   esac
-  forward_post unexpose "{\"local\":\"$LOCAL\",\"protocol\":\"tcp\"}"
-  now=$(forward_target) || exit 1
-  [ -z "$now" ] || { bad "gvproxy still lists $LOCAL -> $now"; exit 1; }
-  ok "forward $LOCAL removed"
 }
-# shard_target - where this machine reaches the shard's HTTPS port: $LOCAL through
-# CRC's forward, or $ADDR:443 directly where there is no CRC socket.
+# shard_target - set TARGET to where this machine reaches the shard's HTTPS port:
+# $LOCAL through CRC's forward, or $ADDR:443 directly where there is no CRC. In this
+# shell, so a failure to read CRC's forwards stops the caller.
 shard_target() {
-  if [ -S "$SOCK" ]; then echo "$LOCAL"; else echo "$ADDR:443"; fi
+  if on_crc; then TARGET=$LOCAL; else TARGET=$ADDR:443; fi
 }
 # shard_curl <target> <curl args...> - curl the canary by its name at <target>.
 shard_curl() {
@@ -168,7 +155,7 @@ deploy() {
 # the first walk verify ran inside that gap and got the router's 503 page.
 canary_ready() {
   local target code='' attempt
-  target=$(shard_target)
+  shard_target; target=$TARGET
   for attempt in $(seq 0 30); do
     code=$(shard_curl "$target" -sk -o /dev/null --max-time 5 -w '%{http_code}') || code=000
     [ "$code" = 200 ] && break
@@ -263,9 +250,9 @@ verify() {
 
   say "3. from this machine"
   # The same way in as deploy's canary_ready: CRC's forward, or the address itself.
-  target=$(shard_target)
-  if [ -S "$SOCK" ]; then
-    fwd=$(forward_target) || exit 1
+  shard_target; target=$TARGET
+  if on_crc; then
+    fwd=$($FORWARD get "$LOCAL") || { bad "cannot read CRC's forwards"; exit 1; }
     assert "$LOCAL forwards to $ADDR:443" "$ADDR:443" "$fwd"
   else
     echo "  note: no CRC socket - checking $ADDR:443 directly"
@@ -294,24 +281,6 @@ verify() {
   assert "ldaps (passthrough, by SNI)" "subject=CN=openldap-service.ldap-testing.svc" \
     "$(cert_subject ldaps-ldap-testing.apps-crc.testing:443 ldaps-ldap-testing.apps-crc.testing)"
   summary
-}
-
-# checked <what> <command...> - run one clean-up step; fatal, with the command's
-# own error, when it fails. --ignore-not-found keeps a re-run at exit 0.
-checked() {
-  local what=$1 out
-  shift
-  out=$("$@" 2>&1) || { bad "cannot $what: $out"; exit 1; }
-}
-# gone <what> <resource> [-n <namespace>] - wait, three minutes at most, until the
-# object is deleted. Already gone - NotFound - counts as deleted.
-gone() {
-  local what=$1 out
-  shift
-  out=$($KUBE wait "$@" --for=delete --timeout=180s 2>&1) && return 0
-  case "$out" in (*NotFound* | *"not found"*) return 0 ;; esac
-  bad "$what is still there after 3 minutes: $out"
-  exit 1
 }
 
 clean() {

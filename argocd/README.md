@@ -27,8 +27,13 @@ same pattern:
 
 The laptop's forward to the shard's address is not in the cluster, so it stays
 `run.sh`'s ([its Permanent lab](../00-prerequisites/ingress-shard/README.md#permanent-lab)).
-Its health and sync are not measured yet: the Application reads `main`, where
-this folder does not exist until #17 is merged.
+Measured after #17 merged (`main` at `9d9c029`), on the lab `./run.sh deploy`
+had built: `Synced/Healthy` 10 s after `oc apply -f argocd/ingress-shard.yaml`;
+every object's UID unchanged — adopted, not re-created; over 3 minutes, 0 of 36
+samples off `Synced/Healthy`, and one sync operation. The default
+`IngressController`, whose route selector the shard's `run.sh` sets, is not
+tracked: it carries no `tracking-id` and is not among the Application's resources
+(read again 2026-09-27 during #15).
 
 Argo CD applies these files and puts back whatever differs from them — a deleted
 object, an edited field. It does **not** run `run.sh`: what `deploy` does by hand

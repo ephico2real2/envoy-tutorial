@@ -349,8 +349,10 @@ print(".".join([h, base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rst
 clean() {
   # Argo CD would put everything back as it is deleted.
   app_pause "$APP"
-  local rc=0 out forwarded="removed"
-  out=$(../_shared/crc-forward.sh remove "$LOCAL" 2>&1) || rc=$?
+  local rc=0 out forwarded="removed" addr
+  # Only this Gateway's forward: the same port to another address is someone else's.
+  addr=$(gw_address "$NS" eg 2>/dev/null)
+  out=$(../_shared/crc-forward.sh remove "$LOCAL" ${addr:+"$addr:80"} 2>&1) || rc=$?
   case $rc in
     0) ;;
     3) forwarded="not on this machine (not CRC)" ;;

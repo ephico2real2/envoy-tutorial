@@ -3,7 +3,9 @@
 # through CRC's own network proxy (gvproxy). CRC only - see below.
 #
 #   crc-forward.sh ensure <127.0.0.1:port> <ip:port>   forward the laptop's port to that address
-#   crc-forward.sh remove <127.0.0.1:port>             stop forwarding it
+#   crc-forward.sh remove <127.0.0.1:port> [<ip:port>] stop forwarding it - with <ip:port>, only
+#                                                      when it forwards there (a caller's own)
+#   crc-forward.sh get <127.0.0.1:port>                where the port forwards to, or nothing
 #   crc-forward.sh list                                every forward, as "<local> -> <remote>"
 #
 # Why: MetalLB gives a Gateway an address on the CRC VM's network (192.168.127.0/24), which
@@ -15,7 +17,9 @@
 #
 # ensure is idempotent: nothing to do when the same forward exists; a failure when the port
 # already forwards somewhere else, or when another program listens on it. remove never
-# touches CRC's own forwards. A forward lasts until it is removed or CRC's VM stops - it does
+# touches CRC's own forwards, and with <ip:port> leaves a forward of the same port to
+# another address alone and fails (someone else's). A forward list that cannot be read is
+# a failure, never "not forwarded". A forward lasts until it is removed or CRC's VM stops - it does
 # not survive `crc stop` / `crc start` (the forwards live in the running gvproxy); run the
 # module's `./run.sh deploy` again after a restart.
 #
@@ -26,7 +30,7 @@ API=http://crc/network/services/forwarder
 # CRC's own forwards, never removed here.
 BUILTIN=" :80 :443 127.0.0.1:6443 127.0.0.1:2222 $HOME/.crc/machines/crc/docker.sock "
 
-usage() { sed -n '5,7p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '5,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 fail() { echo "crc-forward.sh: $*" >&2; exit 1; }
 
 [ -S "$SOCK" ] || {
@@ -69,14 +73,20 @@ case "${1:-}" in
     [ "$now" = "$3" ] || fail "gvproxy accepted $2 -> $3, but does not list it"
     echo "$2 -> $3: forwarded" ;;
   remove)
-    if [ $# -ne 2 ] || ! local_ok "$2"; then usage; fi
+    if [ $# -lt 2 ] || [ $# -gt 3 ] || ! local_ok "$2" || { [ $# -eq 3 ] && ! remote_ok "$3"; }; then usage; fi
     case "$BUILTIN" in (*" $2 "*) fail "$2 is one of CRC's own forwards - left alone" ;; esac
     now=$(remote_of "$2") || fail "cannot read CRC's forwards - nothing removed"
     [ -n "$now" ] || { echo "$2: not forwarded"; exit 0; }
+    if [ $# -eq 3 ] && [ "$now" != "$3" ]; then
+      fail "$2 forwards to $now, not $3 - not yours, left alone"
+    fi
     post unexpose "{\"local\":\"$2\",\"protocol\":\"tcp\"}"
     now=$(remote_of "$2") || fail "asked to remove $2, but cannot read CRC's forwards to check it"
     [ -z "$now" ] || fail "gvproxy accepted the removal of $2, but still lists it"
     echo "$2: forward removed" ;;
+  get)
+    if [ $# -ne 2 ] || ! local_ok "$2"; then usage; fi
+    remote_of "$2" || fail "cannot read CRC's forwards" ;;
   list)
     [ $# -eq 1 ] || usage
     forwards | awk '{ print $1 " -> " $2 }' ;;
