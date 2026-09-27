@@ -1,0 +1,186 @@
+<title>MetalLB Ingress Shard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · 00-prerequisites · the ingress shard</div>
+    <h1>Two routers, one label between them</h1>
+    <p class="lede">Drawn from <code>00-prerequisites/ingress-shard/manifests/</code> and <code>run.sh</code>; every answer was measured on CRC when the README was walked (2026-09-27).</p>
+  </header>
+
+  <section>
+    <h2>Which router serves which Route</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 1180 724" role="img" aria-label="The laptop reaches two routers through CRC&#x27;s network proxy, gvproxy, because it has no route to the CRC network 192.168.127.0/24. Port 443 is CRC&#x27;s own forward to 192.168.127.2, the node, where router-default of IngressController default listens on the node&#x27;s ports 80 and 443 (HostNetwork). 127.0.0.1:20443 is a forward that ./run.sh deploy adds through gvproxy&#x27;s forwarder API, to 192.168.127.130:443, which MetalLB announces at layer 2 on br-ex: the LoadBalancer Service of router-metallb, IngressController metallb, a pod on the pod network, domain apps-metallb.crc.testing. Beside each router, what configures it: on default, routeSelector ingress-shard DoesNotExist, set by ./run.sh deploy and not by Argo CD, kept by clean, and adding it took every Route down for 31 seconds, removing it later for 98 seconds; on metallb, IPAddressPool ingress-shard-pool with the single address 192.168.127.130/32, autoAssign true, and a serviceAllocation that selects, by label, LoadBalancer Services in openshift-ingress carrying the label the ingress operator puts on the router&#x27;s Service, owning-ingresscontroller metallb, plus L2Advertisement ingress-shard-l2 on br-ex; routeSelector ingress-shard: metallb; and Certificate router-metallb-default for *.apps-metallb.crc.testing from ClusterIssuer enterprise-ca, the router&#x27;s default certificate. router-default admits every Route without an ingress-shard label: 21 Routes, among them console 200, oauth 403, keycloak 302, kiosk 200 and ldaps by SNI. The canary&#x27;s host sent to port 443 gets 503: the default router has not admitted it, and its certificate is for *.apps-crc.testing. router-metallb admits only Routes labelled ingress-shard=metallb: Route canary in namespace ingress-shard, edge TLS, admitted by metallb only, to the echo app, which answers 200. The laptop finds canary.apps-metallb.crc.testing as 127.0.0.1 in /etc/hosts, written by CRC&#x27;s routes-controller for Route hosts ending in .crc.testing or .apps-crc.testing. All measured on CRC on 2026-09-27.">
+  <defs><marker id="s1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="s1t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--remote)"/></marker><marker id="s1g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--gap)"/></marker><marker id="s1n" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--none)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<!-- the laptop -->
+<rect x="280" y="14" width="600" height="74" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="294" y="36" font-weight="600">your laptop — curl, a browser</text>
+<text x="294" y="55" font-family="IBM Plex Mono, monospace" font-size="11.5">/etc/hosts: 127.0.0.1 canary.apps-metallb.crc.testing</text>
+<text x="294" y="73" fill="var(--muted)">written by CRC for Route hosts ending in .crc.testing or .apps-crc.testing</text>
+<line x1="420" y1="88" x2="420" y2="124" stroke="currentColor" stroke-width="1.3" marker-end="url(#s1)"/>
+<text x="410" y="111" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="11.5">:443</text>
+<line x1="740" y1="88" x2="740" y2="124" stroke="var(--remote)" stroke-width="1.3" marker-end="url(#s1t)"/>
+<text x="730" y="111" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--remote)">127.0.0.1:20443</text>
+<!-- gvproxy -->
+<rect x="280" y="126" width="600" height="74" rx="7" fill="var(--none-wash)" stroke="currentColor" stroke-width="1.3"/>
+<text x="294" y="147" font-weight="600">gvproxy — CRC&#x27;s network proxy · the laptop has no route to 192.168.127.0/24</text>
+<text x="294" y="166" font-family="IBM Plex Mono, monospace" font-size="11.5">:443 → 192.168.127.2:443</text>
+<text x="594" y="166" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--remote)">127.0.0.1:20443 → 192.168.127.130:443</text>
+<text x="294" y="184" fill="var(--muted)">built into CRC</text>
+<text x="594" y="184" fill="var(--muted)">added by ./run.sh deploy</text>
+<rect x="910" y="126" width="250" height="74" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="924" y="147" font-weight="600">gvproxy&#x27;s forwarder API</text>
+<text x="924" y="166" font-family="IBM Plex Mono, monospace" font-size="11.5">~/.crc/sockets/crc-http.sock</text>
+<text x="924" y="184" fill="var(--muted)">POST …/forwarder/expose</text>
+<line x1="908" y1="166" x2="882" y2="166" stroke="var(--none)" stroke-width="1.3" marker-end="url(#s1n)"/>
+<!-- the boundary -->
+<line x1="20" y1="214" x2="1160" y2="214" stroke="var(--rule)" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text x="24" y="206" font-family="IBM Plex Mono, monospace" font-size="11.5" font-weight="600" fill="var(--muted)">LAPTOP</text>
+<text x="24" y="232" font-family="IBM Plex Mono, monospace" font-size="11.5" font-weight="600" fill="var(--muted)">CRC VM NETWORK</text>
+<text x="24" y="249" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--muted)">192.168.127.0/24 on br-ex</text>
+<text x="24" y="266" fill="var(--muted)">the laptop arrives as 192.168.127.1</text>
+<line x1="420" y1="200" x2="420" y2="260" stroke="currentColor" stroke-width="1.3" marker-end="url(#s1)"/>
+<text x="410" y="244" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="11.5">192.168.127.2:443</text>
+<line x1="740" y1="200" x2="740" y2="260" stroke="var(--remote)" stroke-width="1.3" marker-end="url(#s1t)"/>
+<text x="730" y="234" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--remote)">192.168.127.130:443</text>
+<text x="730" y="251" text-anchor="end" fill="var(--muted)">MetalLB L2: br-ex answers ARP</text>
+<!-- router-default -->
+<rect x="280" y="262" width="280" height="170" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="294" y="284" font-weight="600">router-default</text>
+<text x="294" y="301" font-family="IBM Plex Mono, monospace" font-size="11.5">IngressController default</text>
+<text x="294" y="320">192.168.127.2 — the node itself</text>
+<text x="294" y="337">HostNetwork: the node&#x27;s ports 80, 443</text>
+<text x="294" y="354" fill="var(--muted)">domain apps-crc.testing · 1 replica</text>
+<text x="294" y="397" font-weight="600">admits every Route without</text>
+<text x="294" y="414" font-family="IBM Plex Mono, monospace" font-size="11.5">an ingress-shard label</text>
+<!-- its selector -->
+<rect x="20" y="292" width="230" height="124" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="34" y="312" font-weight="600">routeSelector on default</text>
+<text x="34" y="330" font-family="IBM Plex Mono, monospace" font-size="11.5">ingress-shard DoesNotExist</text>
+<text x="34" y="348">set by ./run.sh deploy, not by</text>
+<text x="34" y="365">Argo CD; clean keeps it</text>
+<text x="34" y="388" fill="var(--muted)">adding it: all Routes down 31 s</text>
+<text x="34" y="405" fill="var(--muted)">removing it later: 98 s</text>
+<line x1="252" y1="347" x2="278" y2="347" stroke="var(--none)" stroke-width="1.3" marker-end="url(#s1n)"/>
+<!-- router-metallb -->
+<rect x="600" y="262" width="280" height="170" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="614" y="284" font-weight="600" fill="var(--remote)">router-metallb</text>
+<text x="614" y="301" font-family="IBM Plex Mono, monospace" font-size="11.5">IngressController metallb</text>
+<text x="614" y="320">Service type LoadBalancer</text>
+<text x="614" y="337" font-family="IBM Plex Mono, monospace" font-size="11.5">192.168.127.130:443</text>
+<text x="614" y="354">a pod on the pod network · 1 replica</text>
+<text x="614" y="371" fill="var(--muted)">domain apps-metallb.crc.testing</text>
+<text x="614" y="397" font-weight="600" fill="var(--remote)">admits only Routes labelled</text>
+<text x="614" y="414" font-family="IBM Plex Mono, monospace" font-size="11.5">ingress-shard=metallb</text>
+<!-- what configures it -->
+<rect x="910" y="232" width="250" height="114" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="924" y="252" font-weight="600">IPAddressPool ingress-shard-pool</text>
+<text x="924" y="270" font-family="IBM Plex Mono, monospace" font-size="11.5">192.168.127.130/32</text>
+<text x="924" y="287" font-family="IBM Plex Mono, monospace" font-size="11.5">autoAssign: true</text>
+<text x="924" y="304">serviceAllocation selects the</text>
+<text x="924" y="321">operator&#x27;s label on the Service</text>
+<text x="924" y="338" fill="var(--muted)">+ L2Advertisement on br-ex</text>
+<line x1="908" y1="300" x2="882" y2="300" stroke="var(--none)" stroke-width="1.3" marker-end="url(#s1n)"/>
+<rect x="910" y="356" width="250" height="48" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="924" y="375" font-weight="600">routeSelector on metallb</text>
+<text x="924" y="393" font-family="IBM Plex Mono, monospace" font-size="11.5">ingress-shard: metallb</text>
+<line x1="908" y1="380" x2="882" y2="380" stroke="var(--none)" stroke-width="1.3" marker-end="url(#s1n)"/>
+<rect x="910" y="414" width="250" height="88" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="924" y="434" font-weight="600">Certificate router-metallb-default</text>
+<text x="924" y="452" font-family="IBM Plex Mono, monospace" font-size="11.5">*.apps-metallb.crc.testing</text>
+<text x="924" y="469">from ClusterIssuer enterprise-ca</text>
+<text x="924" y="486" fill="var(--muted)">the router&#x27;s default certificate</text>
+<line x1="908" y1="424" x2="882" y2="424" stroke="var(--none)" stroke-width="1.3" marker-end="url(#s1n)"/>
+<!-- the default router's answers -->
+<line x1="420" y1="432" x2="420" y2="468" stroke="currentColor" stroke-width="1.3" marker-end="url(#s1)"/>
+<rect x="280" y="470" width="280" height="92" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="294" y="490" font-weight="600">every other Route (21): on default</text>
+<text x="294" y="508" font-family="IBM Plex Mono, monospace" font-size="11.5">console 200 · oauth 403</text>
+<text x="294" y="525" font-family="IBM Plex Mono, monospace" font-size="11.5">keycloak 302 · kiosk 200</text>
+<text x="294" y="542" font-family="IBM Plex Mono, monospace" font-size="11.5">ldaps: passthrough, by SNI</text>
+<line x1="300" y1="432" x2="236" y2="468" stroke="var(--gap)" stroke-width="1.3" marker-end="url(#s1g)"/>
+<rect x="20" y="470" width="230" height="92" rx="7" fill="var(--gap-wash)" stroke="var(--gap)" stroke-width="1.3"/>
+<text x="34" y="490" font-weight="600" fill="var(--gap)">the canary on :443 → 503</text>
+<text x="34" y="508">not admitted here: it carries</text>
+<text x="34" y="525">the label</text>
+<text x="34" y="548" fill="var(--muted)">certificate: *.apps-crc.testing</text>
+<!-- the shard's Route and app -->
+<line x1="740" y1="432" x2="740" y2="468" stroke="var(--remote)" stroke-width="1.3" marker-end="url(#s1t)"/>
+<rect x="600" y="470" width="280" height="70" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="614" y="490" font-weight="600" fill="var(--remote)">Route canary · ns ingress-shard</text>
+<text x="614" y="508" font-family="IBM Plex Mono, monospace" font-size="11.5">label ingress-shard=metallb</text>
+<text x="614" y="525">edge TLS · admitted by metallb only</text>
+<line x1="740" y1="540" x2="740" y2="574" stroke="var(--remote)" stroke-width="1.3" marker-end="url(#s1t)"/>
+<rect x="600" y="576" width="280" height="70" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="614" y="596" font-weight="600" fill="var(--remote)">echo app · Service echo :8080</text>
+<text x="614" y="614">answers 200, host …crc.testing:20443</text>
+<text x="614" y="631" fill="var(--muted)">certificate checked with enterprise-ca</text>
+<!-- takeaway -->
+<text x="20" y="684">One label decides the router: ingress-shard=metallb → router-metallb only, on 192.168.127.130; no ingress-shard label → router-default only.</text>
+<text x="20" y="706" fill="var(--muted)">Grey boxes configure the box they point at. All measured on CRC, 2026-09-27. Where clients can route to the MetalLB address, no forward is needed.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>The laptop reaches the default router on CRC&#x27;s :443 and the shard on 127.0.0.1:20443, both through gvproxy. The label ingress-shard=metallb puts a Route on the shard, on its MetalLB address, and takes it off the default router.</figcaption>
+    </figure>
+  </section>
+</div>

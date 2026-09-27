@@ -1,0 +1,15 @@
+# The shard's default certificate: what it presents for every Route on its
+# domain that brings no certificate of its own. An IngressController reads it
+# from a Secret in openshift-ingress (spec.defaultCertificate), so the
+# Certificate lives there. Signed by the tutorial's CA issuer, enterprise-ca
+# (module 00); clients trust it with that CA's root.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: router-metallb-default
+  namespace: openshift-ingress
+spec:
+  secretName: router-metallb-default-cert
+  commonName: "*.apps-metallb.crc.testing"
+  dnsNames: ["*.apps-metallb.crc.testing"]
+  issuerRef: { name: enterprise-ca, kind: ClusterIssuer, group: cert-manager.io }

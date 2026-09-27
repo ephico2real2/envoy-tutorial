@@ -1,0 +1,53 @@
+# The shard's address: one MetalLB address, for the shard's Service.
+#
+# The ingress operator makes the shard's Service (router-metallb in
+# openshift-ingress) and owns it; the IngressController has no field for its
+# annotations. So the address is not requested on the Service: this pool picks
+# the Service out by the label the operator itself puts on it
+# (ingresscontroller.operator.openshift.io/owning-ingresscontroller, set on every
+# reconcile - cluster-ingress-operator 4.22, load_balancer_service.go). A
+# re-created Service carries the same label and gets the same address.
+#
+# autoAssign: true is what lets serviceAllocation work: MetalLB tries a pool
+# that selects a Service only when the pool may auto-assign, and never
+# auto-assigns from a pool with serviceAllocation to a Service it does not
+# select (openshift/metallb release-4.22, internal/allocator/allocator.go,
+# pinnedPoolsForService and Allocate).
+#
+# The selection is by label, not by name: any LoadBalancer Service in
+# openshift-ingress labelled owning-ingresscontroller=metallb is eligible, and
+# router-metallb is the only one there (measured). Whoever may create Services in
+# openshift-ingress could make another. A Service elsewhere that names this pool
+# in a metallb.io/address-pool annotation is not checked against serviceAllocation
+# either (AllocateFromPool). Nothing on this cluster does either.
+#
+# mongot-pool (192.168.127.100-120, autoAssign: false) is not touched: its
+# addresses belong to mongodb-poc and the Gateways of modules 17 and 19, and
+# MetalLB refuses a pool that overlaps it. .130 is outside it, not next to it,
+# and not one of gvproxy's own addresses (.1 the gateway, .2 the node, .254 the
+# host).
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: ingress-shard-pool
+  namespace: metallb-system
+spec:
+  addresses: ["192.168.127.130/32"]
+  autoAssign: true
+  serviceAllocation:
+    namespaces: [openshift-ingress]
+    serviceSelectors:
+    - matchLabels:
+        ingresscontroller.operator.openshift.io/owning-ingresscontroller: metallb
+---
+# Layer 2: the node answers ARP for the address on br-ex, the interface on the
+# CRC network (192.168.127.0/24), as mongot-l2 does for mongot-pool. mongot-l2
+# names only mongot-pool, and stays as it is.
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: ingress-shard-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools: [ingress-shard-pool]
+  interfaces: [br-ex]

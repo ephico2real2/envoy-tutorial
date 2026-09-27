@@ -150,6 +150,32 @@ problem, it says so and shows the fix. Module 12 has the worked example.
 | MetalLB (or any LoadBalancer) | 12–15, 17 — every module with a `Gateway` |
 | Prometheus Operator CRDs | 10 |
 | user-workload monitoring (OpenShift) | 10 — it decides whether *your* namespaces' metrics are collected |
+| a second router on a MetalLB address | module 20's Route lives there — [`ingress-shard/`](ingress-shard/README.md) |
+
+## MetalLB on OpenShift, and on CRC
+
+A Service of type `LoadBalancer` needs something to give it an address. A cloud
+has its load balancers for that; on bare metal, and on CRC, it is **MetalLB**.
+Here that is the Red Hat MetalLB Operator (`metallb-operator.v4.22.0`), which
+runs MetalLB's controller and a speaker on each node.
+
+- **The pool.** An `IPAddressPool` holds the addresses MetalLB may hand out.
+  - This cluster has `mongot-pool`, `192.168.127.100` to `.120`.
+  - It has `autoAssign: false`, so a Service gets an address only by naming the
+    pool (`metallb.io/address-pool`, or the older `metallb.universe.tf/…`). The
+    Gateways of modules 12 to 17 name it through the shared
+    `EnvoyProxy openshift-scc` (`12-gateway-api/manifests/20-envoyproxy.yaml`).
+- **Layer 2.** An `L2Advertisement` makes a node answer ARP for those addresses
+  on one interface: here `br-ex`, the node's side of the CRC network
+  `192.168.127.0/24`. Anything on that network reaches the address.
+- **Why CRC needs a forward.** Where the clients are on that network, or can
+  route to it, the address simply works, and no forward is needed. Your laptop
+  is not on it, and does not route to it. CRC runs
+  its VM behind its own network proxy, gvproxy, which forwards only a few laptop
+  ports into it: `:80`, `:443`, the API server and ssh. So to reach a MetalLB
+  address from the laptop, you ask gvproxy for one more forward, from a laptop
+  port to that address. [`ingress-shard/`](ingress-shard/README.md) shows it
+  step by step.
 
 ## Troubleshooting
 

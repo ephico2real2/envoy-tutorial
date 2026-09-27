@@ -14,6 +14,20 @@ it as git declares it. One per module, in OpenShift GitOps' instance
 | [`17-keycloak-jwt`](17-keycloak-jwt.yaml) | `17-keycloak-jwt/manifests`, and `_shared/echo-app.yaml` into `envoy-17` | namespace `envoy-17`, Gateway `eg`, its routes and SecurityPolicies, the `ReferenceGrant` and `BackendTLSPolicy` in `keycloak`, the echo app |
 | [`18-keycloak-ldap`](18-keycloak-ldap.yaml) | `18-keycloak-ldap/manifests` | the LDAP bind password's Secret, realm import `corp` |
 
+Beside the Keycloak offering, one more Application keeps a piece of platform that
+module 20 builds on
+([#17](https://github.com/ephico2real2/envoy-tutorial/issues/17)). It follows the
+same pattern:
+
+| Application | Source | Keeps |
+|---|---|---|
+| [`ingress-shard`](ingress-shard.yaml) | `00-prerequisites/ingress-shard/manifests`, and `_shared/echo-app.yaml` into `ingress-shard` | pool `ingress-shard-pool` and `L2Advertisement ingress-shard-l2` in `metallb-system`; the shard's certificate in `openshift-ingress`; `IngressController metallb`; namespace `ingress-shard` (`Prune=false`, as `keycloak`) with Route `canary` and the echo app |
+
+The laptop's forward to the shard's address is not in the cluster, so it stays
+`run.sh`'s ([its Permanent lab](../00-prerequisites/ingress-shard/README.md#permanent-lab)).
+Its health and sync are not measured yet: the Application reads `main`, where
+this folder does not exist until #17 is merged.
+
 Argo CD applies these files and puts back whatever differs from them — a deleted
 object, an edited field. It does **not** run `run.sh`: what `deploy` does by hand
 — approving the operator's InstallPlan, the `nonroot-v2` grant, copying Keycloak's
