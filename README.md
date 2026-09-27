@@ -72,7 +72,8 @@ each module's `run.sh` does them in one go:
 ```
 
 Modules 16 to 18 add `./run.sh pause` and `./run.sh resume`, for their Argo CD
-Applications ([`argocd/`](argocd/README.md)).
+Applications ([`argocd/`](argocd/README.md)). Module 16's `clean` keeps its
+namespace and its database's claim; `./run.sh clean --delete-data` deletes them.
 
 `verify` is a set of assertions against the **running** proxy, not a wall of
 output — a module either passes or names the claim that failed.

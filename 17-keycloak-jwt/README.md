@@ -308,12 +308,13 @@ difference between the two answers is the difference between *who are you*
 ### Step 7 — when the Gateway cannot fetch the keys
 
 Take the `BackendTLSPolicy` away and restart the Gateway's Envoy, so it must
-fetch the keys again (on the permanent lab, `./run.sh pause` first: Argo CD
-would put the policy back — [Permanent lab](#permanent-lab)) — and now does so
-in plain HTTP, to a port that speaks only
-TLS (module 15, step 3):
+fetch the keys again — and now does so in plain HTTP, to a port that speaks only
+TLS (module 15, step 3). `./run.sh pause` first: on the permanent lab it stops
+Argo CD putting the policy back ([Permanent lab](#permanent-lab)); on a cluster
+without it, it does nothing.
 
 ```console
+$ ./run.sh pause >/dev/null
 $ oc delete backendtlspolicy keycloak-service -n keycloak
 backendtlspolicy.gateway.networking.k8s.io "keycloak-service" deleted from keycloak namespace
 $ sleep 20; oc rollout restart deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-namespace=envoy-17
@@ -333,7 +334,8 @@ http.http-10080.jwt_authn.jwks_fetch_success: 0
 **What just happened:** a perfectly good token, refused — **`401 Jwks remote
 fetch is failed`**. With no keys, the Gateway can verify nothing, so it lets
 nothing through: it **fails closed**. The counters show every fetch failing, with
-`503` from the Keycloak cluster. Put the policy back:
+`503` from the Keycloak cluster. Put the policy back, and hand the lab back to
+Argo CD:
 
 ```console
 $ oc apply -f manifests/30-trust-keycloak.yaml
@@ -341,6 +343,7 @@ referencegrant.gateway.networking.k8s.io/envoy-17-fetches-jwks unchanged
 backendtlspolicy.gateway.networking.k8s.io/keycloak-service created
 $ sleep 20; ./token.sh alice | ./request.sh /api -o /dev/null -w '%{http_code}\n'
 200
+$ ./run.sh resume >/dev/null
 ```
 
 Back to `200`, with no restart: the Gateway kept trying to fetch the keys, and
@@ -617,23 +620,30 @@ run as written.)
 
 Step 7 deletes the `BackendTLSPolicy` to show the Gateway failing closed. With
 Argo CD on, the policy would be put back like the ConfigMap above, and the
-failure would not show. So pause this module's Application first, and resume
-it after — `./run.sh pause`, `./run.sh resume`, as in module 16's
-[Permanent lab](../16-keycloak/README.md#permanent-lab).
+failure would not show. So step 7 pauses this module's Application first and
+resumes it after — `./run.sh pause`, `./run.sh resume` on its command lines, as
+in module 16's [Permanent lab](../16-keycloak/README.md#permanent-lab); they do
+nothing on a cluster without the Application.
 To walk the module again from the start, `./run.sh clean` pauses it for you, and
 `./run.sh resume` hands the lab back once you are done — or `./run.sh deploy`,
 which resumes it at its end.
 
 ## Clean up
 
-On the permanent lab a clean-up is a deliberate reset: pause Argo CD first
-(`./run.sh pause`), or it puts each object back as you delete it.
+On the permanent lab a clean-up is a deliberate reset, never the end of a
+walkthrough — leave the Gateway running, as module 16 leaves Keycloak. Pause
+Argo CD first: it would put the manifests back as you delete them, and it
+cannot put back the `nonroot-v2` grant or ConfigMap `keycloak-ca`, which are
+`run.sh`'s ([Permanent lab](#permanent-lab)). `./run.sh clean` does both.
 
 Remove this module's Gateway and what it added next to Keycloak; the Keycloak
 lab itself stays (module 16 removes it), and so do realm `corp` (module 18) and
 the directory's shop users (the chart's `ldap-shop-users.ldif`):
 
+<!-- walkthrough: skip -->
 ```console
+$ ./run.sh pause
+  ✓ Argo CD Application 17-keycloak-jwt paused: it no longer puts back what changes
 $ oc adm policy remove-scc-from-user nonroot-v2 -n envoy-gateway-system -z "$(oc get deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-namespace=envoy-17 -o jsonpath='{.items[0].spec.template.spec.serviceAccountName}')"
 clusterrole.rbac.authorization.k8s.io/system:openshift:scc:nonroot-v2 removed: "envoy-envoy-17-eg-0d84cb63"
 $ oc delete -f manifests/10-gateway.yaml --wait=false

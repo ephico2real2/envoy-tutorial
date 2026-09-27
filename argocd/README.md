@@ -81,13 +81,21 @@ it happens. Each module's `run.sh` has two more commands, from
 [`../_shared/argocd.sh`](../_shared/argocd.sh):
 
 - **`./run.sh pause`** sets the Application's `spec.syncPolicy.automated.enabled`
-  to `false`. Argo CD still compares — the Application says `OutOfSync` once
-  something differs — but changes nothing. Measured: paused, a deleted
-  `echo-src` stayed deleted for 3 min 43 s, through a full reconciliation.
-- **`./run.sh resume`** sets it back to `true`, asks Argo CD to compare again, and
-  waits until it says `Synced` — up to five minutes, the longest gap between two
-  repairs. Measured: `echo-src` was back in the second `resume` was run, and
-  `resume` returned 5 s later.
+  to `false`, asks Argo CD to compare again, and returns only once the
+  controller has done so and no sync operation is pending or running: turning
+  automated sync off stops new syncs, not one under way, which could re-create
+  what a clean deletes next. Five minutes at most; then it fails, and a clean
+  stops before it deletes anything. Argo CD still compares — the Application
+  says `OutOfSync` once something differs — but changes nothing. Measured:
+  paused, a deleted `echo-src` stayed deleted for 3 min 43 s, through a full
+  reconciliation. Pausing does not stop someone syncing by hand.
+- **`./run.sh resume`** sets it back to `true`, asks Argo CD to compare again —
+  a refused request fails — and waits until it says `Synced`: up to ten
+  minutes, because a repair can start 300 s after the previous one and then
+  needs its own time. A status it cannot read fails too; `Synced` with another
+  health (a waiting operator upgrade) passes at the deadline, with a note.
+  Measured: `echo-src` was back in the second `resume` was run, and `resume`
+  returned 5 s later.
 - **`./run.sh clean`** pauses before it deletes anything (module 16's pauses 16,
   17 and 18: the other two keep objects in `keycloak`). Measured with module 17:
   for 4 minutes after its clean, namespace `envoy-17`, the `BackendTLSPolicy` and
@@ -111,10 +119,19 @@ They follow `group-sync`'s pattern — project `default`, a public GitHub
 repository, `targetRevision: main`, automated sync with `prune` and `selfHeal`,
 `retry` with back-off — with these differences, each for a reason:
 
-- **No `resources-finalizer.argocd.argoproj.io`.** With it, deleting the
-  Application deletes every object it keeps — for `16-keycloak`, namespace
-  `keycloak` and with it the database's claim, which must never be removed.
-  Without it, deleting an Application leaves the lab running.
+- **No `resources-finalizer.argocd.argoproj.io`, and no automated prune of
+  namespace `keycloak`.** With the finalizer, deleting the Application deletes
+  every object it keeps — for `16-keycloak`, namespace `keycloak` and with it
+  the database's claim, which must never be removed. Without it, deleting an
+  Application leaves the lab running. That does not cover automated prune: were
+  a later commit on `main` to drop or rename the Namespace document,
+  `prune: true` would delete the namespace, and the claim with it. So the
+  Namespace carries `argocd.argoproj.io/sync-options: Prune=false`
+  ([sync options](https://argo-cd.readthedocs.io/en/release-3.4/user-guide/sync-options/#no-prune-resources));
+  `./run.sh clean --delete-data` is the one way to remove it. The annotation is
+  in `16-keycloak/manifests/10-operator.yaml`, so it reaches the cluster when
+  that change is merged to `main`; until then `oc diff` of that file shows
+  exactly that one added line (measured).
 - **`ServerSideApply=true`**, and the annotation
   `argocd.argoproj.io/compare-options: ServerSideDiff=true`. Measured without
   server-side diff: 16 and 17 stayed `OutOfSync` after their first sync —

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Module 16 — a Keycloak lab (Red Hat build of Keycloak).  ./run.sh deploy | verify | clean | pause | resume
+# Module 16 — a Keycloak lab (Red Hat build of Keycloak).  ./run.sh deploy | verify | clean [--delete-data] | pause | resume
 cd "$(dirname "$0")"
 NS=keycloak
 . ../_shared/lib.sh
@@ -97,32 +97,64 @@ verify() {
   summary
 }
 
+# clean [--delete-data] - a deliberate reset. By default it removes the lab's
+# server, operator and database pod, and KEEPS namespace keycloak and claim
+# data-postgres-0: the database - realms, users, sessions - survives, and the next
+# deploy starts on it. What modules 17 and 18 keep in this namespace stays too.
+# --delete-data is the full wipe: the namespace, and with it the claim and the
+# volume behind it, and everything modules 17 and 18 put in it.
 clean() {
+  local wipe='' pv CSV
+  case "${1:-}" in
+    "") ;;
+    --delete-data) wipe=yes ;;
+    *) echo "usage: ./run.sh clean [--delete-data]"; exit 2 ;;
+  esac
   # Argo CD would put everything back as it is deleted. Modules 17 and 18 keep
   # objects in this namespace too, so their Applications pause with it.
   app_pause 16-keycloak 17-keycloak-jwt 18-keycloak-ldap
   warn=$($KUBE get securitypolicy -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {end}' 2>/dev/null)
   [ -n "$warn" ] && echo "  note: SecurityPolicies that may use this Keycloak: $warn"
-  # The database's volume outlives its claim here: CRC's StorageClass has
-  # reclaimPolicy Retain, and an earlier clean left a Released PV - and the data
-  # on the node's disk - behind (measured). Mark it Delete while the claim still
-  # exists, so deleting the namespace deletes the volume too.
-  local pv; pv=$($KUBE get pvc data-postgres-0 -n "$NS" -o jsonpath='{.spec.volumeName}' 2>/dev/null)
-  [ -n "$pv" ] && $KUBE patch pv "$pv" --type=merge -p '{"spec":{"persistentVolumeReclaimPolicy":"Delete"}}' >/dev/null
+  pv=$($KUBE get pvc data-postgres-0 -n "$NS" -o jsonpath='{.spec.volumeName}' 2>/dev/null)
+  if [ -n "$wipe" ]; then
+    echo "  --delete-data: deleting namespace $NS - the database (realms tutorial and corp, their users and"
+    echo "  sessions), claim data-postgres-0${pv:+ and volume $pv}, and what modules 17 and 18 keep in $NS"
+    # The volume outlives its claim here: CRC's StorageClass has reclaimPolicy
+    # Retain, and an earlier clean left a Released PV - and the data on the
+    # node's disk - behind (measured). Mark it Delete while the claim exists.
+    [ -n "$pv" ] && $KUBE patch pv "$pv" --type=merge -p '{"spec":{"persistentVolumeReclaimPolicy":"Delete"}}' >/dev/null
+  fi
   $KUBE delete keycloakrealmimport tutorial -n "$NS" --ignore-not-found >/dev/null 2>&1
   $KUBE delete keycloak keycloak -n "$NS" --ignore-not-found --wait=true >/dev/null 2>&1
   CSV=$(installed_csv)
   $KUBE delete subscription rhbk-operator -n "$NS" --ignore-not-found >/dev/null 2>&1
   [ -n "$CSV" ] && $KUBE delete csv "$CSV" -n "$NS" --ignore-not-found >/dev/null 2>&1
-  $KUBE delete ns "$NS" --wait=false >/dev/null 2>&1
-  ok "namespace $NS deleting, with the operator, the database and its volume${pv:+ $pv}"
+  if [ -n "$wipe" ]; then
+    $KUBE delete ns "$NS" --wait=false >/dev/null 2>&1
+    ok "namespace $NS deleting, with the operator, the database and its volume${pv:+ $pv}"
+  else
+    # Everything else this module applied, but not the Namespace (10-operator.yaml
+    # holds it). Deleting the StatefulSet leaves its claim: a StatefulSet's claims
+    # are kept unless persistentVolumeClaimRetentionPolicy says otherwise, and
+    # 20-postgres.yaml sets none.
+    $KUBE delete operatorgroup keycloak -n "$NS" --ignore-not-found >/dev/null 2>&1
+    $KUBE delete -f manifests/50-route.yaml -f manifests/40-keycloak.yaml -f manifests/30-certificate.yaml \
+      -f manifests/20-postgres.yaml --ignore-not-found --wait=true >/dev/null 2>&1
+    if [ -n "$pv" ] && [ "$($KUBE get pvc data-postgres-0 -n "$NS" -o jsonpath='{.spec.volumeName}' 2>/dev/null)" = "$pv" ]; then
+      ok "Keycloak, its operator and PostgreSQL removed; namespace $NS and claim data-postgres-0 (volume $pv) kept - the database survives"
+    else
+      bad "claim data-postgres-0 is not there after clean (before: ${pv:-none}) - oc get pvc -n $NS"
+      return 1
+    fi
+    echo "  note: ./run.sh clean --delete-data also deletes the namespace, the claim and the volume"
+  fi
   echo "  note: OLM leaves the CRDs keycloaks.k8s.keycloak.org and keycloakrealmimports.k8s.keycloak.org installed"
   [ -z "$(app_automated 16-keycloak)" ] \
     || echo "  note: to bring the lab back: ./run.sh deploy, then ../18-keycloak-ldap/run.sh deploy and ../17-keycloak-jwt/run.sh deploy - each resumes its Argo CD Application"
 }
 
 case "${1:-deploy}" in
-  deploy) deploy ;; verify) verify ;; clean) clean ;;
+  deploy) deploy ;; verify) verify ;; clean) clean "${2:-}" ;;
   pause) app_pause 16-keycloak ;; resume) app_resume 16-keycloak ;;
   *) sed -n '2p' "$0" | sed 's/^# //'; exit 2 ;;
 esac

@@ -5,7 +5,9 @@
 # No resources-finalizer (unlike the cluster's other Applications): deleting
 # this Application must leave the lab running. With the finalizer, Argo CD would
 # delete every object it manages - namespace keycloak, and with it the
-# database's volume claim.
+# database's volume claim. The Namespace manifest also carries Prune=false, so
+# automated prune cannot delete it either, whatever a later commit on main does;
+# ./run.sh clean --delete-data is the deliberate way.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

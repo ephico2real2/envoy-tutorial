@@ -442,15 +442,17 @@ An import only **creates** a realm. Measured, one change at a time:
 | delete and re-apply the import while `corp` exists | a new Job, which logs `Realm 'corp' already exists. Import skipped` — and the import still says `Done=True` |
 | **delete the realm, then delete and re-apply the import** | a new Job creates `corp` from the file |
 
-So a change is: change the file, delete the realm, delete the import, apply —
-and on the permanent lab, `./run.sh pause` first: Argo CD would undo each step
-([Permanent lab](#permanent-lab)).
+So a change is: change the file, delete the realm, delete the import, apply.
+On the permanent lab Argo CD would undo each step as it happens, so the steps
+below start with `./run.sh pause` and end with `./run.sh resume`
+([Permanent lab](#permanent-lab)); on a cluster without it, they do nothing.
 `./run.sh deploy` repairs the second row by itself: when realm `corp` is missing
 and its import is not, it deletes the import and applies it again — and it only
 reports success once the realm exists.
 Here with a token lifespan of 600 s instead of 300 — first applied the wrong way:
 
 ```console
+$ ./run.sh pause >/dev/null
 $ sed 's/accessTokenLifespan: 300/accessTokenLifespan: 600/' manifests/20-realm.yaml | oc apply -f -
 keycloakrealmimport.k8s.keycloak.org/corp configured
 $ sleep 30; ./admin.sh GET /admin/realms/corp | python3 -c 'import json,sys; print("accessTokenLifespan", json.load(sys.stdin)["accessTokenLifespan"])'
@@ -480,6 +482,7 @@ $ oc wait keycloakrealmimport/corp -n keycloak --for=condition=Done --timeout=30
 keycloakrealmimport.k8s.keycloak.org/corp condition met
 $ ./admin.sh GET /admin/realms/corp | python3 -c 'import json,sys; print("accessTokenLifespan", json.load(sys.stdin)["accessTokenLifespan"])'
 accessTokenLifespan 300
+$ ./run.sh resume >/dev/null
 ```
 
 **What just happened:** deleting the realm deleted everything Keycloak held for
@@ -669,9 +672,11 @@ and `./run.sh deploy` restores it, checked.
 
 Step 13 changes the realm import on purpose — a changed file, then the import
 deleted and applied again. With Argo CD on, the file's change is undone, and a
-deleted import is created again from `main` before you apply yours: pause this
-module's Application first, and resume it after — `./run.sh pause`,
-`./run.sh resume`, as in module 16's [Permanent lab](../16-keycloak/README.md#permanent-lab).
+deleted import is created again from `main` before you apply yours. So step 13
+pauses this module's Application first and resumes it after — `./run.sh pause`,
+`./run.sh resume` on its command lines, as in module 16's
+[Permanent lab](../16-keycloak/README.md#permanent-lab); they do nothing on a
+cluster without the Application.
 `./run.sh clean` pauses it for you, and `./run.sh deploy` resumes it at its end.
 
 ## Clean up
@@ -690,6 +695,8 @@ at most, each — as `./run.sh clean` does:
 
 <!-- walkthrough: skip -->
 ```console
+$ ./run.sh pause
+  ✓ Argo CD Application 18-keycloak-ldap paused: it no longer puts back what changes
 $ ./admin.sh DELETE /admin/realms/corp
 $ oc delete keycloakrealmimport corp -n keycloak
 $ oc delete -f manifests/10-bind-secret.yaml

@@ -8,6 +8,13 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: keycloak
+  annotations:
+    # Argo CD never prunes this namespace. It holds PostgreSQL's claim
+    # data-postgres-0: were a later commit on main to drop or rename this
+    # document, automated prune would delete the namespace, and the claim with
+    # it. Deleting the Application is safe already (it has no resources
+    # finalizer); ./run.sh clean --delete-data is the one way to remove it.
+    argocd.argoproj.io/sync-options: Prune=false
   labels:
     # The estate's namespace metadata: the app mnemonic and its environment.
     # Together they select NamespaceConfig baseline-nonprod-rbac, which binds

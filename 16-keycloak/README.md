@@ -448,7 +448,7 @@ by hand, and what other controllers make, is not:
 | **approving the InstallPlan** (step 2) | `./run.sh deploy`: `oc patch installplan … approved: true` | nobody — `run.sh` only | `Manual` approval is the point: a person decides on each operator version. OLM makes one InstallPlan per version, under a generated name; approving it from git would make `Manual` automatic. While a new version waits, Argo CD's health check for a `Subscription` says `Progressing` (`status.state` `UpgradePending`; argo-cd v3.4.7, `resource_customizations/operators.coreos.com/Subscription/health.lua`), so the Application shows it |
 | the operator's CSV and Deployment | OLM | OLM | |
 | StatefulSet `keycloak`, Services `keycloak-service` and `keycloak-discovery`, the import's Job | the Keycloak operator | the operator | made from the resources above |
-| claim `data-postgres-0` | the StatefulSet | the StatefulSet | Argo CD does not track it, so it never prunes it |
+| claim `data-postgres-0` | the StatefulSet | the StatefulSet | Argo CD does not track it, and namespace `keycloak` carries `argocd.argoproj.io/sync-options: Prune=false`, so an automated prune — were a later commit on `main` to drop or rename the Namespace — cannot delete the namespace and the claim with it. Only `./run.sh clean --delete-data` removes them. The annotation reaches the cluster when this change is merged: Argo CD applies `main`, so until then `oc diff -f manifests/10-operator.yaml` shows exactly that one line (measured) |
 | pod `client` | step 6, or `./run.sh verify` when it is missing | nobody | a test tool, not part of the offering |
 
 ### Walkthroughs, experiments and clean
@@ -468,15 +468,21 @@ $ ./run.sh resume
 ```
 
 **What just happened:** `pause` set the Application's
-`spec.syncPolicy.automated.enabled` to `false`: Argo CD still compares — it says
-`OutOfSync` as soon as something differs — but changes nothing. `resume` set it
-back to `true` and waited until Argo CD had put back everything that differed
-from git and said `Synced` — up to five minutes, because Argo CD spaces out the
-repairs it makes in a row ([`../argocd`](../argocd/README.md)).
+`spec.syncPolicy.automated.enabled` to `false`, and returned once Argo CD had
+compared again and no sync was still under way — turning automated sync off
+does not stop one already running. Argo CD still compares — it says `OutOfSync`
+as soon as something differs — but changes nothing. `resume` set it back to
+`true`, asked Argo CD to compare again, and waited until it had put back
+everything that differed from git and said `Synced` — up to ten minutes,
+because Argo CD waits up to five before a repair it makes soon after another
+([`../argocd`](../argocd/README.md)). A request or read that fails makes either
+command fail. Neither checks the lab itself: `./run.sh verify` does.
 
 - **`./run.sh clean`** pauses first — this Application, and 17's and 18's, which
   keep objects in `keycloak` too — so the clean-up is not undone. It is a
-  deliberate reset, and it deletes the database's volume (Clean up).
+  deliberate reset. It keeps namespace `keycloak` and the database's claim, so
+  the realms and their users survive; only `./run.sh clean --delete-data`
+  deletes them, with the volume ([Clean up](#clean-up)).
 - **`./run.sh deploy`** resumes the Application at its end. After a clean, bring
   the offering back in order: `./run.sh deploy`, then
   `../18-keycloak-ldap/run.sh deploy`, then `../17-keycloak-jwt/run.sh deploy` —
@@ -504,12 +510,17 @@ recipe, not a redesign — module 18 is the worked example of every item:
    each cluster makes for itself, like the directory's here, does not go in git
    (module 18, "Why the directory's root is not in git"). A new Secret restarts
    Keycloak about 45 s later (measured, module 18 step 6).
-2. **Content.** The integration's realm, or its clients, is its own
-   `KeycloakRealmImport`, in its own module folder. Credentials reach it only
-   through `spec.placeholders` from a Secret (module 18's
-   `LDAP_BIND_PASSWORD`). An import only creates: to change a realm, follow
-   module 18's step 13 — delete the realm, delete the import, apply — with the
-   Application paused.
+2. **Content.** A new integration gets **its own realm**, from its own
+   `KeycloakRealmImport` in its own module folder. Credentials reach it only
+   through `spec.placeholders` from a Secret (module 18's `LDAP_BIND_PASSWORD`).
+   An import only creates a realm: a second import naming an existing realm is
+   skipped (`Realm '…' already exists. Import skipped`, module 18), so it cannot
+   add clients to one. To add clients to an existing realm — `corp`, say —
+   change **that realm's** import file, and apply it the measured way (module 18,
+   step 13): pause its Application, delete the realm, delete the import, apply,
+   resume. Deleting the realm deletes everything Keycloak holds only for it —
+   safe for `corp`, whose people come back from the directory, and never for a
+   realm whose users live only in Keycloak.
 3. **Access by group.** Who may log in comes from a **gate group** — the
    enterprise default is `app-ssb-autobahnusers`, the gate OpenShift's own
    `ldap-local` login uses (module 18, step 8); what they may do comes from
@@ -535,13 +546,38 @@ or an epic, when it is large.
 ## Clean up
 
 Leave the lab running if you go on to module 17 — and on the permanent lab, a
-clean-up is a deliberate reset, never the end of a walkthrough. To remove it —
-the server, the database and its volume, and the operator. On CRC the database's volume outlives
-its claim — the StorageClass keeps volumes (`reclaimPolicy: Retain`), and an
-earlier clean-up left one behind, `Released`, data and all (measured) — so mark it
-for deletion first. Where Argo CD keeps the lab, pause it first — this module's
-Application, and 17's and 18's, which keep objects in `keycloak` too — or it puts
-each object back as you delete it:
+clean-up is a deliberate reset, never the end of a walkthrough. Where Argo CD
+keeps the lab, pause it first — this module's Application, and 17's and 18's,
+which keep objects in `keycloak` too — or it puts each object back as you delete
+it. `./run.sh clean` does, and then removes the server, the operator and the
+database's pod, and **keeps** namespace `keycloak` and the database's claim
+`data-postgres-0`: the database — realms `tutorial` and `corp`, their users —
+survives, and so does what modules 17 and 18 keep in `keycloak`. The next
+`./run.sh deploy` starts on that database. By hand:
+
+<!-- walkthrough: skip -->
+```console
+$ ./run.sh pause; ../17-keycloak-jwt/run.sh pause; ../18-keycloak-ldap/run.sh pause
+$ oc delete keycloakrealmimport tutorial -n keycloak
+$ oc delete keycloak keycloak -n keycloak
+$ oc delete subscription rhbk-operator -n keycloak
+$ oc delete csv rhbk-operator.v26.6.7-opr.1 -n keycloak
+$ oc delete operatorgroup keycloak -n keycloak
+$ oc delete -f manifests/50-route.yaml -f manifests/40-keycloak.yaml -f manifests/30-certificate.yaml -f manifests/20-postgres.yaml --ignore-not-found
+```
+
+Deleting the StatefulSet leaves its claim: its `persistentVolumeClaimRetentionPolicy`
+is `whenDeleted: Retain`, the default (measured on the live StatefulSet).
+
+**`./run.sh clean --delete-data` is the full wipe**, and it destroys: namespace
+`keycloak`; the database — realms `tutorial` and `corp`, their users and
+sessions; claim `data-postgres-0` **and its volume**; and everything modules 17
+and 18 keep in `keycloak` (the `ReferenceGrant`, the `BackendTLSPolicy`,
+ConfigMap `keycloak-ca`, Secrets `ldap-root-ca` and `keycloak-ldap-bind`, realm
+import `corp`). On CRC a volume outlives its claim — the StorageClass keeps
+volumes (`reclaimPolicy: Retain`), and an earlier clean-up left one behind,
+`Released`, data and all (measured) — so it marks the volume for deletion first.
+By hand:
 
 <!-- walkthrough: skip -->
 ```console
@@ -562,7 +598,8 @@ operator on the cluster uses them.
 
 `./run.sh deploy` does steps 2 to 8, approving the InstallPlan for you, and
 resumes Argo CD's Application if there is one; `./run.sh verify` is step 11;
-`./run.sh clean` is the clean-up, with the three Applications paused first;
+`./run.sh clean` is the clean-up, with the three Applications paused first and
+the database kept (`--delete-data` wipes it);
 `./run.sh pause` and `./run.sh resume` are the [Permanent lab](#permanent-lab)'s.
 
 ## References
