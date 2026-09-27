@@ -327,7 +327,7 @@ $ oc get secret enterprise-root-ca -n cert-manager -o jsonpath='{.data.ca\.crt}'
 $ for i in $(seq 1 30); do [ "$(curl -s -o /dev/null --max-time 5 --cacert enterprise-root-ca.pem -w '%{http_code}' https://canary.apps-metallb.crc.testing:20443/)" = 200 ] && break; sleep 2; done
 $ curl -sS --cacert enterprise-root-ca.pem https://canary.apps-metallb.crc.testing:20443/ -w ' -> %{http_code}\n'
 {
-  "served_by": "echo-f8fc6d5c9-rwz4d",
+  "served_by": "echo-f8fc6d5c9-rmd9c",
   "method": "GET",
   "path": "/",
   "headers": {
@@ -435,7 +435,7 @@ the default router is not touched.
 $ oc delete svc router-metallb -n openshift-ingress
 service "router-metallb" deleted from openshift-ingress namespace
 $ for i in $(seq 1 60); do ip=$(oc get svc router-metallb -n openshift-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null); [ "$ip" = 192.168.127.130 ] && break; sleep 2; done; oc get svc router-metallb -n openshift-ingress -o jsonpath='{.metadata.creationTimestamp}  {.status.loadBalancer.ingress[0].ip}  {.metadata.annotations.metallb\.io/ip-allocated-from-pool}{"\n"}'
-2026-09-27T20:40:34Z  192.168.127.130  ingress-shard-pool
+2026-09-27T20:50:44Z  192.168.127.130  ingress-shard-pool
 ```
 
 The ingress operator puts back only the Service annotations it manages, a fixed
@@ -458,6 +458,9 @@ $ ./run.sh verify
   ✓ ...on br-ex
   ✓ IngressController metallb serves apps-metallb.crc.testing
   ✓ ...published as a LoadBalancerService
+  ✓ ...with External scope
+  ✓ ...and unmanaged DNS
+  ✓ ...with one replica
   ✓ ...admitting Routes labelled ingress-shard=metallb
   ✓ ...with the default certificate router-metallb-default-cert
   ✓ IngressController metallb is Available

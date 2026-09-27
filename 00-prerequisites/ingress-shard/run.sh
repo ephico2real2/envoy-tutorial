@@ -234,6 +234,12 @@ verify() {
     "$($KUBE get ingresscontroller metallb -n openshift-ingress-operator -o jsonpath='{.spec.domain}')"
   assert "...published as a LoadBalancerService" "LoadBalancerService" \
     "$($KUBE get ingresscontroller metallb -n openshift-ingress-operator -o jsonpath='{.spec.endpointPublishingStrategy.type}')"
+  assert "...with External scope" "External" \
+    "$($KUBE get ingresscontroller metallb -n openshift-ingress-operator -o jsonpath='{.spec.endpointPublishingStrategy.loadBalancer.scope}')"
+  assert "...and unmanaged DNS" "Unmanaged" \
+    "$($KUBE get ingresscontroller metallb -n openshift-ingress-operator -o jsonpath='{.spec.endpointPublishingStrategy.loadBalancer.dnsManagementPolicy}')"
+  assert "...with one replica" "1" \
+    "$($KUBE get ingresscontroller metallb -n openshift-ingress-operator -o jsonpath='{.spec.replicas}')"
   assert "...admitting Routes labelled ingress-shard=metallb" "$(canon '{"matchLabels":{"ingress-shard":"metallb"}}')" \
     "$(canon "$($KUBE get ingresscontroller metallb -n openshift-ingress-operator -o jsonpath='{.spec.routeSelector}')")"
   assert "...with the default certificate router-metallb-default-cert" "router-metallb-default-cert" \
