@@ -3,8 +3,8 @@
 # through CRC's own network proxy (gvproxy). CRC only - see below.
 #
 #   crc-forward.sh ensure <127.0.0.1:port> <ip:port>   forward the laptop's port to that address
-#   crc-forward.sh remove <127.0.0.1:port> [<ip:port>] stop forwarding it - with <ip:port>, only
-#                                                      when it forwards there (a caller's own)
+#   crc-forward.sh remove <127.0.0.1:port> <ip:port>   stop forwarding it, only when it forwards
+#                                                      to that address (the caller's own)
 #   crc-forward.sh get <127.0.0.1:port>                where the port forwards to, or nothing
 #   crc-forward.sh list                                every forward, as "<local> -> <remote>"
 #
@@ -17,11 +17,12 @@
 #
 # ensure is idempotent: nothing to do when the same forward exists; a failure when the port
 # already forwards somewhere else, or when another program listens on it. remove never
-# touches CRC's own forwards, and with <ip:port> leaves a forward of the same port to
-# another address alone and fails (someone else's). A forward list that cannot be read is
-# a failure, never "not forwarded". A forward lasts until it is removed or CRC's VM stops - it does
-# not survive `crc stop` / `crc start` (the forwards live in the running gvproxy); run the
-# module's `./run.sh deploy` again after a restart.
+# touches CRC's own forwards, and leaves a forward of the same port to another address
+# alone and fails (someone else's): a caller names the forward it made, never just a
+# port. A forward list that cannot be read is a failure, never "not forwarded". A
+# forward lasts until it is removed or CRC's VM stops - it does not survive `crc stop` /
+# `crc start` (the forwards live in the running gvproxy); run the module's
+# `./run.sh deploy` again after a restart.
 #
 # Exit status: 0 done, 1 refused or failed, 2 usage, 3 no CRC socket (not CRC, or CRC down).
 set -euo pipefail
@@ -62,7 +63,7 @@ case "${1:-}" in
     # A failed read is a failure, never "not forwarded": the proxy's state is unknown.
     now=$(remote_of "$2") || fail "cannot read CRC's forwards - nothing changed"
     if [ "$now" = "$3" ]; then echo "$2 -> $3: already forwarded"; exit 0; fi
-    [ -z "$now" ] || fail "$2 already forwards to $now, not $3 - remove it first: crc-forward.sh remove $2"
+    [ -z "$now" ] || fail "$2 already forwards to $now, not $3 - remove it first: crc-forward.sh remove $2 $now"
     # Another program on the laptop listening on the port would take the connections.
     port=${2##*:}
     # lsof exits 1 when nothing listens: that is the answer wanted, not an error.
@@ -73,13 +74,11 @@ case "${1:-}" in
     [ "$now" = "$3" ] || fail "gvproxy accepted $2 -> $3, but does not list it"
     echo "$2 -> $3: forwarded" ;;
   remove)
-    if [ $# -lt 2 ] || [ $# -gt 3 ] || ! local_ok "$2" || { [ $# -eq 3 ] && ! remote_ok "$3"; }; then usage; fi
+    if [ $# -ne 3 ] || ! local_ok "$2" || ! remote_ok "$3"; then usage; fi
     case "$BUILTIN" in (*" $2 "*) fail "$2 is one of CRC's own forwards - left alone" ;; esac
     now=$(remote_of "$2") || fail "cannot read CRC's forwards - nothing removed"
     [ -n "$now" ] || { echo "$2: not forwarded"; exit 0; }
-    if [ $# -eq 3 ] && [ "$now" != "$3" ]; then
-      fail "$2 forwards to $now, not $3 - not yours, left alone"
-    fi
+    [ "$now" = "$3" ] || fail "$2 forwards to $now, not $3 - not yours, left alone"
     post unexpose "{\"local\":\"$2\",\"protocol\":\"tcp\"}"
     now=$(remote_of "$2") || fail "asked to remove $2, but cannot read CRC's forwards to check it"
     [ -z "$now" ] || fail "gvproxy accepted the removal of $2, but still lists it"

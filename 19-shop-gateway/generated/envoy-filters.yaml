@@ -57,6 +57,69 @@ route:
   match:
     path_separated_prefix: /v1
   typed_per_filter_config:
+    envoy.filters.http.oauth2:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2PerRoute
+      config:
+        token_endpoint:
+          uri: "https://keycloak-service.keycloak.svc:8443/realms/corp/protocol/openid-connect/token"
+          cluster: securitypolicy/envoy-19/sign-in/oidc/0
+          timeout: "10s"
+        authorization_endpoint: "https://keycloak.apps-crc.testing/realms/corp/protocol/openid-connect/auth"
+        credentials:
+          client_id: shop-kiosk
+          token_secret:
+            name: oauth2/client_secret/securitypolicy/envoy-19/sign-in
+            sds_config:
+              ads: {}
+              resource_api_version: V3
+          hmac_secret:
+            name: oauth2/hmac_secret/securitypolicy/envoy-19/sign-in
+            sds_config:
+              ads: {}
+              resource_api_version: V3
+          cookie_names:
+            bearer_token: AccessToken-ab2789d9
+            oauth_hmac: OauthHMAC-ab2789d9
+            oauth_expires: OauthExpires-ab2789d9
+            id_token: IdToken-ab2789d9
+            refresh_token: RefreshToken-ab2789d9
+            oauth_nonce: OauthNonce-ab2789d9
+            code_verifier: CodeVerifier-ab2789d9
+        redirect_uri: "http://localhost:19080/oauth2/callback"
+        redirect_path_matcher:
+          path:
+            exact: /oauth2/callback
+        signout_path:
+          path:
+            exact: /logout
+        forward_bearer_token: true
+        pass_through_matcher:
+          - name: Authorization
+            string_match:
+              prefix: "Bearer "
+        auth_scopes:
+          - openid
+        auth_type: BASIC_AUTH
+        use_refresh_token: true
+        cookie_configs:
+          bearer_token_cookie_config:
+            same_site: LAX
+          oauth_hmac_cookie_config:
+            same_site: LAX
+          oauth_expires_cookie_config:
+            same_site: LAX
+          id_token_cookie_config:
+            same_site: LAX
+          refresh_token_cookie_config:
+            same_site: LAX
+          oauth_nonce_cookie_config:
+            same_site: LAX
+            path: /oauth2/callback
+          code_verifier_cookie_config:
+            same_site: LAX
+            path: /oauth2/callback
+        stat_prefix: securitypolicy/envoy-19/sign-in
+        end_session_endpoint: "https://keycloak.apps-crc.testing/realms/corp/protocol/openid-connect/logout"
     envoy.filters.http.rbac:
       "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBACPerRoute
       rbac:
@@ -174,69 +237,6 @@ route:
                 "@type": type.googleapis.com/envoy.config.rbac.v3.Action
                 name: DENY
                 action: DENY
-    envoy.filters.http.oauth2:
-      "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2PerRoute
-      config:
-        token_endpoint:
-          uri: "https://keycloak-service.keycloak.svc:8443/realms/corp/protocol/openid-connect/token"
-          cluster: securitypolicy/envoy-19/sign-in/oidc/0
-          timeout: "10s"
-        authorization_endpoint: "https://keycloak.apps-crc.testing/realms/corp/protocol/openid-connect/auth"
-        credentials:
-          client_id: shop-kiosk
-          token_secret:
-            name: oauth2/client_secret/securitypolicy/envoy-19/sign-in
-            sds_config:
-              ads: {}
-              resource_api_version: V3
-          hmac_secret:
-            name: oauth2/hmac_secret/securitypolicy/envoy-19/sign-in
-            sds_config:
-              ads: {}
-              resource_api_version: V3
-          cookie_names:
-            bearer_token: AccessToken-5ab99a4b
-            oauth_hmac: OauthHMAC-5ab99a4b
-            oauth_expires: OauthExpires-5ab99a4b
-            id_token: IdToken-5ab99a4b
-            refresh_token: RefreshToken-5ab99a4b
-            oauth_nonce: OauthNonce-5ab99a4b
-            code_verifier: CodeVerifier-5ab99a4b
-        redirect_uri: "http://localhost:19080/oauth2/callback"
-        redirect_path_matcher:
-          path:
-            exact: /oauth2/callback
-        signout_path:
-          path:
-            exact: /logout
-        forward_bearer_token: true
-        pass_through_matcher:
-          - name: Authorization
-            string_match:
-              prefix: "Bearer "
-        auth_scopes:
-          - openid
-        auth_type: BASIC_AUTH
-        use_refresh_token: true
-        cookie_configs:
-          bearer_token_cookie_config:
-            same_site: LAX
-          oauth_hmac_cookie_config:
-            same_site: LAX
-          oauth_expires_cookie_config:
-            same_site: LAX
-          id_token_cookie_config:
-            same_site: LAX
-          refresh_token_cookie_config:
-            same_site: LAX
-          oauth_nonce_cookie_config:
-            same_site: LAX
-            path: /oauth2/callback
-          code_verifier_cookie_config:
-            same_site: LAX
-            path: /oauth2/callback
-        stat_prefix: securitypolicy/envoy-19/sign-in
-        end_session_endpoint: "https://keycloak.apps-crc.testing/realms/corp/protocol/openid-connect/logout"
     envoy.filters.http.jwt_authn:
       "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.PerRouteConfig
       requirement_name: corp_c75e69e4addfef6c

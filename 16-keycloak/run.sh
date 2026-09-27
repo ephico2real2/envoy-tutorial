@@ -7,14 +7,21 @@ NS=keycloak
 
 REALM=https://keycloak.apps-crc.testing/realms/tutorial
 
-# has_btp - the cluster serves Gateway API BackendTLSPolicies (OpenShift 4.19+ does).
-has_btp() { case "$($KUBE api-resources --api-group=gateway.networking.k8s.io -o name 2>/dev/null)" in (*backendtlspolicies*) return 0 ;; (*) return 1 ;; esac; }
+# has_btp - 0 when the cluster serves Gateway API BackendTLSPolicies (OpenShift 4.19+
+# does), 1 when it does not, 2 when the API server cannot be asked (api_serves, lib.sh).
+has_btp() { api_serves gateway.networking.k8s.io backendtlspolicies; }
 # gateway_trust - what every Gateway needs to reach keycloak-service over TLS: ConfigMap
 # keycloak-ca, copied from Secret keycloak-tls (this cluster's CA, so not in git), and
-# the BackendTLSPolicy that names it (70-backend-tls-policy.yaml). Skipped on a cluster
-# without the Gateway API.
+# the BackendTLSPolicy that names it (70-backend-tls-policy.yaml). Skipped only when the
+# API server answers that it serves no BackendTLSPolicy; an unanswered question fails.
 gateway_trust() {
-  has_btp || { echo "  note: no Gateway API BackendTLSPolicy on this cluster - 70-backend-tls-policy.yaml not applied"; return 0; }
+  local s=0
+  has_btp || s=$?
+  case $s in
+    0) ;;
+    1) echo "  note: no Gateway API BackendTLSPolicy on this cluster - 70-backend-tls-policy.yaml not applied"; return 0 ;;
+    *) exit 1 ;;
+  esac
   $KUBE create configmap keycloak-ca -n "$NS" --dry-run=client -o yaml \
     --from-literal=ca.crt="$($KUBE get secret keycloak-tls -n "$NS" -o jsonpath='{.data.ca\.crt}' | base64 -d)" \
     | $KUBE apply -f - >/dev/null || { bad "ConfigMap keycloak-ca could not be written"; exit 1; }
@@ -107,7 +114,10 @@ verify() {
   assert_contains "the JWKS has an RS256 signing key" '"alg":"RS256"' "$JWKS"
   assert_contains "...reachable at the Service too, for in-cluster callers" '"alg":"RS256"' \
     "$(kc https://keycloak-service.keycloak.svc:8443/realms/tutorial/protocol/openid-connect/certs)"
-  if has_btp; then
+  local btp=0
+  has_btp || btp=$?
+  [ $btp -ne 2 ] || assert "for Gateways: the API server says whether it serves BackendTLSPolicies" "answered" "no answer"
+  if [ $btp -eq 0 ]; then
     assert "for Gateways: BackendTLSPolicy keycloak-service expects the Service's name" "keycloak-service.keycloak.svc" \
       "$($KUBE get backendtlspolicy keycloak-service -n "$NS" -o jsonpath='{.spec.validation.hostname}' 2>/dev/null)"
     assert "...and trusts Keycloak's CA (ConfigMap keycloak-ca = Secret keycloak-tls's ca.crt)" "same" \
@@ -138,7 +148,7 @@ verify() {
 # --delete-data is the full wipe: the namespace, and with it the claim and the
 # volume behind it, and everything modules 17 and 18 put in it.
 clean() {
-  local wipe='' pv CSV
+  local wipe='' pv CSV btp=0
   case "${1:-}" in
     "") ;;
     --delete-data) wipe=yes ;;
@@ -155,6 +165,15 @@ clean() {
       (*) bad "cannot read claim data-postgres-0 - nothing deleted: $pv"; return 1 ;;
     esac
   fi
+  # Read before the Subscription goes: afterwards nothing names the operator's CSV.
+  if ! CSV=$($KUBE get subscription rhbk-operator -n "$NS" -o jsonpath='{.status.installedCSV}' 2>&1); then
+    case "$CSV" in
+      (*NotFound*) CSV='' ;;
+      (*) bad "cannot read Subscription rhbk-operator's CSV - nothing deleted: $CSV"; return 1 ;;
+    esac
+  fi
+  has_btp || btp=$?
+  [ $btp -ne 2 ] || { bad "cannot tell whether a BackendTLSPolicy is to be deleted - nothing deleted"; return 1; }
   if [ -n "$wipe" ]; then
     echo "  --delete-data: deleting namespace $NS - the database (realms tutorial and corp, their users and"
     echo "  sessions), claim data-postgres-0${pv:+ and volume $pv}, and what modules 17, 18 and 19 keep in $NS"
@@ -169,7 +188,6 @@ clean() {
   fi
   checked "delete realm import tutorial" "$KUBE" delete keycloakrealmimport tutorial -n "$NS" --ignore-not-found
   checked "delete Keycloak keycloak" "$KUBE" delete keycloak keycloak -n "$NS" --ignore-not-found --wait=true
-  CSV=$(installed_csv)
   checked "delete Subscription rhbk-operator" "$KUBE" delete subscription rhbk-operator -n "$NS" --ignore-not-found
   if [ -n "$CSV" ]; then
     checked "delete the operator's CSV $CSV" "$KUBE" delete csv "$CSV" -n "$NS" --ignore-not-found
@@ -183,7 +201,7 @@ clean() {
     # are kept unless persistentVolumeClaimRetentionPolicy says otherwise, and
     # 20-postgres.yaml sets none.
     checked "delete OperatorGroup keycloak" "$KUBE" delete operatorgroup keycloak -n "$NS" --ignore-not-found
-    if has_btp; then
+    if [ $btp -eq 0 ]; then
       checked "delete BackendTLSPolicy keycloak-service" "$KUBE" delete -f manifests/70-backend-tls-policy.yaml --ignore-not-found
     fi
     checked "delete ConfigMap keycloak-ca" "$KUBE" delete configmap keycloak-ca -n "$NS" --ignore-not-found

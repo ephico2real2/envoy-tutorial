@@ -604,9 +604,9 @@ $ oc wait ns/ingress-shard --for=delete --timeout=180s
 $ rm -f enterprise-root-ca.pem
 ```
 
-The forward goes only when it leads to `192.168.127.130:443`: with that address
-given, `crc-forward.sh remove` leaves another forward of the same port alone and
-fails — someone else's (measured: a hand-made `127.0.0.1:20443 →
+The forward goes only when it leads to `192.168.127.130:443`: `crc-forward.sh
+remove` always takes the address a forward must lead to, leaves another forward
+of the same port alone and fails — someone else's (measured: a hand-made `127.0.0.1:20443 →
 192.168.127.102:80` stopped `./run.sh clean` before it deleted anything, exit 1,
 and `./run.sh deploy` refused to replace it).
 `./run.sh clean` does all of this, checks every step, and stops at the first

@@ -346,18 +346,39 @@ print(".".join([h, base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rst
   summary
 }
 
-clean() {
-  # Argo CD would put everything back as it is deleted.
-  app_pause "$APP"
-  local rc=0 out forwarded="removed" addr
-  # Only this Gateway's forward: the same port to another address is someone else's.
-  addr=$(gw_address "$NS" eg 2>/dev/null)
-  out=$(../_shared/crc-forward.sh remove "$LOCAL" ${addr:+"$addr:80"} 2>&1) || rc=$?
+# unforward - remove the laptop's forward $LOCAL, but only the one to this Gateway's
+# address: the same port forwarded anywhere else is someone else's. Sets $forwarded to
+# what became of it; exits 1, having changed nothing, when it cannot tell whose it is.
+unforward() {
+  local rc=0 out addr
+  if ! addr=$($KUBE get gateway/eg -n "$NS" -o jsonpath='{.status.addresses[0].value}' 2>&1); then
+    case "$addr" in
+      (*NotFound*) addr= ;;
+      (*) bad "cannot read Gateway $NS/eg, so not where its forward $LOCAL leads - nothing removed: $addr"; exit 1 ;;
+    esac
+  fi
+  if [ -n "$addr" ]; then
+    out=$(../_shared/crc-forward.sh remove "$LOCAL" "$addr:80" 2>&1) || rc=$?
+  else
+    # No Gateway address to name: a forward still on the port cannot be shown to be ours.
+    out=$(../_shared/crc-forward.sh get "$LOCAL" 2>&1) || rc=$?
+    if [ $rc -eq 0 ] && [ -n "$out" ]; then
+      bad "Gateway $NS/eg has no address, but $LOCAL still forwards to $out - left alone. If it is this module's, remove it with: ../_shared/crc-forward.sh remove $LOCAL $out"
+      exit 1
+    fi
+  fi
   case $rc in
-    0) ;;
+    0) case "$out" in (*"forward removed"*) forwarded="removed" ;; (*) forwarded="was not there" ;; esac ;;
     3) forwarded="not on this machine (not CRC)" ;;
     *) bad "cannot remove the laptop's forward $LOCAL: $out"; exit 1 ;;
   esac
+}
+
+clean() {
+  local forwarded
+  unforward
+  # Argo CD would put everything back as it is deleted.
+  app_pause "$APP"
   gw_down "$NS" eg || exit 1
   checked "delete the ReferenceGrant in keycloak" \
     "$KUBE" delete -f manifests/50-trust-keycloak.yaml --ignore-not-found

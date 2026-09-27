@@ -137,3 +137,21 @@ gone() {
   bad "$what is still there after 3 minutes: $out"
   exit 1
 }
+
+# api_serves <group> <resource> - 0 when the API server serves <resource> in <group>, 1
+# when discovery answered without it, 2 (having said why, on stderr) when discovery
+# failed without naming it: an unanswered question is not "not served". Discovery can
+# fail for one unavailable aggregated API and still list the rest, so a listed
+# resource counts even then.
+api_serves() {
+  local out rc=0
+  out=$($KUBE api-resources --api-group="$1" -o name 2>&1) || rc=$?
+  case "
+$out
+" in (*"
+$2.$1
+"*) return 0 ;; esac
+  [ "$rc" -eq 0 ] && return 1
+  bad "cannot ask the API server which $1 resources it serves: $out" >&2
+  return 2
+}

@@ -177,13 +177,16 @@ $ oc get keycloak keycloak -n keycloak -o jsonpath='{.status.conditions[?(@.type
 True
 $ oc get keycloakrealmimport corp -n keycloak -o jsonpath='{.status.conditions[?(@.type=="Done")].status}{"\n"}'
 True
-$ oc get backendtlspolicy keycloak-service -n keycloak -o jsonpath='{.status.ancestors[0].conditions[?(@.type=="Accepted")].status}{"\n"}'
-True
+$ oc get backendtlspolicy keycloak-service -n keycloak -o name
+backendtlspolicy.gateway.networking.k8s.io/keycloak-service
 ```
 
 **What just happened:** Keycloak is up, realm `corp` is imported, and module
-16's `BackendTLSPolicy` to Keycloak's Service is accepted — the Gateway will
-reach Keycloak through it.
+16's `BackendTLSPolicy` to Keycloak's Service exists — the Gateway will reach
+Keycloak through it. Only that it exists: the policy is accepted for each
+Gateway that uses it, and has no status until one does (module 16, step 11).
+Whether it accepts `envoy-19`'s is checked at step 6, once this module's
+`SecurityPolicy` uses it.
 
 ### Step 2 — realm `corp` gets the kiosk's client
 
@@ -806,12 +809,12 @@ $ grep -E '^  - name: |^    envoy\.filters\.http\.[a-z_0-9]+:$|^                
   - name: envoy.filters.http.jwt_authn
   - name: envoy.filters.http.rbac
   - name: envoy.filters.http.router
+    envoy.filters.http.jwt_authn:
     envoy.filters.http.rbac:
                     name: admins
                     name: signed-in-may-read
                     name: signed-in-may-reserve
     envoy.filters.http.oauth2:
-    envoy.filters.http.jwt_authn:
 ```
 
 **What just happened:** the listener's chain is **`oauth2` → `jwt_authn` →
@@ -862,10 +865,10 @@ $ ./run.sh verify
   ✓ ...as shop.alice, without admin
   ✓ GET /v1/items -> 200
   ✓ GET /v1/warehouses -> 200
-  ✓ (shop.bob makes a disposable item, VERIFY-19-B-1790543971)
-  ✓ POST /v1/items/VERIFY-19-B-1790543971:reserve -> reserved (ok true, 1 reserved)
+  ✓ (shop.bob makes a disposable item, VERIFY-19-B-1790548544)
+  ✓ POST /v1/items/VERIFY-19-B-1790548544:reserve -> reserved (ok true, 1 reserved)
   ✓ POST /v1/items (create) -> 403
-  ✓ DELETE /v1/items/VERIFY-19-B-1790543971 -> 403
+  ✓ DELETE /v1/items/VERIFY-19-B-1790548544 -> 403
   ✓ POST /v1/items:reset -> 403
 
 4. shop.bob signs in: admin, from his LDAP group - he may create and delete
@@ -874,7 +877,7 @@ $ ./run.sh verify
   ✓ POST /v1/items (create SKU-V19) -> 200
   ✓ DELETE /v1/items/SKU-V19 -> 200
   ✓ POST /v1/items:reset -> 200
-  ✓ DELETE /v1/items/VERIFY-19-B-1790543971 (the disposable item) -> 200
+  ✓ DELETE /v1/items/VERIFY-19-B-1790548544 (the disposable item) -> 200
   ✓ shop.bob signs out: back to corp's logout, then the shop
 
 5. bob.wilson - in the directory, outside the login gate - cannot sign in
@@ -883,25 +886,25 @@ $ ./run.sh verify
 
 6. the command line: a bearer JWT, the same answers
   ✓ shop.alice: GET /v1/items -> 200
-  ✓ (shop.bob makes a disposable item, VERIFY-19-C-1790543974)
+  ✓ (shop.bob makes a disposable item, VERIFY-19-C-1790548547)
   ✓ shop.alice: reserve -> reserved (ok true, 1 reserved)
   ✓ shop.alice: create -> 403 RBAC
   ✓ shop.alice: delete -> 403 RBAC
   ✓ shop.alice: reset -> 403 RBAC
   ✓ shop.bob: create -> 200
   ✓ shop.bob: delete -> 200
-  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790543974%2Fx:reserve -> 307
-  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790543974%3Fx:reserve -> 403
-  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790543974%3Bx:reserve -> 403
-  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790543974:reserve/ -> 403
-  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790543974:reserve?x=1 -> 403
-  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790543974:restock -> 403
-  ✓ shop.alice: PATCH /v1/items/VERIFY-19-C-1790543974 -> 403
-  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790543974 + X-HTTP-Method-Override: DELETE -> 403
-  ✓ shop.alice: post /v1/items/VERIFY-19-C-1790543974:reserve -> 400
-  ✓ ...and the %2F one's redirect, /v1/items/VERIFY-19-C-1790543974/x:reserve -> 403
-  ✓ ...and VERIFY-19-C-1790543974 holds only the one reservation made above
-  ✓ (shop.bob removes VERIFY-19-C-1790543974)
+  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790548547%2Fx:reserve -> 307
+  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790548547%3Fx:reserve -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790548547%3Bx:reserve -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790548547:reserve/ -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790548547:reserve?x=1 -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790548547:restock -> 403
+  ✓ shop.alice: PATCH /v1/items/VERIFY-19-C-1790548547 -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-19-C-1790548547 + X-HTTP-Method-Override: DELETE -> 403
+  ✓ shop.alice: post /v1/items/VERIFY-19-C-1790548547:reserve -> 400
+  ✓ ...and the %2F one's redirect, /v1/items/VERIFY-19-C-1790548547/x:reserve -> 403
+  ✓ ...and VERIFY-19-C-1790548547 holds only the one reservation made above
+  ✓ (shop.bob removes VERIFY-19-C-1790548547)
   ✓ shop.bob: reset -> 200
   ✓ shop.alice's JWT edited to add admin -> 401
   ✓ a JWT from realm tutorial -> 401
@@ -972,7 +975,7 @@ all checks passed
 |---|---|---|
 | the callback or `/logout` answers `404` | no route matches the path, and Envoy Gateway turns the `oauth2` filter on per route — measured with both paths left out of the `HTTPRoute` | keep `/oauth2/callback` and `/logout` in `40-route.yaml` |
 | the policy says `Accepted=False` `OIDC: Get "…/.well-known/openid-configuration": … x509: certificate is valid for *.apps-crc.testing, not keycloak-service.keycloak.svc`; the controller's log: `setting 500 direct response in routes due to errors in SecurityPolicy` | the endpoints are not in the policy, so the controller fetches the discovery document from the issuer's host, expecting the name of the `BackendTLSPolicy` — measured | give `authorizationEndpoint` and `tokenEndpoint` (both) |
-| a request passes the reserve rule though it is not a reserve | the expression matched something in the query string — measured with `[^/]+` | exclude `/`, `?`, `#`, `;` from the item, anchor it (step 9) |
+| a request passes the reserve rule though it is not a reserve | the expression matched something in the query string — measured with `[^/]+` | an allow-list for the item, `[A-Za-z0-9._~-]+` — no `%`, `/`, `?`, `#`, `;` or `:` — and anchor it, `^…:reserve$` (step 9) |
 | someone removed from an LDAP group keeps its role | Keycloak's user cache delays newly issued claims — measured before `cachePolicy: NO_CACHE`, which avoids it. A token already issued keeps its claims until it expires, and the Gateway accepts it 60 s beyond (step 13) | `NO_CACHE` (step 2); sign in again, or wait for the session's refresh; an old bearer token is refused about 360 s after its issue |
 | `401 Jwt is expired` | the token outlived `corp`'s 300 s (plus 60 s of skew) | a fresh token; a browser session refreshes by itself |
 | `401 Jwt issuer is not configured` | a token from another realm — `tutorial`'s | a `corp` token |
@@ -981,6 +984,8 @@ all checks passed
 | the browser cannot load `localhost:19080`, before or after signing in | no forward — CRC was restarted, or the module cleaned — or it points at an old address: Keycloak always sends the browser back to `localhost:19080` (step 7) | `./run.sh verify` or `../_shared/crc-forward.sh ensure …` (step 7) |
 | `crc-forward.sh: port 19080 is taken on this laptop by …` | another program listens on 19080 — measured with a Python web server on another port | stop it; the port is fixed by the redirect URI |
 | `crc-forward.sh: no CRC network socket …` (exit 3) | not CRC, or CRC is not running | on bare metal no forward is needed |
+| `./run.sh clean`: `crc-forward.sh: 127.0.0.1:19080 forwards to …, not …:80 - not yours, left alone` | the port forwards to another address than this Gateway's — someone else's; nothing was changed | find whose it is; the clean-up runs once it is gone |
+| `./run.sh clean`: `Gateway envoy-19/eg has no address, but 127.0.0.1:19080 still forwards to …` | the Gateway is gone, so nothing shows the forward is this module's; nothing was changed | if it is, run the `crc-forward.sh remove …` the message prints, then `./run.sh clean` |
 
 ## Browser screenshots
 
@@ -1030,10 +1035,15 @@ and Argo CD, or `./run.sh deploy`, applies it again.
 ## Clean up
 
 On the permanent lab a clean-up is a deliberate reset, never the end of a
-walkthrough. `./run.sh clean` pauses Argo CD's Application, removes the laptop's
-forward, the `nonroot-v2` grant and the `ReferenceGrant`, and deletes namespace `envoy-19` —
-the shop and its database claim. Realm `corp`'s client `shop-kiosk` stays: it is
-module 18's.
+walkthrough. `./run.sh clean` first removes the laptop's forward — only the one
+to the Gateway's address, `crc-forward.sh remove 127.0.0.1:19080 <address>:80`,
+so a forward of the same port anywhere else is someone else's and stops the
+clean-up before it changes anything. When the Gateway's address cannot be read,
+the clean-up stops too; when the Gateway is gone and a forward is still there, it
+leaves the forward, names where it leads, and prints the command that removes it.
+Then it pauses Argo CD's Application, removes the `nonroot-v2` grant and the
+`ReferenceGrant`, and deletes namespace `envoy-19` — the shop and its database
+claim. Realm `corp`'s client `shop-kiosk` stays: it is module 18's.
 
 <!-- walkthrough: skip -->
 ```console
