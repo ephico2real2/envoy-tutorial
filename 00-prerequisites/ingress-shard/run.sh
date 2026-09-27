@@ -119,7 +119,24 @@ deploy() {
   ok "router-metallb is published at $ADDR"
   wait_ready echo
   forward_ensure
+  canary_ready
   app_resume "$APP"
+}
+
+# canary_ready - wait, a minute at most, for the canary's first 200 through the
+# shard. A new router serves a Route a few seconds after its pods are ready: in
+# the first walk verify ran inside that gap and got the router's 503 page.
+canary_ready() {
+  local target code='' attempt
+  if [ -S "$SOCK" ]; then target="127.0.0.1:${LOCAL##*:}"; else target="$ADDR:443"; fi
+  for attempt in $(seq 0 30); do
+    code=$(curl -sk -o /dev/null --max-time 5 --resolve "$HOST:${target##*:}:${target%:*}" \
+      -w '%{http_code}' "https://$HOST:${target##*:}/") || code=000
+    [ "$code" = 200 ] && break
+    [ "$attempt" -eq 30 ] || sleep 2
+  done
+  [ "$code" = 200 ] || { bad "the canary does not answer through the shard (last HTTP $code) - oc get route canary -n $NS -o yaml"; exit 1; }
+  ok "the canary answers through the shard"
 }
 
 # routers_of <route> <namespace> - the routers that list the Route, as sorted

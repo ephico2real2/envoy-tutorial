@@ -70,7 +70,15 @@ CRC's network proxy.
 
 ```console
 $ oc get ipaddresspool,l2advertisement -n metallb-system
+NAME                                   AUTO ASSIGN   AVOID BUGGY IPS   ADDRESSES
+ipaddresspool.metallb.io/mongot-pool   false         false             ["192.168.127.100-192.168.127.120"]
+
+NAME                                   IPADDRESSPOOLS    IPADDRESSPOOL SELECTORS   INTERFACES
+l2advertisement.metallb.io/mongot-l2   ["mongot-pool"]                             ["br-ex"]
 $ oc get svc -A -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}/{.metadata.name}  {.status.loadBalancer.ingress[0].ip}  {.metadata.annotations.metallb\.io/ip-allocated-from-pool}{"\n"}{end}'
+envoy-gateway-system/envoy-envoy-17-eg-0d84cb63  192.168.127.101  mongot-pool
+envoy-gateway-system/envoy-envoy-19-eg-413e95da  192.168.127.102  mongot-pool
+mongodb-poc/mongot-grpc-lb  192.168.127.100  mongot-pool
 ```
 
 **What just happened:** there is one pool, `mongot-pool`, holding
@@ -85,7 +93,9 @@ on the CRC network: the node answers ARP for those addresses.
 
 ```console
 $ oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.status.endpointPublishingStrategy.type}  {.status.domain}  namespaceSelector={.spec.namespaceSelector}  routeSelector={.spec.routeSelector}{"\n"}'
+HostNetwork  apps-crc.testing  namespaceSelector=  routeSelector={"matchExpressions":[{"key":"ingress-shard","operator":"DoesNotExist"}]}
 $ oc get deploy router-default -n openshift-ingress -o jsonpath='replicas={.spec.replicas}  hostNetwork={.spec.template.spec.hostNetwork}  strategy={.spec.strategy.rollingUpdate}{"\n"}'
+replicas=1  hostNetwork=true  strategy={"maxSurge":0,"maxUnavailable":"25%"}
 ```
 
 **What just happened:**
@@ -121,7 +131,12 @@ only `mongot-pool`, and stays as it is.
 
 ```console
 $ oc apply -f manifests/10-pool.yaml
+ipaddresspool.metallb.io/ingress-shard-pool created
+l2advertisement.metallb.io/ingress-shard-l2 created
 $ oc get ipaddresspool -n metallb-system -o custom-columns=NAME:.metadata.name,ADDRESSES:.spec.addresses,AUTOASSIGN:.spec.autoAssign,ASSIGNED:.status.assignedIPv4
+NAME                 ADDRESSES                           AUTOASSIGN   ASSIGNED
+ingress-shard-pool   [192.168.127.130/32]                true         0
+mongot-pool          [192.168.127.100-192.168.127.120]   false        3
 ```
 
 ### Step 4 — the shard's certificate
@@ -134,7 +149,9 @@ from.
 
 ```console
 $ oc apply -f manifests/20-certificate.yaml
+certificate.cert-manager.io/router-metallb-default created
 $ oc wait certificate/router-metallb-default -n openshift-ingress --for=condition=Ready --timeout=120s
+certificate.cert-manager.io/router-metallb-default condition met
 ```
 
 ### Step 5 — keep the default router off the shard's Routes
@@ -151,6 +168,8 @@ exactly those, so the answer must be `0`:
 
 ```console
 $ oc get routes -A -l ingress-shard --no-headers | wc -l
+No resources found
+       0
 ```
 
 > **Outage.** Changing the default IngressController makes the ingress operator
@@ -174,8 +193,11 @@ that value, then for the rollout:
 
 ```console
 $ oc patch ingresscontroller default -n openshift-ingress-operator --type=merge -p '{"spec":{"routeSelector":{"matchExpressions":[{"key":"ingress-shard","operator":"DoesNotExist"}]}}}'
+ingresscontroller.operator.openshift.io/default patched (no change)
 $ for i in $(seq 1 60); do [ "$(oc get deploy router-default -n openshift-ingress -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ROUTE_LABELS")].value}')" = '!ingress-shard' ] && break; sleep 2; done; oc rollout status deploy/router-default -n openshift-ingress --timeout=300s
+deployment "router-default" successfully rolled out
 $ oc get deploy router-default -n openshift-ingress -o jsonpath='ROUTE_LABELS={.spec.template.spec.containers[0].env[?(@.name=="ROUTE_LABELS")].value}  generation={.metadata.generation}{"\n"}'
+ROUTE_LABELS=!ingress-shard  generation=4
 ```
 
 **What just happened:**
@@ -205,8 +227,11 @@ $ oc get deploy router-default -n openshift-ingress -o jsonpath='ROUTE_LABELS={.
 
 ```console
 $ oc apply -f manifests/30-ingresscontroller.yaml
+ingresscontroller.operator.openshift.io/metallb created
 $ oc wait ingresscontroller/metallb -n openshift-ingress-operator --for=condition=Available --timeout=300s
+ingresscontroller.operator.openshift.io/metallb condition met
 $ oc get svc router-metallb -n openshift-ingress -o jsonpath='{.spec.type}  {.status.loadBalancer.ingress[0].ip}  {.metadata.annotations.metallb\.io/ip-allocated-from-pool}{"\n"}'
+LoadBalancer  192.168.127.130  ingress-shard-pool
 ```
 
 **What to look for:**
@@ -228,9 +253,18 @@ host `canary.apps-metallb.crc.testing`, to the echo app:
 
 ```console
 $ oc apply -f manifests/40-canary.yaml
+namespace/ingress-shard created
+route.route.openshift.io/canary created
 $ oc apply -n ingress-shard -f ../../_shared/echo-app.yaml
+configmap/echo-src created
+service/echo created
+deployment.apps/echo created
 $ oc rollout status deploy/echo -n ingress-shard --timeout=180s
+Waiting for deployment "echo" rollout to finish: 0 of 2 updated replicas are available...
+Waiting for deployment "echo" rollout to finish: 1 of 2 updated replicas are available...
+deployment "echo" successfully rolled out
 $ oc get route canary -n ingress-shard -o jsonpath='{range .status.ingress[*]}{.routerName}  Admitted={.conditions[?(@.type=="Admitted")].status}  {.routerCanonicalHostname}{"\n"}{end}'
+metallb  Admitted=True  router-metallb.apps-metallb.crc.testing
 ```
 
 **What to look for:** one router, `metallb`. The shard admits the Route because
@@ -247,7 +281,15 @@ shard's HTTPS port; the laptop's `:443` is taken, so this uses `20443`:
 
 ```console
 $ curl -s --unix-socket ~/.crc/sockets/crc-http.sock -X POST -d '{"local":"127.0.0.1:20443","remote":"192.168.127.130:443","protocol":"tcp"}' -w '%{http_code}\n' http://crc/network/services/forwarder/expose
+200
 $ curl -s --unix-socket ~/.crc/sockets/crc-http.sock http://crc/network/services/forwarder/all | python3 -c 'import json, sys; [print(f["local"], "->", f["remote"]) for f in json.load(sys.stdin)]'
+/Users/olasumbo/.crc/machines/crc/docker.sock -> ssh-tunnel://core@192.168.127.2:22/run/podman/podman.sock?key=%2FUsers%2Folasumbo%2F.crc%2Fmachines%2Fcrc%2Fid_ed25519
+127.0.0.1:19080 -> 192.168.127.102:80
+127.0.0.1:20443 -> 192.168.127.130:443
+127.0.0.1:2222 -> 192.168.127.2:22
+127.0.0.1:6443 -> 192.168.127.2:6443
+:443 -> 192.168.127.2:443
+:80 -> 192.168.127.2:80
 ```
 
 (Once [#15](https://github.com/ephico2real2/envoy-tutorial/issues/15) is merged,
@@ -262,10 +304,33 @@ takes it to the shard:
 
 ```console
 $ grep -o 'canary.apps-metallb.crc.testing' /etc/hosts
+canary.apps-metallb.crc.testing
 $ oc get secret enterprise-root-ca -n cert-manager -o jsonpath='{.data.ca\.crt}' | base64 -d > enterprise-root-ca.pem
+$ for i in $(seq 1 30); do [ "$(curl -s -o /dev/null --max-time 5 --cacert enterprise-root-ca.pem -w '%{http_code}' https://canary.apps-metallb.crc.testing:20443/)" = 200 ] && break; sleep 2; done
 $ curl -sS --cacert enterprise-root-ca.pem https://canary.apps-metallb.crc.testing:20443/ -w ' -> %{http_code}\n'
+{
+  "served_by": "echo-f8fc6d5c9-p9g5w",
+  "method": "GET",
+  "path": "/",
+  "headers": {
+    "user-agent": "curl/8.7.1",
+    "accept": "*/*",
+    "host": "canary.apps-metallb.crc.testing:20443",
+    "x-forwarded-host": "canary.apps-metallb.crc.testing:20443",
+    "x-forwarded-port": "443",
+    "x-forwarded-proto": "https",
+    "forwarded": "for=192.168.127.1;host=canary.apps-metallb.crc.testing:20443;proto=https",
+    "x-forwarded-for": "192.168.127.1"
+  }
+} -> 200
 $ openssl s_client -connect 127.0.0.1:20443 -servername canary.apps-metallb.crc.testing </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer
+subject=CN=*.apps-metallb.crc.testing
+issuer=O=Enterprise POC, CN=Enterprise Root CA
 ```
+
+The loop waits for the first `200`. A new router serves a Route a few seconds
+after the Route's pods are ready; a request inside that gap gets the router's
+`503` page (it happened on this page's first walk).
 
 **What to look for:**
 
@@ -281,6 +346,7 @@ The laptop's `:443` goes to the default router. Send it the shard's name:
 
 ```console
 $ curl -sk https://canary.apps-metallb.crc.testing/ -o /dev/null -w '%{http_code}\n'
+503
 ```
 
 **What to look for:** `503`, the default router's answer for a host it has not
@@ -295,9 +361,40 @@ The default router's Routes, from the laptop:
 
 ```console
 $ for h in console-openshift-console oauth-openshift keycloak kiosk-modernize-demo; do printf '%-28s %s\n' "$h" "$(curl -sk -o /dev/null --max-time 10 -w '%{http_code}' https://$h.apps-crc.testing/)"; done
+console-openshift-console    200
+oauth-openshift              403
+keycloak                     302
+kiosk-modernize-demo         200
 $ openssl s_client -connect ldaps-ldap-testing.apps-crc.testing:443 -servername ldaps-ldap-testing.apps-crc.testing </dev/null 2>/dev/null | openssl x509 -noout -subject
+subject=CN=openldap-service.ldap-testing.svc
 $ oc get routes -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}  {range .status.ingress[*]}{.routerName}={.conditions[?(@.type=="Admitted")].status} {end}{"\n"}{end}'
+group-sync-dashboard/grafana-openshift-grafana  default=True 
+group-sync-dashboard/group-sync-dashboard  default=True 
+ingress-shard/canary  metallb=True 
+keycloak/keycloak  default=True 
+ldap-testing/ldap-route  default=True 
+ldap-testing/ldaps  default=True 
+ldap-testing/phpldapadmin-route  default=True 
+modernize-demo/kiosk  default=True 
+mongodb-poc/mongot-grpc  default=True 
+mongodb-poc/mongot-gui  default=True 
+openshift-authentication/oauth-openshift  default=True 
+openshift-console/console  default=True 
+openshift-console/downloads  default=True 
+openshift-gitops/openshift-gitops-server  default=True 
+openshift-image-registry/default-route  default=True 
+openshift-ingress-canary/canary  default=True 
+openshift-monitoring/alertmanager-main  default=True 
+openshift-monitoring/prometheus-k8s  default=True 
+openshift-monitoring/prometheus-k8s-federate  default=True 
+openshift-monitoring/thanos-querier  default=True 
+openshift-user-workload-monitoring/federate  default=True 
+openshift-user-workload-monitoring/thanos-ruler  default=True 
 $ oc get svc -A -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.namespace}/{.metadata.name}  {.status.loadBalancer.ingress[0].ip}  {.metadata.annotations.metallb\.io/ip-allocated-from-pool}{"\n"}{end}'
+envoy-gateway-system/envoy-envoy-17-eg-0d84cb63  192.168.127.101  mongot-pool
+envoy-gateway-system/envoy-envoy-19-eg-413e95da  192.168.127.102  mongot-pool
+mongodb-poc/mongot-grpc-lb  192.168.127.100  mongot-pool
+openshift-ingress/router-metallb  192.168.127.130  ingress-shard-pool
 ```
 
 **What to look for:**
@@ -318,7 +415,9 @@ the default router is not touched.
 
 ```console
 $ oc delete svc router-metallb -n openshift-ingress
+service "router-metallb" deleted from openshift-ingress namespace
 $ for i in $(seq 1 60); do ip=$(oc get svc router-metallb -n openshift-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null); [ "$ip" = 192.168.127.130 ] && break; sleep 2; done; oc get svc router-metallb -n openshift-ingress -o jsonpath='{.metadata.creationTimestamp}  {.status.loadBalancer.ingress[0].ip}  {.metadata.annotations.metallb\.io/ip-allocated-from-pool}{"\n"}'
+2026-09-27T16:51:56Z  192.168.127.130  ingress-shard-pool
 ```
 
 The ingress operator puts back only the Service annotations it manages, a fixed
@@ -331,6 +430,37 @@ reconcile, but not this delete. The pool's selector survives both.
 
 ```console
 $ ./run.sh verify
+
+1. the address
+  ✓ pool ingress-shard-pool holds 192.168.127.130 only
+  ✓ IngressController metallb is Available
+  ✓ ...and its load balancer is ready
+  ✓ router-metallb has 192.168.127.130
+  ✓ ...from ingress-shard-pool
+  ✓ no other Service holds an address from ingress-shard-pool
+
+2. which router admits what
+  ✓ the default router ignores Routes labelled ingress-shard
+  ✓ canary is admitted by the shard alone
+  ✓ the shard admits only Routes labelled ingress-shard=metallb
+  ✓ the default router admits no Route labelled ingress-shard
+  ✓ every other Route is still admitted by the default router
+
+3. from this laptop
+  ✓ 127.0.0.1:20443 forwards to 192.168.127.130:443
+  ✓ https://canary.apps-metallb.crc.testing:20443/ -> 200, the certificate checked against enterprise-ca
+  ✓ ...answered by the echo app behind the canary Route
+  ✓ ...with the shard's certificate
+  ✓ on :443 the default router does not serve the canary
+
+4. the default router's Routes still answer from this laptop
+  ✓ console
+  ✓ oauth
+  ✓ keycloak
+  ✓ kiosk
+  ✓ ldaps (passthrough, by SNI)
+
+all checks passed
 ```
 
 ## The options
