@@ -1,6 +1,6 @@
 # Step 6. /admin needs the realm role "admin". A policy on the route replaces
-# the Gateway's for that route, so it repeats the JWT provider - all of it,
-# claimToHeaders included - and adds the authorization rule.
+# the Gateway's for that route, so it repeats the JWT providers - both of them,
+# all of each, claimToHeaders included - and adds the authorization rules.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy
 metadata:
@@ -24,8 +24,24 @@ spec:
       claimToHeaders:
       - { claim: preferred_username, header: x-user }
       - { claim: azp, header: x-client }
+    # Left out here, a corp token would get no further than the JWT check on
+    # /admin: this list, not the Gateway's, is what /admin accepts.
+    - name: corp
+      issuer: https://keycloak.apps-crc.testing/realms/corp
+      audiences: [shop-api]
+      remoteJWKS:
+        uri: https://keycloak-service.keycloak.svc:8443/realms/corp/protocol/openid-connect/certs
+        backendRefs:
+        - { group: "", kind: Service, name: keycloak-service, namespace: keycloak, port: 8443 }
+      claimToHeaders:
+      - { claim: preferred_username, header: x-user }
+      - { claim: azp, header: x-client }
   authorization:
     defaultAction: Deny
+    # One rule per provider: a rule's principal names ONE provider, and matches
+    # only the claims of a token that provider verified. Each realm has its own
+    # role "admin" - tutorial's is given to bob in the realm file; corp's comes
+    # from the LDAP group app-ocp-rbac-ocp-keycloak-admin (module 18, step 10).
     rules:
     - name: admins
       action: Allow
@@ -34,4 +50,11 @@ spec:
           provider: keycloak
           claims:
           # Keycloak puts realm roles in realm_access.roles - a nested list.
+          - { name: realm_access.roles, valueType: StringArray, values: [admin] }
+    - name: corp-admins
+      action: Allow
+      principal:
+        jwt:
+          provider: corp
+          claims:
           - { name: realm_access.roles, valueType: StringArray, values: [admin] }

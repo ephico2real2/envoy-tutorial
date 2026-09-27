@@ -6,10 +6,17 @@
 #   orders-service   realm tutorial, client credentials                (a service)
 #   alice-admin-cli  realm tutorial, Keycloak's built-in admin-cli client - no shop-api audience
 #   master-admin     realm master, the lab's admin (module 16, step 7) - another issuer
+#   shop.alice       realm corp (LDAP, module 18), client shop-cli     (in the login gate)
+#   shop.bob         realm corp, client shop-cli                       (gate + keycloak-admin: role admin)
+#   bob.wilson       realm corp - in the directory, NOT in the gate: refused
 #
 # It asks from the client pod in the keycloak namespace, which trusts only the
 # enterprise CA (module 16, step 6). The passwords and the secret are module
 # 16's LAB values, published there - master-admin's too (Secret keycloak-admin).
+# corp's people are LDAP users: their password is the directory's published lab
+# value, Ldap123! (group-sync-operator-helm-chart, setup-local-ldap-testing,
+# ldap-shop-users.ldif). bob.wilson's is not known; he is asked with the same
+# value and refused before any password is checked - Keycloak does not find him.
 #
 # Every form goes to curl on its standard input, never as an argument: `oc exec`
 # sends its arguments in the request URL, and the API server's audit log records
@@ -34,6 +41,8 @@ ask() {
 # urlencode - stdin to stdout, encoded for a form value (a generated password may hold & + = %).
 urlencode() { python3 -c 'import sys, urllib.parse; sys.stdout.write(urllib.parse.quote(sys.stdin.read(), safe=""))'; }
 secret() { $KUBE get secret keycloak-admin -n keycloak -o jsonpath="{.data.$1}" | base64 -d; }
+# person <username> <password> - the password grant through shop-cli, the password encoded.
+person() { printf 'grant_type=password&client_id=shop-cli&username=%s&password=' "$1"; printf '%s' "$2" | urlencode; }
 
 case "${1:-}" in
   alice|bob)       printf 'grant_type=password&client_id=shop-cli&username=%s&password=%s-lab-password' "$1" "$1" | ask tutorial ;;
@@ -41,5 +50,6 @@ case "${1:-}" in
   alice-admin-cli) printf 'grant_type=password&client_id=admin-cli&username=alice&password=alice-lab-password' | ask tutorial ;;
   master-admin)    { printf 'grant_type=password&client_id=admin-cli&username='; secret username | urlencode
                      printf '&password=';                                        secret password | urlencode; } | ask master ;;
-  *) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  shop.alice|shop.bob|bob.wilson) person "$1" 'Ldap123!' | ask corp ;;
+  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

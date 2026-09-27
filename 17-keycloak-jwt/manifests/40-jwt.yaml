@@ -1,5 +1,6 @@
 # Step 4. Only requests with a valid token from the realm "tutorial", meant for
-# shop-api, get through - on the whole Gateway.
+# shop-api, get through - on the whole Gateway. Step 8 uses the second provider:
+# the realm "corp", whose people come from LDAP (module 18).
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy
 metadata:
@@ -9,6 +10,9 @@ spec:
   targetRefs:
   - { group: gateway.networking.k8s.io, kind: Gateway, name: eg }
   jwt:
+    # Two providers in one policy: Envoy Gateway joins them with Envoy's
+    # requires_any, so a token from EITHER realm passes (v1.9.1,
+    # internal/xds/translator/jwt.go, buildJWTRequirement) - step 8 shows it.
     providers:
     - name: keycloak
       # Must equal the token's iss claim exactly - module 16, step 9.
@@ -22,6 +26,23 @@ spec:
         uri: https://keycloak-service.keycloak.svc:8443/realms/tutorial/protocol/openid-connect/certs
         backendRefs:
         - { group: "", kind: Service, name: keycloak-service, namespace: keycloak, port: 8443 }
+      claimToHeaders:
+      - { claim: preferred_username, header: x-user }
+      - { claim: azp, header: x-client }
+    - name: corp
+      # The same Keycloak, another realm: its own issuer, and its own signing
+      # key (a different kid from tutorial's), so its own JWKS.
+      issuer: https://keycloak.apps-crc.testing/realms/corp
+      # corp's shop-cli puts shop-api in aud, as tutorial's does (module 18).
+      audiences: [shop-api]
+      remoteJWKS:
+        # The same Service - and so the same ReferenceGrant and BackendTLSPolicy
+        # - as above; only the realm in the path differs.
+        uri: https://keycloak-service.keycloak.svc:8443/realms/corp/protocol/openid-connect/certs
+        backendRefs:
+        - { group: "", kind: Service, name: keycloak-service, namespace: keycloak, port: 8443 }
+      # The same headers, so the app learns who called the same way whichever
+      # realm signed the token: x-user is the LDAP uid here.
       claimToHeaders:
       - { claim: preferred_username, header: x-user }
       - { claim: azp, header: x-client }

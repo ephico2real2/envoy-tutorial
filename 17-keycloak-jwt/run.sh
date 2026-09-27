@@ -11,6 +11,11 @@ need_keycloak() {
     && [ "$($KUBE get keycloakrealmimport tutorial -n keycloak -o jsonpath='{.status.conditions[?(@.type=="Done")].status}' 2>/dev/null)" = True ] \
     || { bad "module 16's Keycloak lab is not running - ../16-keycloak/run.sh deploy"; exit 1; }
 }
+# corp_state - the Done condition of module 18's realm import: "True" when realm
+# corp - the second issuer the policies name - has been imported.
+corp_state() {
+  $KUBE get keycloakrealmimport corp -n keycloak -o jsonpath='{.status.conditions[?(@.type=="Done")].status}' 2>/dev/null
+}
 
 deploy() {
   need_keycloak
@@ -27,6 +32,9 @@ deploy() {
   $KUBE apply -f manifests/30-trust-keycloak.yaml -f manifests/40-jwt.yaml -f manifests/50-admin-only.yaml >/dev/null
   wait_ready echo
   ok "Gateway eg programmed at $(gw_address "$NS" eg)"
+  # Not fatal: tutorial's tokens work without corp. Steps 8 to 10 need it.
+  [ "$(corp_state)" = True ] \
+    || echo "  note: realm corp is not imported - steps 8 to 10 need module 18 (../18-keycloak-ldap/run.sh deploy)"
 }
 
 # call <token|""> <path> [curl args...] - the response body and, last, " -> <status>".
@@ -36,6 +44,38 @@ call() {
   else incluster_curl -w ' -> %{http_code}' "$@" "http://$ADDR$path"; fi
 }
 condition() { $KUBE get "$1" -n "$2" -o jsonpath="{.status.ancestors[0].conditions[?(@.type==\"$3\")].status}"; }
+# requirements - from the running Envoy, one line per route: its path, how its JWT
+# requirement combines providers, and the realms of those providers' issuers, e.g.
+# "/api requires_any corp tutorial". The listener holds the requirements and the
+# providers; each route names the requirement it uses. Empty if Envoy cannot be asked.
+requirements() {
+  python3 - "$NS/eg" <<'PY' 2>/dev/null
+import json, subprocess, sys
+def dump(resource):
+    out = subprocess.run(["../_shared/eg-admin.sh", sys.argv[1], "config_dump?resource=" + resource],
+                         check=True, capture_output=True, text=True).stdout
+    return json.loads(out)["configs"]
+reqs, providers = {}, {}
+for l in dump("dynamic_listeners"):
+    listener = l["active_state"]["listener"]
+    for fc in [listener.get("default_filter_chain")] + listener.get("filter_chains", []):
+        for f in (fc or {}).get("filters", []):
+            for h in f["typed_config"].get("http_filters", []):
+                if h["name"].startswith("envoy.filters.http.jwt_authn"):
+                    reqs.update(h["typed_config"].get("requirement_map", {}))
+                    providers.update(h["typed_config"]["providers"])
+for c in dump("dynamic_route_configs"):
+    for vh in c["route_config"]["virtual_hosts"]:
+        for r in vh["routes"]:
+            name = r.get("typed_per_filter_config", {}).get("envoy.filters.http.jwt_authn", {}).get("requirement_name")
+            if name:
+                # One provider: {"provider_name": p}. Several: {"requires_any": {"requirements": [...]}}.
+                (kind, body), = reqs[name].items()
+                names = [body] if kind == "provider_name" else [x["provider_name"] for x in body["requirements"]]
+                realms = sorted(providers[p]["issuer"].rsplit("/", 1)[1] for p in names)
+                print(r["match"].get("path_separated_prefix", r["match"]), kind, " ".join(realms))
+PY
+}
 
 verify() {
   need_keycloak
@@ -57,8 +97,16 @@ verify() {
   assert "SecurityPolicy admin-only accepted"             "True" "$(condition securitypolicy/admin-only "$NS" Accepted)"
   assert "...and the Gateway's policy says it is overridden on /admin" "True" \
     "$(condition securitypolicy/keycloak-jwt "$NS" Overridden)"
+  STATS=$(../_shared/eg-admin.sh "$NS/eg" stats)
   assert "the keys came from keycloak-service over TLS" "yes" \
-    "$(../_shared/eg-admin.sh "$NS/eg" stats | awk -F': ' '/^cluster\.securitypolicy\/'"$NS"'\/keycloak-jwt\/jwt\/0\.ssl\.handshake:/ { print ($2 > 0) ? "yes" : "no" }')"
+    "$(awk -F': ' '/^cluster\.securitypolicy\/'"$NS"'\/keycloak-jwt\/jwt\/0\.ssl\.handshake:/ { print ($2 > 0) ? "yes" : "no" }' <<<"$STATS")"
+  # Provider 1 of keycloak-jwt is corp: Envoy Gateway numbers the JWKS clusters
+  # in the policy's provider order.
+  assert "...and corp's keys too" "yes" \
+    "$(awk -F': ' '/^cluster\.securitypolicy\/'"$NS"'\/keycloak-jwt\/jwt\/1\.ssl\.handshake:/ { print ($2 > 0) ? "yes" : "no" }' <<<"$STATS")"
+  REQS=$(requirements)
+  assert "/api accepts a token from either realm (requires_any)"   "/api requires_any corp tutorial"   "$(grep '^/api ' <<<"$REQS")"
+  assert "/admin accepts a token from either realm (requires_any)" "/admin requires_any corp tutorial" "$(grep '^/admin ' <<<"$REQS")"
 
   say "2. who gets through /api"
   assert_contains "no token -> 401"                 "Jwt is missing -> 401"   "$(call "" /api)"
@@ -88,6 +136,23 @@ PY
   R=$(call "$BOB" /admin -H 'x-client: forged-client')
   assert_contains "bob (admin) -> 200"    " -> 200"                    "$R"
   assert_contains "...and the app gets the token's client, not the caller's x-client" '"x-client": "shop-cli"' "$R"
+
+  say "4. realm corp: people from LDAP (module 18), admin from an LDAP group"
+  assert "realm corp imported (module 18)" "True" "$(corp_state)"
+  SHOP_ALICE=$(./token.sh shop.alice)
+  SHOP_BOB=$(./token.sh shop.bob)
+  R=$(call "$SHOP_ALICE" /api)
+  assert_contains "shop.alice (gate member) -> /api 200" " -> 200"                   "$R"
+  assert_contains "...and the app is told her LDAP uid" '"x-user": "shop.alice"'     "$R"
+  assert_contains "shop.bob -> /api 200"                " -> 200"                    "$(call "$SHOP_BOB" /api)"
+  assert_contains "shop.alice (not in keycloak-admin) -> /admin 403" "RBAC: access denied -> 403" "$(call "$SHOP_ALICE" /admin)"
+  R=$(call "$SHOP_BOB" /admin -H 'x-client: forged-client')
+  assert_contains "shop.bob (in keycloak-admin) -> /admin 200" " -> 200"             "$R"
+  assert_contains "...as himself"                       '"x-user": "shop.bob"'       "$R"
+  assert_contains "...and the app gets the token's client, not the caller's x-client" '"x-client": "shop-cli"' "$R"
+  # Refused by Keycloak, before the Gateway: the gate is corp's user search.
+  assert_contains "bob.wilson (outside the login gate): no corp token" "no token: {'error': 'invalid_grant'" \
+    "$(./token.sh bob.wilson 2>&1)"
   summary
 }
 
