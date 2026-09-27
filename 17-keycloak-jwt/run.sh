@@ -11,6 +11,9 @@ need_keycloak() {
   [ "$($KUBE get keycloak keycloak -n keycloak -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = True ] \
     && [ "$($KUBE get keycloakrealmimport tutorial -n keycloak -o jsonpath='{.status.conditions[?(@.type=="Done")].status}' 2>/dev/null)" = True ] \
     || { bad "module 16's Keycloak lab is not running - ../16-keycloak/run.sh deploy"; exit 1; }
+  # How the Gateway reaches keycloak-service over TLS: module 16's BackendTLSPolicy.
+  $KUBE get backendtlspolicy keycloak-service -n keycloak >/dev/null 2>&1 \
+    || { bad "no BackendTLSPolicy keycloak/keycloak-service - ../16-keycloak/run.sh deploy makes it"; exit 1; }
 }
 # corp_state - the Done condition of module 18's realm import: "True" when realm
 # corp - the second issuer the policies name - has been imported.
@@ -26,10 +29,6 @@ deploy() {
   $KUBE apply -f manifests/10-gateway.yaml >/dev/null
   gw_up "$NS" eg
   $KUBE apply -n "$NS" -f ../_shared/client.yaml -f ../_shared/echo-app.yaml -f manifests/20-routes.yaml >/dev/null
-  # Keycloak's CA, where the BackendTLSPolicy in the keycloak namespace reads it.
-  $KUBE create configmap keycloak-ca -n keycloak --dry-run=client -o yaml \
-    --from-literal=ca.crt="$($KUBE get secret keycloak-tls -n keycloak -o jsonpath='{.data.ca\.crt}' | base64 -d)" \
-    | $KUBE apply -f - >/dev/null
   $KUBE apply -f manifests/30-trust-keycloak.yaml -f manifests/40-jwt.yaml -f manifests/50-admin-only.yaml >/dev/null
   wait_ready echo
   ok "Gateway eg programmed at $(gw_address "$NS" eg)"
@@ -214,9 +213,9 @@ clean() {
   app_pause 17-keycloak-jwt
   gw_down "$NS" eg
   $KUBE delete -f manifests/10-gateway.yaml --ignore-not-found --wait=false >/dev/null 2>&1
-  # What this module added next to Keycloak - not the lab itself.
+  # What this module added next to Keycloak - its ReferenceGrant. The BackendTLSPolicy
+  # and its CA are module 16's, used by every Gateway that calls Keycloak.
   $KUBE delete -f manifests/30-trust-keycloak.yaml --ignore-not-found >/dev/null 2>&1
-  $KUBE delete configmap keycloak-ca -n keycloak --ignore-not-found >/dev/null 2>&1
   ok "namespace $NS deleting; module 16's Keycloak lab is left running"
 }
 

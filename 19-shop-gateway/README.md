@@ -31,10 +31,10 @@ one onto the other.
   [`18`](../18-keycloak-ldap/README.md)'s realm `corp` are running
   (`../18-keycloak-ldap/run.sh verify` passes), and the directory has the shop's
   users `shop.alice` and `shop.bob` (module 17, "Before you start").
-- Module [`17`](../17-keycloak-jwt/README.md) is deployed: its
-  `BackendTLSPolicy` `keycloak/keycloak-service` is how **every** Gateway reaches
-  Keycloak's Service over TLS. A Service port takes one `BackendTLSPolicy` (module
-  15), so this module uses that one rather than adding a second.
+- Module 16's `BackendTLSPolicy` `keycloak/keycloak-service` (its step 11) is
+  there: it is how **every** Gateway reaches Keycloak's Service over TLS. A
+  Service port takes one `BackendTLSPolicy` (module 15), so this module uses that
+  one rather than adding a second.
 - Envoy Gateway is installed (module [`12`](../12-gateway-api/README.md)).
 - Work from this folder: `cd 19-shop-gateway`.
 - This module uses the namespace **`envoy-19`**, adds a `ReferenceGrant` to
@@ -67,7 +67,7 @@ v1.9.1, `internal/xds/translator/httpfilters.go`: `oauth2` 9, `jwt_authn` 10,
 | `rbac` | `authorization` | the realm role `admin` may do anything; any `corp` token may `GET` and reserve stock; everything else is `403` |
 
 <!-- markdownlint-disable MD033 -->
-<img alt="Two callers reach Gateway eg in envoy-19. A browser on the laptop reaches it at http://localhost:19080, which CRC's network proxy forwards to the Gateway's MetalLB address; a command-line caller sends Authorization: Bearer with a JWT from client shop-cli. The Gateway runs one SecurityPolicy as three filters in order. First oauth2: a browser without a session gets a 302 to realm corp's login page at keycloak.apps-crc.testing, as client shop-kiosk with a PKCE S256 challenge; after the person signs in, Keycloak sends the browser back to /oauth2/callback with a code, which the Gateway swaps for tokens at keycloak-service:8443 and keeps in Secure, HttpOnly, SameSite=Lax cookies; on every later request it forwards the access token as Authorization: Bearer; a request that already carries a Bearer header skips this filter. Second jwt_authn: issuer realms/corp, audience shop-api, the signature with corp's public keys fetched from keycloak-service:8443 over TLS through module 17's BackendTLSPolicy and a ReferenceGrant, cached 300 seconds, and the expiry. Third rbac: the realm role admin may do anything; any corp token may GET and POST items/sku:reserve; everything else is denied with 403. Keycloak reads each person and their groups from the LDAP directory at every login: only members of app-ssb-autobahnusers may sign in, and app-ocp-rbac-ocp-keycloak-admin becomes the role admin. Allowed requests reach the shop vendored from envoy-grpc-modernization: its own Envoy turns REST and JSON into gRPC, then three inventory pods and MongoDB, and the kiosk page; NetworkPolicies let only this Gateway's Envoy call it. Measured answers, the same in the browser and on the command line: shop.alice lists and reserves, 200, and gets 403 RBAC access denied on create, delete and reset; shop.bob creates, deletes and resets, 200. An edited JWT gets 401 Jwt verification fails, a JWT from realm tutorial 401 Jwt issuer is not configured, an expired JWT 401 Jwt is expired; bob.wilson cannot sign in, Invalid username or password, user_not_found; the shop's Envoy called directly does not answer. Removing shop.bob from the admin group in LDAP takes admin away at his next sign-in, and from an open session at its next token refresh." src="../docs/diagrams/19-shop-gateway/flow.light.png">
+<img alt="Two callers reach Gateway eg in envoy-19. A browser on the laptop reaches it at http://localhost:19080, which CRC's network proxy forwards to the Gateway's MetalLB address; a command-line caller sends Authorization: Bearer with a JWT from client shop-cli. The Gateway runs one SecurityPolicy as three filters in order. First oauth2: a browser without a session gets a 302 to realm corp's login page at keycloak.apps-crc.testing, as client shop-kiosk with a PKCE S256 challenge; after the person signs in, Keycloak sends the browser back to /oauth2/callback with a code, which the Gateway swaps for tokens at keycloak-service:8443 and keeps in Secure, HttpOnly, SameSite=Lax cookies; on every later request it forwards the access token as Authorization: Bearer; a request that already carries a Bearer header skips this filter. Second jwt_authn: issuer realms/corp, audience shop-api, the signature with corp's public keys fetched from keycloak-service:8443 over TLS through module 16's BackendTLSPolicy and a ReferenceGrant, cached 300 seconds, and the expiry. Third rbac: the realm role admin may do anything; any corp token may GET and POST items/sku:reserve; everything else is denied with 403. Keycloak reads each person and their groups from the LDAP directory at every login: only members of app-ssb-autobahnusers may sign in, and app-ocp-rbac-ocp-keycloak-admin becomes the role admin. Allowed requests reach the shop vendored from envoy-grpc-modernization: its own Envoy turns REST and JSON into gRPC, then three inventory pods and MongoDB, and the kiosk page; NetworkPolicies let only this Gateway's Envoy call it. Measured answers, the same in the browser and on the command line: shop.alice lists and reserves, 200, and gets 403 RBAC access denied on create, delete and reset; shop.bob creates, deletes and resets, 200. An edited JWT gets 401 Jwt verification fails, a JWT from realm tutorial 401 Jwt issuer is not configured, an expired JWT 401 Jwt is expired; bob.wilson cannot sign in, Invalid username or password, user_not_found; the shop's Envoy called directly does not answer. Removing shop.bob from the admin group in LDAP takes admin away at his next sign-in, and from an open session at its next token refresh." src="../docs/diagrams/19-shop-gateway/flow.light.png">
 <!-- markdownlint-enable MD033 -->
 
 ### The choices, and why
@@ -156,12 +156,15 @@ Keycloak documentation — and measured on CRC:
    the Server Administration Guide: "operations that fetch a single user (for
    example during login) are usually cached").
 
-**The client secret is written in the realm file**, as module 16 writes
-`orders-service`'s — not a `spec.placeholders` entry from a Secret, which module
-16's "Adding an integration" asks for. A placeholder's Secret must live beside
-the import, in `keycloak`, and be module 18's; this module changes only module
-18's realm file. Both copies — the realm's and the Gateway's Secret — are
-published LAB values; outside a lab both come from a vault.
+**The client secret is written nowhere.** Module 16's "Adding an integration"
+recipe: credentials reach a realm through `spec.placeholders` from a Secret,
+owned by whoever owns the import. Realm `corp`'s import is module 18's, so module
+18's `run.sh deploy` generates Secret `keycloak/shop-kiosk-client` once — a
+random value — and never replaces it; this module's `run.sh deploy` copies the
+value into the Gateway's Secret `envoy-19/shop-kiosk-oidc` (step 6). Neither is in
+git, so neither is Argo CD's. What happens when the import runs before the Secret
+exists is measured in module 18 ("Permanent lab"): its Job waits, and completes
+once the Secret is there.
 
 ## Walkthrough
 
@@ -177,7 +180,7 @@ True
 ```
 
 **What just happened:** Keycloak is up, realm `corp` is imported, and module
-17's `BackendTLSPolicy` to Keycloak's Service is accepted — the Gateway will
+16's `BackendTLSPolicy` to Keycloak's Service is accepted — the Gateway will
 reach Keycloak through it.
 
 ### Step 2 — realm `corp` gets the kiosk's client
@@ -369,17 +372,26 @@ admits.
 
 ### Step 6 — sign-in, the JWT and the permissions: one SecurityPolicy
 
-Three files. [`manifests/50-trust-keycloak.yaml`](manifests/50-trust-keycloak.yaml)
-is a `ReferenceGrant` in `keycloak`: a policy in `envoy-19` may point at
-`keycloak-service`. [`manifests/60-kiosk-client-secret.yaml`](manifests/60-kiosk-client-secret.yaml)
-is the client secret, LAB ONLY. [`manifests/70-sign-in.yaml`](manifests/70-sign-in.yaml)
-is the policy, on the whole Gateway — read it: every field has its reason
-beside it, and [The options](#the-options) lists them.
+The client secret first. Module 18 generated it, in Secret `shop-kiosk-client`
+in `keycloak`, and the realm was imported with it (step 2); Envoy Gateway reads a
+client secret from a Secret in the policy's own namespace, under the key
+`client-secret`. Copy it across — the value goes from one Secret to the other
+through a pipe, never on a command line or the screen:
 
 ```console
-$ oc apply -f manifests/50-trust-keycloak.yaml -f manifests/60-kiosk-client-secret.yaml -f manifests/70-sign-in.yaml
-referencegrant.gateway.networking.k8s.io/envoy-19-signs-in-with-keycloak created
+$ oc get secret shop-kiosk-client -n keycloak -o jsonpath='{.data.client-secret}' | base64 -d | oc create secret generic shop-kiosk-oidc -n envoy-19 --from-file=client-secret=/dev/stdin --dry-run=client -o yaml | oc apply -f -
 secret/shop-kiosk-oidc created
+```
+
+Then [`manifests/50-trust-keycloak.yaml`](manifests/50-trust-keycloak.yaml), a
+`ReferenceGrant` in `keycloak` — a policy in `envoy-19` may point at
+`keycloak-service` — and [`manifests/70-sign-in.yaml`](manifests/70-sign-in.yaml),
+the policy, on the whole Gateway — read it: every field has its reason beside
+it, and [The options](#the-options) lists them.
+
+```console
+$ oc apply -f manifests/50-trust-keycloak.yaml -f manifests/70-sign-in.yaml
+referencegrant.gateway.networking.k8s.io/envoy-19-signs-in-with-keycloak created
 securitypolicy.gateway.envoyproxy.io/sign-in created
 $ sleep 20; oc get securitypolicy sign-in -n envoy-19 -o jsonpath='{range .status.ancestors[0].conditions[*]}{.type}={.status} {.message}{"\n"}{end}'
 Accepted=True Policy has been accepted.
@@ -424,6 +436,7 @@ $ ../_shared/crc-forward.sh ensure 127.0.0.1:19080 "$(oc get gateway eg -n envoy
 $ ../_shared/crc-forward.sh list
 /Users/olasumbo/.crc/machines/crc/docker.sock -> ssh-tunnel://core@192.168.127.2:22/run/podman/podman.sock?key=%2FUsers%2Folasumbo%2F.crc%2Fmachines%2Fcrc%2Fid_ed25519
 127.0.0.1:19080 -> 192.168.127.102:80
+127.0.0.1:20443 -> 192.168.127.130:443
 127.0.0.1:2222 -> 192.168.127.2:22
 127.0.0.1:6443 -> 192.168.127.2:6443
 :443 -> 192.168.127.2:443
@@ -715,12 +728,12 @@ $ grep -E '^  - name: |^    envoy\.filters\.http\.[a-z_0-9]+:$|^                
   - name: envoy.filters.http.jwt_authn
   - name: envoy.filters.http.rbac
   - name: envoy.filters.http.router
-    envoy.filters.http.jwt_authn:
-    envoy.filters.http.oauth2:
     envoy.filters.http.rbac:
                     name: admins
                     name: signed-in-may-read
                     name: signed-in-may-reserve
+    envoy.filters.http.oauth2:
+    envoy.filters.http.jwt_authn:
 ```
 
 **What just happened:** the listener's chain is **`oauth2` → `jwt_authn` →
@@ -745,6 +758,7 @@ $ ./run.sh verify
   ✓ Gateway programmed
   ✓ HTTPRoute shop accepted
   ✓ SecurityPolicy sign-in accepted
+  ✓ the Gateway's client secret is module 18's (Secret shop-kiosk-oidc = keycloak/shop-kiosk-client)
   ✓ realm corp's client shop-kiosk: its redirect URI, PKCE S256
   ✓ the Gateway's filter chain: oauth2, jwt_authn, rbac, router
 
@@ -814,7 +828,7 @@ all checks passed
 | `provider.authorizationEndpoint` | `keycloak.apps-crc.testing/…/auth` | where the browser is sent to sign in | discovered |
 | `provider.tokenEndpoint` | `keycloak-service.keycloak.svc:8443/…/token` | where Envoy swaps the code for tokens | discovered |
 | `provider.endSessionEndpoint` | `…/logout` | where `/logout` sends the browser | discovered, if any |
-| `provider.backendRefs` | `keycloak-service:8443` | the connection to the token endpoint — TLS from its `BackendTLSPolicy` | the endpoint's host |
+| `provider.backendRefs` | `keycloak-service:8443` | the connection to the token endpoint — TLS from its `BackendTLSPolicy` (module 16's) | the endpoint's host |
 | `clientID`, `clientSecret` | `shop-kiosk`, Secret `shop-kiosk-oidc` (`client-secret`) | who the Gateway is at Keycloak (HTTP Basic, `BASIC_AUTH`) | — |
 | `redirectURL` | `http://localhost:19080/oauth2/callback` | where Keycloak sends the code | `%REQ(x-forwarded-proto)%://%REQ(:authority)%/oauth2/callback` |
 | `logoutPath` | `/logout` | signs out | `/logout` |
@@ -841,7 +855,7 @@ all checks passed
 | Here (lab) | Production |
 |---|---|
 | a CRC forward to the MetalLB address, and `http://localhost:19080` | the MetalLB address, routable; a public hostname with a certificate the browsers trust, and the Gateway listening on HTTPS |
-| the client secret and the database password in git (LAB ONLY) | from a vault; the realm's through `spec.placeholders` |
+| the database password in git (LAB ONLY); the client secret generated by `run.sh` and copied between namespaces | both from a vault, the client secret delivered to both namespaces by it |
 | the password grant (`shop-cli`) for the command line | a service's client credentials, or a person's token from a device or browser flow |
 | `/whoami` echoes the bearer token | never echo a token |
 | `cachePolicy: NO_CACHE` — the directory at every login | the same, or `MAX_LIFESPAN` with a short `maxLifespan`, weighed against the directory's load |
@@ -891,7 +905,8 @@ module's `manifests/` and the echo app behind `/whoami` — the same files
 
 | What | Made by | Kept by | Why |
 |---|---|---|---|
-| namespace `envoy-19`, Gateway `eg`, the shop, the NetworkPolicies, `HTTPRoute` `shop`, `ReferenceGrant` in `keycloak`, Secret `shop-kiosk-oidc`, `SecurityPolicy` `sign-in` | `manifests/` | Argo CD | manifests |
+| namespace `envoy-19`, Gateway `eg`, the shop, the NetworkPolicies, `HTTPRoute` `shop`, `ReferenceGrant` in `keycloak`, `SecurityPolicy` `sign-in` | `manifests/` | Argo CD | manifests |
+| **Secret `shop-kiosk-oidc`** — the Gateway's copy of the client secret (step 6) | `./run.sh deploy`, from module 18's `keycloak/shop-kiosk-client` | nobody — `run.sh` only | not in git. Until it exists — a new cluster where Argo CD applied the policy first — the policy is not accepted; `./run.sh deploy` writes it. After a new value in module 18's Secret (and a re-import of `corp`), `./run.sh deploy` copies it again; `./run.sh verify` checks both hold the same |
 | the echo app | [`../_shared/echo-app.yaml`](../_shared/echo-app.yaml), with `-n envoy-19` | Argo CD — the Application's second source | as module 17 |
 | client `shop-kiosk` and `cachePolicy: NO_CACHE` in realm `corp` | module 18's realm file, imported once (step 2) | Argo CD `18-keycloak-ldap` keeps the import; the realm is created once | an import only creates (module 18, step 13) |
 | **the `nonroot-v2` grant** for the Gateway's Envoy, and its restart | `./run.sh deploy` | nobody — `run.sh` only | as module 17: one RoleBinding shared by every Gateway module |
@@ -901,7 +916,7 @@ module's `manifests/` and the echo app behind `/whoami` — the same files
 | the HMAC key the session cookies are signed with | Envoy Gateway (`envoy-gateway-system/envoy-oidc-hmac`) | Envoy Gateway | shared by every OIDC policy of the controller |
 
 `./run.sh deploy` checks what the module builds on — Keycloak, realm `corp` with
-`shop-kiosk`, module 17's `BackendTLSPolicy` — and stops with the step that makes
+`shop-kiosk`, module 16's `BackendTLSPolicy` — and stops with the step that makes
 the missing one. Module 16's `clean --delete-data` deletes namespace `keycloak`,
 and with it this module's `ReferenceGrant`: sign-in fails until module 16 is back
 and Argo CD, or `./run.sh deploy`, applies it again.
@@ -937,12 +952,12 @@ Gateway API object each part came from:
 |---|---|
 | `http_filters`: `envoy.filters.http.oauth2`, `envoy.filters.http.jwt_authn`, `envoy.filters.http.rbac`, `envoy.filters.http.router` — in that order | `SecurityPolicy sign-in`'s `oidc`, `jwt`, `authorization`; the order is Envoy Gateway's (`httpfilters.go`) |
 | per route, `oauth2` `config`: `authorization_endpoint`, `token_endpoint` (`cluster: securitypolicy/envoy-19/sign-in/oidc/0`), `end_session_endpoint`, `redirect_uri`, `redirect_path_matcher` `/oauth2/callback`, `signout_path` `/logout` | `oidc.provider.*`, `oidc.redirectURL`, `oidc.logoutPath` |
-| `credentials.client_id: shop-kiosk`; `token_secret` and `hmac_secret` by SDS name | `oidc.clientID`; `oidc.clientSecret` → Secret `shop-kiosk-oidc`; the HMAC key from Envoy Gateway's `envoy-oidc-hmac` |
+| `credentials.client_id: shop-kiosk`; `token_secret` and `hmac_secret` by SDS name | `oidc.clientID`; `oidc.clientSecret` → Secret `shop-kiosk-oidc` (module 18's generated value, copied); the HMAC key from Envoy Gateway's `envoy-oidc-hmac` |
 | `cookie_names` (`AccessToken-`, `IdToken-`, `RefreshToken-`, `OauthHMAC-`, `OauthExpires-`, `OauthNonce-`, `CodeVerifier-` + a suffix); `cookie_configs` `same_site: LAX`, the nonce and verifier on path `/oauth2/callback` | Envoy Gateway's names; `oidc.cookieConfig.sameSite` |
 | `forward_bearer_token: true`; `pass_through_matcher`: `Authorization`, prefix `Bearer ` | `oidc.forwardAccessToken`; `oidc.passThroughAuthHeader` with the JWT provider's default location |
 | `auth_scopes: [openid]`, `auth_type: BASIC_AUTH`, `use_refresh_token: true` | Envoy Gateway's defaults |
 | `jwt_authn` provider `corp_…`: `issuer`, `audiences: [shop-api]`, `remote_jwks` (`cluster: securitypolicy/envoy-19/sign-in/jwt/0`, `cache_duration: 300s`, `async_fetch`), `forward: true`, `payload_in_metadata: corp`, `claim_to_headers` `x-user`; per route, `requirement_name` | `jwt.providers[corp]`; `forward` and `payload_in_metadata` are Envoy Gateway's |
-| the two clusters' TLS to `keycloak-service` | `BackendTLSPolicy keycloak/keycloak-service` (module 17), allowed by the `ReferenceGrant` |
+| the two clusters' TLS to `keycloak-service` | `BackendTLSPolicy keycloak/keycloak-service` (module 16), allowed by the `ReferenceGrant` |
 | per route, `rbac` matchers `admins`, `signed-in-may-read`, `signed-in-may-reserve` — the claims read from `jwt_authn`'s metadata under `corp`; `:method` and `:path` headers — and `on_no_match` `DENY` | `authorization.rules`, `authorization.defaultAction` |
 | the routes `path_separated_prefix: /v1`, `path: /`, `/oauth2/callback`, `/logout`, `/whoami` | `HTTPRoute shop` |
 

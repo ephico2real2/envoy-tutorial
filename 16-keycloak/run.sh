@@ -7,6 +7,22 @@ NS=keycloak
 
 REALM=https://keycloak.apps-crc.testing/realms/tutorial
 
+# has_btp - the cluster serves Gateway API BackendTLSPolicies (OpenShift 4.19+ does).
+has_btp() { case "$($KUBE api-resources --api-group=gateway.networking.k8s.io -o name 2>/dev/null)" in (*backendtlspolicies*) return 0 ;; (*) return 1 ;; esac; }
+# gateway_trust - what every Gateway needs to reach keycloak-service over TLS: ConfigMap
+# keycloak-ca, copied from Secret keycloak-tls (this cluster's CA, so not in git), and
+# the BackendTLSPolicy that names it (70-backend-tls-policy.yaml). Skipped on a cluster
+# without the Gateway API.
+gateway_trust() {
+  has_btp || { echo "  note: no Gateway API BackendTLSPolicy on this cluster - 70-backend-tls-policy.yaml not applied"; return 0; }
+  $KUBE create configmap keycloak-ca -n "$NS" --dry-run=client -o yaml \
+    --from-literal=ca.crt="$($KUBE get secret keycloak-tls -n "$NS" -o jsonpath='{.data.ca\.crt}' | base64 -d)" \
+    | $KUBE apply -f - >/dev/null || { bad "ConfigMap keycloak-ca could not be written"; exit 1; }
+  $KUBE apply -f manifests/70-backend-tls-policy.yaml >/dev/null \
+    || { bad "the BackendTLSPolicy to keycloak-service could not be applied"; exit 1; }
+  ok "Gateways can reach keycloak-service over TLS: BackendTLSPolicy keycloak-service, CA in ConfigMap keycloak-ca"
+}
+
 # The operator version this Subscription installed. Not "every CSV in the
 # namespace": OLM copies the CSVs of cluster-wide operators into each one.
 installed_csv() { $KUBE get subscription rhbk-operator -n "$NS" -o jsonpath='{.status.installedCSV}' 2>/dev/null; }
@@ -38,6 +54,7 @@ deploy() {
   $KUBE wait keycloakrealmimport/tutorial -n "$NS" --for=condition=Done --timeout=300s >/dev/null \
     || { bad "the realm import did not finish"; exit 1; }
   ok "Keycloak ready at https://keycloak.apps-crc.testing, realm tutorial imported"
+  gateway_trust
   app_resume 16-keycloak
 }
 
@@ -81,6 +98,14 @@ verify() {
   assert_contains "the JWKS has an RS256 signing key" '"alg":"RS256"' "$JWKS"
   assert_contains "...reachable at the Service too, for in-cluster callers" '"alg":"RS256"' \
     "$(kc https://keycloak-service.keycloak.svc:8443/realms/tutorial/protocol/openid-connect/certs)"
+  if has_btp; then
+    assert "for Gateways: BackendTLSPolicy keycloak-service expects the Service's name" "keycloak-service.keycloak.svc" \
+      "$($KUBE get backendtlspolicy keycloak-service -n "$NS" -o jsonpath='{.spec.validation.hostname}' 2>/dev/null)"
+    assert "...and trusts Keycloak's CA (ConfigMap keycloak-ca = Secret keycloak-tls's ca.crt)" "same" \
+      "$([ -n "$($KUBE get configmap keycloak-ca -n "$NS" -o jsonpath='{.data.ca\.crt}' 2>/dev/null)" ] \
+         && [ "$($KUBE get configmap keycloak-ca -n "$NS" -o jsonpath='{.data.ca\.crt}')" = "$($KUBE get secret keycloak-tls -n "$NS" -o jsonpath='{.data.ca\.crt}' | base64 -d)" ] \
+         && echo same || echo differ)"
+  fi
 
   say "3. tokens"
   A=$(claims "$(token shop-cli -d grant_type=password -d username=alice -d password=alice-lab-password)")
@@ -110,9 +135,9 @@ clean() {
     --delete-data) wipe=yes ;;
     *) echo "usage: ./run.sh clean [--delete-data]"; exit 2 ;;
   esac
-  # Argo CD would put everything back as it is deleted. Modules 17 and 18 keep
-  # objects in this namespace too, so their Applications pause with it.
-  app_pause 16-keycloak 17-keycloak-jwt 18-keycloak-ldap
+  # Argo CD would put everything back as it is deleted. Modules 17, 18 and 19
+  # keep objects in this namespace too, so their Applications pause with it.
+  app_pause 16-keycloak 17-keycloak-jwt 18-keycloak-ldap 19-shop-gateway
   warn=$($KUBE get securitypolicy -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {end}' 2>/dev/null)
   [ -n "$warn" ] && echo "  note: SecurityPolicies that may use this Keycloak: $warn"
   if ! pv=$($KUBE get pvc data-postgres-0 -n "$NS" -o jsonpath='{.spec.volumeName}' 2>&1); then
@@ -150,6 +175,8 @@ clean() {
     # are kept unless persistentVolumeClaimRetentionPolicy says otherwise, and
     # 20-postgres.yaml sets none.
     $KUBE delete operatorgroup keycloak -n "$NS" --ignore-not-found >/dev/null 2>&1
+    $KUBE delete -f manifests/70-backend-tls-policy.yaml --ignore-not-found >/dev/null 2>&1
+    $KUBE delete configmap keycloak-ca -n "$NS" --ignore-not-found >/dev/null 2>&1
     $KUBE delete -f manifests/50-route.yaml -f manifests/40-keycloak.yaml -f manifests/30-certificate.yaml \
       -f manifests/20-postgres.yaml --ignore-not-found --wait=true >/dev/null 2>&1
     if [ -n "$pv" ] && [ "$($KUBE get pvc data-postgres-0 -n "$NS" -o jsonpath='{.spec.volumeName}' 2>/dev/null)" = "$pv" ]; then
@@ -162,7 +189,7 @@ clean() {
   fi
   echo "  note: OLM leaves the CRDs keycloaks.k8s.keycloak.org and keycloakrealmimports.k8s.keycloak.org installed"
   [ -z "$(app_automated 16-keycloak)" ] \
-    || echo "  note: to bring the lab back: ./run.sh deploy, then ../18-keycloak-ldap/run.sh deploy and ../17-keycloak-jwt/run.sh deploy - each resumes its Argo CD Application"
+    || echo "  note: to bring the lab back: ./run.sh deploy, then ../18-keycloak-ldap/run.sh deploy, ../17-keycloak-jwt/run.sh deploy and ../19-shop-gateway/run.sh deploy - each resumes its Argo CD Application"
 }
 
 case "${1:-deploy}" in

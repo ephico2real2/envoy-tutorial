@@ -13,11 +13,18 @@ metadata:
   namespace: keycloak
 spec:
   keycloakCRName: keycloak
-  # ${LDAP_BIND_PASSWORD} below is replaced, in the import Job only, with this
-  # Secret's value (10-bind-secret.yaml). The realm file holds no credential.
+  # ${LDAP_BIND_PASSWORD} and ${SHOP_KIOSK_CLIENT_SECRET} below are replaced, in
+  # the import Job only, with these Secrets' values. The realm file holds no
+  # credential.
   placeholders:
+    # 10-bind-secret.yaml.
     LDAP_BIND_PASSWORD:
       secret: { name: keycloak-ldap-bind, key: password }
+    # Not in git: ../run.sh deploy generates it once, a random value, and never
+    # changes it (README, step 2). Missing, the import cannot run: its Job waits
+    # for the Secret (README, "Permanent lab").
+    SHOP_KIOSK_CLIENT_SECRET:
+      secret: { name: shop-kiosk-client, key: client-secret }
   realm:
     realm: corp
     enabled: true
@@ -66,10 +73,9 @@ spec:
     - clientId: shop-kiosk
       enabled: true
       publicClient: false
-      # LAB ONLY: published, like realm tutorial's orders-service-lab-secret
-      # (module 16); module 19's Secret shop-kiosk-oidc holds the same value for
-      # the Gateway. Outside a lab both come from a vault.
-      secret: shop-kiosk-lab-secret
+      # From Secret shop-kiosk-client (placeholders, above). Module 19's run.sh
+      # copies the same value into the Gateway's namespace.
+      secret: ${SHOP_KIOSK_CLIENT_SECRET}
       standardFlowEnabled: true
       directAccessGrantsEnabled: false
       # The one place Keycloak sends a code back to: module 19's Gateway, which

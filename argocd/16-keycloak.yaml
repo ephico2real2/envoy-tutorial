@@ -1,5 +1,6 @@
 # Module 16 - the Keycloak offering: the operator's Subscription, PostgreSQL,
-# the certificate, the Keycloak server, its Route and realm tutorial - exactly
+# the certificate, the Keycloak server, its Route, realm tutorial and the
+# BackendTLSPolicy every Gateway reaches keycloak-service with - exactly
 # the files ../16-keycloak/run.sh applies. Argo CD keeps them as declared.
 #
 # No resources-finalizer (unlike the cluster's other Applications): deleting

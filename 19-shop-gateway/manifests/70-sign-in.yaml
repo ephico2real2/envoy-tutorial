@@ -31,7 +31,8 @@ spec:
       backendRefs:
       - { group: "", kind: Service, name: keycloak-service, namespace: keycloak, port: 8443 }
     # The confidential client in realm corp (../18-keycloak-ldap/manifests/20-realm.yaml)
-    # and its secret (60-kiosk-client-secret.yaml).
+    # and its secret: not in git - ../run.sh deploy copies it from module 18's
+    # generated Secret keycloak/shop-kiosk-client (README, step 6).
     clientID: shop-kiosk
     clientSecret: { name: shop-kiosk-oidc }
     # Where Keycloak sends the browser back. Fixed, and registered as the client's

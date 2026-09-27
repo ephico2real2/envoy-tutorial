@@ -53,9 +53,6 @@ route:
   match:
     path_separated_prefix: /v1
   typed_per_filter_config:
-    envoy.filters.http.jwt_authn:
-      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.PerRouteConfig
-      requirement_name: corp_c75e69e4addfef6c
     envoy.filters.http.rbac:
       "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBACPerRoute
       rbac:
@@ -194,13 +191,13 @@ route:
               ads: {}
               resource_api_version: V3
           cookie_names:
-            bearer_token: AccessToken-386b48f3
-            oauth_hmac: OauthHMAC-386b48f3
-            oauth_expires: OauthExpires-386b48f3
-            id_token: IdToken-386b48f3
-            refresh_token: RefreshToken-386b48f3
-            oauth_nonce: OauthNonce-386b48f3
-            code_verifier: CodeVerifier-386b48f3
+            bearer_token: AccessToken-1534c7de
+            oauth_hmac: OauthHMAC-1534c7de
+            oauth_expires: OauthExpires-1534c7de
+            id_token: IdToken-1534c7de
+            refresh_token: RefreshToken-1534c7de
+            oauth_nonce: OauthNonce-1534c7de
+            code_verifier: CodeVerifier-1534c7de
         redirect_uri: "http://localhost:19080/oauth2/callback"
         redirect_path_matcher:
           path:
@@ -236,3 +233,6 @@ route:
             path: /oauth2/callback
         stat_prefix: securitypolicy/envoy-19/sign-in
         end_session_endpoint: "https://keycloak.apps-crc.testing/realms/corp/protocol/openid-connect/logout"
+    envoy.filters.http.jwt_authn:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.PerRouteConfig
+      requirement_name: corp_c75e69e4addfef6c

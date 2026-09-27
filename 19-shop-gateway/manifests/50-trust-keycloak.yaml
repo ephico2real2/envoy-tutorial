@@ -3,7 +3,7 @@
 # sign-in's code for tokens (the OIDC token endpoint). A policy in envoy-19 may
 # point at a Service in keycloak only if keycloak says so - this ReferenceGrant.
 #
-# The TLS to keycloak-service needs no policy here: module 17's BackendTLSPolicy
+# The TLS to keycloak-service needs no policy here: module 16's BackendTLSPolicy
 # keycloak/keycloak-service applies to every Gateway that reaches that Service,
 # and a Service port takes one BackendTLSPolicy (README, "Before you start").
 apiVersion: gateway.networking.k8s.io/v1beta1

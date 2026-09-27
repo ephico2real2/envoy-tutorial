@@ -16,7 +16,7 @@ LOCAL=127.0.0.1:19080
 # What deploy applies after the Gateway, in this order: the shop, then the sign-in.
 SHOP="20-shop-db-secret 21-shop-database 22-shop-inventory-src 23-shop-inventory 24-shop-envoy-config
       25-shop-envoy-proto 26-shop-envoy 27-shop-kiosk-src 28-shop-kiosk 30-network-policy 40-route
-      50-trust-keycloak 60-kiosk-client-secret 70-sign-in"
+      50-trust-keycloak 70-sign-in"
 
 # kiosk_client - realm corp's client shop-kiosk as "<redirect URIs> <PKCE method>", or
 # nothing when there is none.
@@ -27,7 +27,7 @@ for c in json.load(sys.stdin):
     print(",".join(c["redirectUris"]), c["attributes"].get("pkce.code.challenge.method", "-"))' 2>/dev/null
 }
 # What this module builds on: module 16's Keycloak, module 18's realm corp with the
-# kiosk's client (README step 2), and module 17's BackendTLSPolicy to keycloak-service.
+# kiosk's client (README step 2), and module 16's BackendTLSPolicy to keycloak-service.
 need_lab() {
   [ "$($KUBE get keycloak keycloak -n keycloak -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = True ] \
     || { bad "module 16's Keycloak is not running - ../16-keycloak/run.sh deploy"; exit 1; }
@@ -36,7 +36,7 @@ need_lab() {
   [ -n "$(kiosk_client)" ] \
     || { bad "realm corp has no client shop-kiosk - README step 2 re-imports corp with it"; exit 1; }
   [ "$($KUBE get backendtlspolicy keycloak-service -n keycloak -o jsonpath='{.status.ancestors[0].conditions[?(@.type=="Accepted")].status}' 2>/dev/null)" = True ] \
-    || { bad "no accepted BackendTLSPolicy keycloak/keycloak-service - ../17-keycloak-jwt/run.sh deploy makes it"; exit 1; }
+    || { bad "no accepted BackendTLSPolicy keycloak/keycloak-service - ../16-keycloak/run.sh deploy makes it"; exit 1; }
 }
 
 # forward - on CRC, make the laptop's port 19080 reach the Gateway's MetalLB address,
@@ -54,6 +54,19 @@ forward() {
   esac
 }
 
+# kiosk_secret_copy - Secret shop-kiosk-oidc in envoy-19, the Gateway's copy of module
+# 18's shop-kiosk-client (key client-secret, which Envoy Gateway reads). The value goes
+# from one Secret to the other through a pipe, never an argument; an unchanged copy is
+# left as it is ("unchanged").
+kiosk_secret_copy() {
+  local v
+  v=$($KUBE get secret shop-kiosk-client -n keycloak -o jsonpath='{.data.client-secret}' 2>/dev/null)
+  [ -n "$v" ] || { bad "no Secret shop-kiosk-client in keycloak - ../18-keycloak-ldap/run.sh deploy makes it"; return 1; }
+  printf '%s' "$v" | base64 -d \
+    | $KUBE create secret generic shop-kiosk-oidc -n "$NS" --from-file=client-secret=/dev/stdin --dry-run=client -o yaml \
+    | $KUBE apply -f - >/dev/null || { bad "Secret shop-kiosk-oidc could not be written"; return 1; }
+}
+
 deploy() {
   need_lab
   say "deploying into $NS"
@@ -62,6 +75,7 @@ deploy() {
   ns_settle "$NS"
   $KUBE apply -f manifests/10-gateway.yaml >/dev/null || { bad "could not create the Gateway in $NS"; exit 1; }
   gw_up "$NS" eg
+  kiosk_secret_copy || exit 1
   local f
   for f in $SHOP; do
     $KUBE apply -f "manifests/$f.yaml" >/dev/null || { bad "manifests/$f.yaml could not be applied"; exit 1; }
@@ -166,6 +180,10 @@ verify() {
     "$($KUBE get httproute shop -n "$NS" -o jsonpath='{.status.parents[0].conditions[?(@.type=="Accepted")].status}')"
   assert "SecurityPolicy sign-in accepted" "True" \
     "$($KUBE get securitypolicy sign-in -n "$NS" -o jsonpath='{.status.ancestors[0].conditions[?(@.type=="Accepted")].status}')"
+  assert "the Gateway's client secret is module 18's (Secret shop-kiosk-oidc = keycloak/shop-kiosk-client)" "same" \
+    "$([ -n "$($KUBE get secret shop-kiosk-oidc -n "$NS" -o jsonpath='{.data.client-secret}' 2>/dev/null)" ] \
+       && [ "$($KUBE get secret shop-kiosk-oidc -n "$NS" -o jsonpath='{.data.client-secret}')" = "$($KUBE get secret shop-kiosk-client -n keycloak -o jsonpath='{.data.client-secret}')" ] \
+       && echo same || echo differ)"
   assert "realm corp's client shop-kiosk: its redirect URI, PKCE S256" \
     "http://localhost:19080/oauth2/callback S256" "$(kiosk_client)"
   assert "the Gateway's filter chain: oauth2, jwt_authn, rbac, router" \

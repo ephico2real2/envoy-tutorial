@@ -1,5 +1,5 @@
 # Module 17 - Keycloak's tokens at Gateway eg in envoy-17: the Gateway, the
-# routes, the ReferenceGrant and BackendTLSPolicy in keycloak, the two
+# routes, the ReferenceGrant in keycloak, the two
 # SecurityPolicies (../17-keycloak-jwt/manifests), and the echo app behind the
 # routes (../_shared/echo-app.yaml, which run.sh applies with -n envoy-17; its
 # objects carry no namespace, so they take this destination's).

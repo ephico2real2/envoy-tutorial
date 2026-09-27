@@ -11,10 +11,10 @@ with it. One per module, in OpenShift GitOps' instance
 
 | Application | Source | Keeps |
 |---|---|---|
-| [`16-keycloak`](16-keycloak.yaml) | `16-keycloak/manifests` | namespace `keycloak`, the operator's `Subscription`, PostgreSQL, the certificate, the `Keycloak` resource, its Route, realm import `tutorial` |
-| [`17-keycloak-jwt`](17-keycloak-jwt.yaml) | `17-keycloak-jwt/manifests`, and `_shared/echo-app.yaml` into `envoy-17` | namespace `envoy-17`, Gateway `eg`, its routes and SecurityPolicies, the `ReferenceGrant` and `BackendTLSPolicy` in `keycloak`, the echo app |
-| [`18-keycloak-ldap`](18-keycloak-ldap.yaml) | `18-keycloak-ldap/manifests` | the LDAP bind password's Secret, realm import `corp` |
-| [`19-shop-gateway`](19-shop-gateway.yaml) | `19-shop-gateway/manifests`, and `_shared/echo-app.yaml` into `envoy-19` | namespace `envoy-19`, Gateway `eg`, the shop (vendored from `envoy-grpc-modernization`), its NetworkPolicies, route, `SecurityPolicy` and client Secret, the `ReferenceGrant` in `keycloak`, the echo app behind `/whoami` — an integration of the offering (module 16's index) |
+| [`16-keycloak`](16-keycloak.yaml) | `16-keycloak/manifests` | namespace `keycloak`, the operator's `Subscription`, PostgreSQL, the certificate, the `Keycloak` resource, its Route, realm import `tutorial`, the `BackendTLSPolicy` every Gateway reaches `keycloak-service` with |
+| [`17-keycloak-jwt`](17-keycloak-jwt.yaml) | `17-keycloak-jwt/manifests`, and `_shared/echo-app.yaml` into `envoy-17` | namespace `envoy-17`, Gateway `eg`, its routes and SecurityPolicies, the `ReferenceGrant` in `keycloak`, the echo app |
+| [`18-keycloak-ldap`](18-keycloak-ldap.yaml) | `18-keycloak-ldap/manifests` | the LDAP bind password's Secret, realm import `corp` (not Secret `shop-kiosk-client`, which `run.sh` generates) |
+| [`19-shop-gateway`](19-shop-gateway.yaml) | `19-shop-gateway/manifests`, and `_shared/echo-app.yaml` into `envoy-19` | namespace `envoy-19`, Gateway `eg`, the shop (vendored from `envoy-grpc-modernization`), its NetworkPolicies, route and `SecurityPolicy`, the `ReferenceGrant` in `keycloak` (not the client Secret, which `run.sh` copies), the echo app behind `/whoami` — an integration of the offering (module 16's index) |
 
 Beside the Keycloak offering, one more Application keeps a piece of platform that
 module 20 builds on
@@ -128,6 +128,35 @@ altogether (`controller/appcontroller.go`, `canProcessApp`), so its status would
 no longer show what differs. The `argocd`
 CLI is not installed here (`which argocd`: not found); `oc patch` is all it takes.
 `oc apply -f argocd/` resumes too: the files say `enabled: true`.
+
+## Moving an object from one Application to another
+
+Argo CD here tracks what it keeps by an **annotation**, not a label: `argocd-cm`
+says `application.resourceTrackingMethod: annotation`, and each kept object
+carries `argocd.argoproj.io/tracking-id: <application>:<group>/<kind>:<namespace>/<name>`
+(no `app.kubernetes.io/instance` label — measured on the `BackendTLSPolicy` below).
+An Application's own objects are the live ones whose annotation names it, plus the
+ones its git files declare (gitops-engine, `pkg/cache/cluster.go`,
+`GetManagedLiveObjs`; argo-cd v3.4.7, `controller/cache/cache.go`); what it owns
+and git no longer declares, it **prunes** (`prune: true`). An object git declares
+for an Application while another's annotation is on it gets a
+`SharedResourceWarning` (`controller/state.go`), and a sync of the declaring
+Application writes its own annotation (read in the source, not yet measured for
+an object another Application annotated — step 3 below checks it).
+
+So when a file moves from one module's `manifests/` to another's — the
+`BackendTLSPolicy` `keycloak/keycloak-service`, from 17 to 16 (#15) — the old
+Application must not look before the new one has taken it: seeing its annotation
+and no file, it deletes the object. The order, around the merge:
+
+1. `17-keycloak-jwt/run.sh pause` — the old owner makes no change.
+2. Merge.
+3. Let `16-keycloak` compare and sync (`16-keycloak/run.sh resume` asks for it and
+   waits for `Synced/Healthy`) until the object's `tracking-id` names
+   `16-keycloak`.
+4. `17-keycloak-jwt/run.sh resume` — the annotation is not 17's any more: nothing
+   to prune.
+5. The object's `uid` is the one recorded before step 1: it was never deleted.
 
 ## How these differ from the cluster's other Applications
 
