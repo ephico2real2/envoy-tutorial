@@ -208,12 +208,12 @@ secret/ldap-root-ca created
 $ loaded=no; for i in $(seq 1 60); do secret=$(oc get secret ldap-root-ca -n keycloak -o jsonpath='{.data.ldap-root-ca\.pem}' | base64 -d | openssl x509 -noout -fingerprint -sha256 2>/dev/null); mounted=$(oc exec -n keycloak keycloak-0 -- cat /opt/keycloak/conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null); logged=$(oc logs keycloak-0 -n keycloak 2>/dev/null | grep TruststoreBuilder | grep -o 'secret-ldap-root-ca/\.\.20[^/]*' | tail -n 1); linked=$(oc exec -n keycloak keycloak-0 -- readlink -f /opt/keycloak/conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem 2>/dev/null | grep -o 'secret-ldap-root-ca/\.\.20[^/]*'); [ -n "$secret" ] && [ "$secret" = "$mounted" ] && [ -n "$logged" ] && [ "$logged" = "$linked" ] && { loaded=yes; break; }; sleep 5; done; [ "$loaded" = yes ] && oc wait pod/keycloak-0 -n keycloak --for=condition=Ready --timeout=300s || { echo "Keycloak has not loaded the Secret's root, or is not Ready - the root is NOT trusted"; false; }
 pod/keycloak-0 condition met
 $ oc logs keycloak-0 -n keycloak | grep TruststoreBuilder | grep -o 'secret-ldap-root-ca/\.\.20[^/]*' | tail -n 1; oc exec -n keycloak keycloak-0 -- readlink -f /opt/keycloak/conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem
-secret-ldap-root-ca/..2026_09_27_02_55_51.1233400631
-/opt/keycloak/conf/truststores/secret-ldap-root-ca/..2026_09_27_02_55_51.1233400631/ldap-root-ca.pem
+secret-ldap-root-ca/..2026_09_27_04_50_12.2373335208
+/opt/keycloak/conf/truststores/secret-ldap-root-ca/..2026_09_27_04_50_12.2373335208/ldap-root-ca.pem
 $ oc get pod keycloak-0 -n keycloak -o jsonpath='{.spec.containers[0].volumeMounts[?(@.name=="truststore-secret-ldap-root-ca")].mountPath}{"\n"}'
 /opt/keycloak/conf/truststores/secret-ldap-root-ca
 $ oc logs keycloak-0 -n keycloak | grep TruststoreBuilder | grep -o 'Found the following truststore files.*'
-Found the following truststore files in the truststore paths [/var/run/secrets/kubernetes.io/serviceaccount/ca.crt, /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..data/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..2026_09_27_02_55_51.1233400631/ldap-root-ca.pem]
+Found the following truststore files in the truststore paths [/var/run/secrets/kubernetes.io/serviceaccount/ca.crt, /var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..data/ldap-root-ca.pem, /opt/keycloak/bin/../conf/truststores/secret-ldap-root-ca/..2026_09_27_04_50_12.2373335208/ldap-root-ca.pem]
 ```
 
 **What just happened:** the operator restarted Keycloak with the Secret mounted
@@ -274,14 +274,13 @@ The filter needs `memberOf`, and this directory keeps `memberOf` only for
 `groupOfUniqueNames` groups — which `app-ssb-autobahnusers` is. List the users, as
 the admin console's **Users** page does:
 
-<!-- output pending the from-scratch run.py --update pass: pasted before ldap-shop-users.ldif; measured since (2026-09-27) the gate holds 9 people and corp lists 9 users, shop.alice and shop.bob among them -->
 ```console
 $ ./admin.sh GET /admin/realms/corp/users/count; echo
 0
 $ ./admin.sh GET '/admin/realms/corp/users?briefRepresentation=true&max=100' | python3 -c 'import json,sys; print(sorted(u["username"] for u in json.load(sys.stdin)))'
-['alice.cooper', 'dana.lee', 'jane.smith', 'jeff', 'john.doe', 'lateef.o', 'sarah.jones']
+['alice.cooper', 'dana.lee', 'jane.smith', 'jeff', 'john.doe', 'lateef.o', 'sarah.jones', 'shop.alice', 'shop.bob']
 $ ./admin.sh GET /admin/realms/corp/users/count; echo
-7
+9
 ```
 
 **What just happened:** `corp` held nobody — users are imported when they are
@@ -411,9 +410,9 @@ out of that window):
 
 ```console
 $ sleep 2; T=$(date -u +%Y-%m-%dT%H:%M:%SZ); sleep 1; ./token.sh sarah.jones >/dev/null; sleep 2; oc logs -n ldap-testing deploy/openldap-server -c openldap --since-time="$T" | grep -E 'BIND dn="(cn=keycloak-bind-serviceid|uid=sarah.jones)[^"]*" mech|SRCH base="ou=People|SRCH base="ou=Groups' | sed -E 's/^[0-9a-f]+ //; s/(filter=".{60}).*/\1.../'
-conn=7973 op=0 BIND dn="cn=keycloak-bind-serviceid,ou=TrustedApplications,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
-conn=7973 op=1 SRCH base="ou=People,dc=ephico2real,dc=com" scope=1 deref=3 filter="(&(entryUUID=499e85a4-480f-1041-84a7-371855b7826b)(memberOf=...
-conn=7974 op=0 BIND dn="uid=sarah.jones,ou=People,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
+conn=10454 op=0 BIND dn="cn=keycloak-bind-serviceid,ou=TrustedApplications,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
+conn=10454 op=1 SRCH base="ou=People,dc=ephico2real,dc=com" scope=1 deref=3 filter="(&(entryUUID=499e85a4-480f-1041-84a7-371855b7826b)(memberOf=...
+conn=10455 op=0 BIND dn="uid=sarah.jones,ou=People,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
 ```
 
 **What just happened:** Keycloak opened a connection, **bound as the bind
