@@ -1,0 +1,41 @@
+# Module 17 - Keycloak's tokens at Gateway eg in envoy-17: the Gateway, the
+# routes, the ReferenceGrant and BackendTLSPolicy in keycloak, the two
+# SecurityPolicies (../17-keycloak-jwt/manifests), and the echo app behind the
+# routes (../_shared/echo-app.yaml, which run.sh applies with -n envoy-17; its
+# objects carry no namespace, so they take this destination's).
+#
+# No resources-finalizer: deleting this Application leaves the lab running.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: 17-keycloak-jwt
+  namespace: openshift-gitops
+  annotations:
+    # Diff by a server-side dry run: the API server's defaults (an HTTPRoute's
+    # backendRefs weight, a StatefulSet's volumeClaimTemplates status) are
+    # then part of both sides, not a difference Argo CD would "heal" forever.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: default
+  sources:
+  - repoURL: https://github.com/ephico2real2/envoy-tutorial.git
+    targetRevision: main
+    path: 17-keycloak-jwt/manifests
+  - repoURL: https://github.com/ephico2real2/envoy-tutorial.git
+    targetRevision: main
+    path: _shared
+    directory:
+      include: echo-app.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: envoy-17
+  syncPolicy:
+    automated:
+      enabled: true
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff: { duration: 5s, factor: 2, maxDuration: 3m }
+    syncOptions:
+    - ServerSideApply=true

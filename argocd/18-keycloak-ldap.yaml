@@ -1,0 +1,37 @@
+# Module 18 - realm corp: the LDAP bind password's Secret and the realm import
+# (../18-keycloak-ldap/manifests). The directory's root CA, Secret ldap-root-ca,
+# is not here: ../18-keycloak-ldap/run.sh deploy fetches it and checks it
+# against the PKI owner's copy on each cluster (its README, "Permanent lab").
+#
+# Namespace keycloak belongs to 16-keycloak; this Application only adds to it.
+# No resources-finalizer: deleting this Application leaves the lab running.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: 18-keycloak-ldap
+  namespace: openshift-gitops
+  annotations:
+    # Diff by a server-side dry run: the API server's defaults (an HTTPRoute's
+    # backendRefs weight, a StatefulSet's volumeClaimTemplates status) are
+    # then part of both sides, not a difference Argo CD would "heal" forever.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ephico2real2/envoy-tutorial.git
+    targetRevision: main
+    path: 18-keycloak-ldap/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      enabled: true
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff: { duration: 5s, factor: 2, maxDuration: 3m }
+    syncOptions:
+    - ServerSideApply=true
+    - SkipDryRunOnMissingResource=true

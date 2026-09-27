@@ -39,7 +39,9 @@ Everything is declared in two Kubernetes resources — module 16's `Keycloak`, a
   steps below need them: `brew install openssl`.
 - Work from this folder: `cd 18-keycloak-ldap`.
 - This module works in the namespace **`keycloak`**, reads `ldap-testing` and
-  `openshift-config`, and takes about 20 minutes. It restarts Keycloak once.
+  `openshift-config`, and takes about 20 minutes. It restarts Keycloak once. On
+  the operator's CRC it is **permanent**, kept by Argo CD: see
+  [Permanent lab](#permanent-lab) before you change anything by hand there.
 
 ## The picture
 
@@ -441,12 +443,16 @@ An import only **creates** a realm. Measured, one change at a time:
 | **delete the realm, then delete and re-apply the import** | a new Job creates `corp` from the file |
 
 So a change is: change the file, delete the realm, delete the import, apply.
+On the permanent lab Argo CD would undo each step as it happens, so the steps
+below start with `./run.sh pause` and end with `./run.sh resume`
+([Permanent lab](#permanent-lab)); on a cluster without it, they do nothing.
 `./run.sh deploy` repairs the second row by itself: when realm `corp` is missing
 and its import is not, it deletes the import and applies it again — and it only
 reports success once the realm exists.
 Here with a token lifespan of 600 s instead of 300 — first applied the wrong way:
 
 ```console
+$ ./run.sh pause >/dev/null
 $ sed 's/accessTokenLifespan: 300/accessTokenLifespan: 600/' manifests/20-realm.yaml | oc apply -f -
 keycloakrealmimport.k8s.keycloak.org/corp configured
 $ sleep 30; ./admin.sh GET /admin/realms/corp | python3 -c 'import json,sys; print("accessTokenLifespan", json.load(sys.stdin)["accessTokenLifespan"])'
@@ -476,6 +482,7 @@ $ oc wait keycloakrealmimport/corp -n keycloak --for=condition=Done --timeout=30
 keycloakrealmimport.k8s.keycloak.org/corp condition met
 $ ./admin.sh GET /admin/realms/corp | python3 -c 'import json,sys; print("accessTokenLifespan", json.load(sys.stdin)["accessTokenLifespan"])'
 accessTokenLifespan 300
+$ ./run.sh resume >/dev/null
 ```
 
 **What just happened:** deleting the realm deleted everything Keycloak held for
@@ -604,11 +611,81 @@ captures, zoomed, checked with `tooling/screenshot/verify.py`):
 - Realm roles: `admin`.
 - Optional: `sarah.jones` signing in to her account console.
 
+## Permanent lab
+
+On the operator's CRC realm `corp` stays: it is the Keycloak offering's
+directory-backed realm (module 16, [Permanent lab](../16-keycloak/README.md#permanent-lab)).
+Argo CD's Application `18-keycloak-ldap`
+([`../argocd/18-keycloak-ldap.yaml`](../argocd/18-keycloak-ldap.yaml)) keeps this
+module's `manifests/` as they are on the `main` branch — the bind password's
+Secret and the realm import:
+
+<!-- walkthrough: skip -->
+```console
+$ oc get applications.argoproj.io 18-keycloak-ldap -n openshift-gitops -o jsonpath='{range .status.resources[*]}{.kind}/{.name}  {.status}{"\n"}{end}'
+Secret/keycloak-ldap-bind  Synced
+KeycloakRealmImport/corp  Synced
+```
+
+(This block needs the Application, so the walkthrough runner skips it; it was
+run as written.)
+
+### What `./run.sh deploy` makes, and who keeps it
+
+| What | Made by | Kept by | Why |
+|---|---|---|---|
+| Secret `keycloak-ldap-bind`, `KeycloakRealmImport corp` | `manifests/` | Argo CD | manifests. Measured: a deleted import was back in 0.7 s, and its new Job logged `Realm 'corp' already exists. Import skipped` |
+| realm `corp` itself, in Keycloak's database | the import's Job, once | nobody | an import only creates. A deleted realm is not imported again while its import says `Done` (step 13), and Argo CD sees nothing to repair: the import is unchanged. `./run.sh deploy` repairs it — it pauses the Application, deletes the import and applies it again (measured with Argo CD on: realm deleted, `deploy` brought it back and resumed the Application, `Synced/Healthy`) |
+| **Secret `ldap-root-ca`** — the directory's root CA, fetched from the wire and checked (steps 4 to 6) | `./run.sh deploy` | nobody — `run.sh` only | [below](#why-the-directorys-root-is-not-in-git) |
+| the truststore entry that mounts it | module 16's `Keycloak` resource | Argo CD, `16-keycloak` | one owner (step 6) |
+| Keycloak's restart after the Secret changes | the Keycloak operator | — | about 45 s after the change (step 6) |
+| pod `client` in `keycloak` | module 16 (step 6) or `./run.sh verify` | nobody | a test tool |
+
+### Why the directory's root is not in git
+
+The root is a **public** certificate — nothing in it is secret — so git could hold
+it, as a Secret manifest beside the realm import, and Argo CD would put it back if
+it were deleted. It stays out, for two reasons:
+
+- **It belongs to one cluster.** The chart that builds the directory makes a new
+  self-signed root on every cluster it runs on (group-sync-operator-helm-chart,
+  `setup-local-ldap-testing/15-bootstrap-cert-manager-ca.sh`:
+  `ClusterIssuer/ldap-selfsigned-bootstrap` → `Certificate/ldap-enterprise-root-ca`).
+  The root in step 5, `0E:1F:4B:E3:…:A7:0E:14:26`, is this CRC's. In this
+  module's `manifests/` — the files every reader applies — it would be wrong on
+  every other cluster, and Argo CD would enforce a wrong root here too the day the
+  directory's CA is rebuilt.
+- **Trusting it takes the out-of-band check, and `run.sh` makes it every time.**
+  `./run.sh deploy` fetches the root, compares it with the PKI owner's copy
+  (`openshift-config/ca-config-map`), stops on a mismatch, and writes the Secret
+  only when it changed (which restarts Keycloak). A new root — this one expires on
+  2036-09-16 — is one `./run.sh deploy`, checked, with no commit. In git, the
+  check would move to whoever reviews the commit, and each cluster would need a
+  copy of its own.
+
+What it costs: nothing puts back a **deleted** `ldap-root-ca` by itself. Keycloak
+restarts without it — 5 s after the delete, measured (Clean up) — and LDAP logins
+fail; `./run.sh verify` fails on "Secret ldap-root-ca holds the PKI owner's root",
+and `./run.sh deploy` restores it, checked.
+
+### Walkthroughs, experiments and clean
+
+Step 13 changes the realm import on purpose — a changed file, then the import
+deleted and applied again. With Argo CD on, the file's change is undone, and a
+deleted import is created again from `main` before you apply yours. So step 13
+pauses this module's Application first and resumes it after — `./run.sh pause`,
+`./run.sh resume` on its command lines, as in module 16's
+[Permanent lab](../16-keycloak/README.md#permanent-lab); they do nothing on a
+cluster without the Application.
+`./run.sh clean` pauses it for you, and `./run.sh deploy` resumes it at its end.
+
 ## Clean up
 
 Leave `corp` in place if you go on: module 17's Gateway accepts its tokens beside
 realm `tutorial`'s (module 17, steps 8 to 10).
-To remove what this module added — the realm, its import, the two Secrets.
+On the permanent lab a clean-up is a deliberate reset: pause Argo CD first
+(`./run.sh pause`), or it puts the import and the bind Secret back as you delete
+them. To remove what this module added — the realm, its import, the two Secrets.
 Module 16's `Keycloak` keeps its `truststores` entry: it is optional. But the
 Secret it names is gone, so the operator **restarts Keycloak** — measured: it
 stopped `keycloak-0` 5 seconds after the delete, and the new Keycloak trusts the
@@ -618,6 +695,8 @@ at most, each — as `./run.sh clean` does:
 
 <!-- walkthrough: skip -->
 ```console
+$ ./run.sh pause
+  ✓ Argo CD Application 18-keycloak-ldap paused: it no longer puts back what changes
 $ ./admin.sh DELETE /admin/realms/corp
 $ oc delete keycloakrealmimport corp -n keycloak
 $ oc delete -f manifests/10-bind-secret.yaml
@@ -628,8 +707,10 @@ $ old=$(oc get pod keycloak-0 -n keycloak -o jsonpath='{.metadata.uid}'); new=$o
 ## The shortcut
 
 `./run.sh deploy` does steps 4 to 6 and 2 — fetch, check (and stop on a
-mismatch), trust, import; `./run.sh verify` is step 14; `./run.sh clean` is the
-clean-up.
+mismatch), trust, import — and resumes Argo CD's Application if there is one;
+`./run.sh verify` is step 14; `./run.sh clean` is the clean-up, with the
+Application paused first; `./run.sh pause` and `./run.sh resume` are the
+[Permanent lab](#permanent-lab)'s.
 
 ## References
 

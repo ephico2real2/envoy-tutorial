@@ -1,0 +1,49 @@
+# Module 16 - the Keycloak offering: the operator's Subscription, PostgreSQL,
+# the certificate, the Keycloak server, its Route and realm tutorial - exactly
+# the files ../16-keycloak/run.sh applies. Argo CD keeps them as declared.
+#
+# No resources-finalizer (unlike the cluster's other Applications): deleting
+# this Application must leave the lab running. With the finalizer, Argo CD would
+# delete every object it manages - namespace keycloak, and with it the
+# database's volume claim. The Namespace manifest also carries Prune=false, so
+# automated prune cannot delete it either, whatever a later commit on main does;
+# ./run.sh clean --delete-data is the deliberate way.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: 16-keycloak
+  namespace: openshift-gitops
+  annotations:
+    # Diff by a server-side dry run: the API server's defaults (an HTTPRoute's
+    # backendRefs weight, a StatefulSet's volumeClaimTemplates status) are
+    # then part of both sides, not a difference Argo CD would "heal" forever.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ephico2real2/envoy-tutorial.git
+    targetRevision: main
+    path: 16-keycloak/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      # run.sh pause | resume switch this, and nothing else (README.md here).
+      enabled: true
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff: { duration: 5s, factor: 2, maxDuration: 3m }
+    syncOptions:
+    # Server-side apply: Argo CD owns the fields it applies and leaves the rest,
+    # so run.sh's `oc apply` of the same files and `oc diff` agree with it. Side
+    # effect: an object Argo CD applies loses kubectl's last-applied annotation
+    # (kubectl moves the fields of kubectl-client-side-apply to Argo CD's field
+    # manager, which does not declare it - measured, and k8s.io/kubectl v0.34
+    # apply.go, migrateToSSAIfNecessary), so the next `oc apply` of it warns that
+    # the annotation is missing and adds it back. Harmless.
+    - ServerSideApply=true
+    # Keycloak and KeycloakRealmImport exist only once the operator is installed.
+    - SkipDryRunOnMissingResource=true
