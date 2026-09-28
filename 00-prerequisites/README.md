@@ -162,8 +162,10 @@ runs MetalLB's controller and a speaker on each node.
 
 - **The pool.** An `IPAddressPool` holds the addresses MetalLB may hand out.
   - This cluster has `mongot-pool`, `192.168.127.100` to `.120`.
-  - It has `autoAssign: false`, so a Service gets an address only by naming the
-    pool (`metallb.io/address-pool`, or the older `metallb.universe.tf/…`). The
+  - It has `autoAssign: false`, so MetalLB does not choose it automatically.
+    A Service can request the pool (`metallb.io/address-pool`, or the older
+    `metallb.universe.tf/…`) or a specific IP in it (`metallb.io/loadBalancerIPs`,
+    or deprecated `spec.loadBalancerIP`). The
     Gateways of modules 12 to 17 name it through the shared
     `EnvoyProxy openshift-scc` (`12-gateway-api/manifests/20-envoyproxy.yaml`).
 - **Layer 2.** An `L2Advertisement` makes a node answer ARP for those addresses

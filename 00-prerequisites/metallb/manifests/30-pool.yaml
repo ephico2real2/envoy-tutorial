@@ -2,9 +2,10 @@
 #
 # mongot-pool: 192.168.127.100-120, on the CRC network 192.168.127.0/24 where the
 # node's br-ex is 192.168.127.2. It avoids gvproxy's own addresses there: .1 the
-# gateway, .254 the host. autoAssign: false, so only a Service that names the pool
-# (annotation metallb.io/address-pool, or the deprecated metallb.universe.tf/address-pool)
-# gets one of its addresses.
+# gateway, .254 the host. autoAssign: false disables automatic pool selection.
+# A Service can request the pool by metallb.io/address-pool (or the deprecated
+# metallb.universe.tf/address-pool), or a specific IP within it with
+# metallb.io/loadBalancerIPs (or deprecated spec.loadBalancerIP).
 #
 # mongot-l2: the node answers ARP for the pool's addresses on br-ex only. Without
 # `interfaces`, the speaker would answer on every interface of the node.

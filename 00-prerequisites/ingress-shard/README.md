@@ -80,8 +80,10 @@ mongodb-poc/mongot-grpc-lb  192.168.127.100  mongot-pool
 
 **What just happened:** there is one pool, `mongot-pool`, holding
 `192.168.127.100` to `.120`, with `autoAssign: false`. With that setting a
-Service gets one of its addresses only when it asks for the pool by name, in the
-annotation `metallb.io/address-pool` (or the older `metallb.universe.tf/…`). The
+Service must explicitly request the pool by name, in the annotation
+`metallb.io/address-pool` (or the older `metallb.universe.tf/…`), or request an
+IP within it through `metallb.io/loadBalancerIPs` (or deprecated
+`spec.loadBalancerIP`). The
 Services listed asked for it: `mongodb-poc`'s and the Gateways of modules 17 and
 19. `mongot-l2` advertises the pool at layer 2 on `br-ex`, the node's interface
 on the CRC network: the node answers ARP for those addresses.
@@ -134,9 +136,10 @@ defines a pool that **selects the Service**:
 The selection is by **label**, not by name. Any `LoadBalancer` Service in
 `openshift-ingress` with that label is eligible for the address; `router-metallb`
 is the only one there (step 10), and only someone who may create Services in
-`openshift-ingress` could add another. A Service elsewhere that names the pool in
-a `metallb.io/address-pool` annotation is not checked against `serviceAllocation`
-either (`AllocateFromPool`); nothing on this cluster does that.
+`openshift-ingress` could add another. An explicit pool or IP request must also
+match `serviceAllocation`: at MetalLB commit `42b0bfe`, `AllocateFromPool` calls
+`Assign`, which checks `isPoolCompatibleWithService`. Naming this pool does not
+bypass its namespace and Service selectors.
 
 `L2Advertisement ingress-shard-l2` advertises it on `br-ex`. `mongot-l2` names
 only `mongot-pool`, and stays as it is.

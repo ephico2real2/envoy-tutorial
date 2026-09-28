@@ -15,19 +15,20 @@ Since then `mongodb-poc`, the Gateways of modules 12 to 15, 17 and 19, and the
 So this page **installs nothing on that cluster**. Each step that creates
 something runs as `oc apply --dry-run=server`: the API server checks the
 manifest against what is there and saves nothing. It says `unchanged` when the
-cluster already matches. Every other command only reads, except `../check.sh`
-in step 9, which starts a test pod in a namespace of its own and deletes it.
+cluster already matches the fields being applied. The remaining commands do
+not persist cluster changes. This walk does not run `../check.sh`: that script
+creates a test pod and deletes its test namespace.
 
 ## What you'll learn
 
 - how the MetalLB Operator comes from Red Hat's catalog through OLM, and why its
-  `OperatorGroup` must be `spec: {}`;
+  `OperatorGroup` selects all namespaces (`spec: {}` here);
 - what the one `MetalLB` resource starts: a controller that hands out
   addresses, and a speaker on each node that announces them;
 - why the pool on CRC is `192.168.127.100` to `.120`, with `autoAssign: false`,
   announced on `br-ex`;
 - how to tell that a Service got an address, and that a node announces it;
-- why the laptop reaches none of these addresses without a forward.
+- how the laptop uses gvproxy forwards to reach these addresses.
 
 ## Before you start
 
@@ -36,22 +37,38 @@ in step 9, which starts a test pod in a namespace of its own and deletes it.
   OpenShift Local (CRC) 4.22.7, one node, on 2026-09-28.
 - Work from this folder: `cd 00-prerequisites/metallb`. About 5 minutes.
 - **On a cluster that already has MetalLB, change nothing.** It is shared: a
-  second install, a changed pool or a deleted `MetalLB` takes the addresses away
-  from every Service that uses them. On a cluster **without** MetalLB, drop
-  `--dry-run=server` from steps 2, 4 and 6: those are then the install.
+  conflicting install, a pool change or deleting `MetalLB` can disrupt its
+  consumers. On a CRC cluster **without** MetalLB, drop `--dry-run=server`
+  from steps 2, 4 and 6, in order, waiting in steps 3 and 4 before proceeding.
+  These are real cluster writes, including the operator's reconciliation.
+  Check step 5 before applying the pool: reserve its addresses, ensure they
+  are unused, and adapt the range and interface if your CRC network differs.
+  Avoiding `.1`, `.2` and `.254` alone is not proof the other addresses are free.
+- **Fresh-cluster output differs.** These manifests install MetalLB and one
+  pool/advertisement; they create no application, `LoadBalancer` Service,
+  ingress shard or laptop forward. Step 6 initially has just `mongot-pool`
+  with 0 assigned and 21 available addresses if no other consumer requests
+  one. Step 7 may list no Services or announcements; skip its speaker-log
+  filter and the `mongodb-poc` diagnostic if those consumers do not exist.
+  Step 8's `.102` timeout then says nothing about announcement or routing;
+  skip that request until an actual consumer is running. Deploy a linked
+  Gateway module or the ingress shard separately for an end-to-end test.
+  The `stable` channel follows the catalog, so a later install can use a
+  different CSV; read its install modes and status rather than expecting the
+  recorded name or timings.
 
 ## The picture
 
 <!-- markdownlint-disable MD033 -->
-<img alt="MetalLB on CRC, as installed on 2026-09-24 and read on 2026-09-28. The install, in order: the catalog redhat-operators offers metallb-operator on channel stable, with install mode AllNamespaces only; namespace metallb-system holds OperatorGroup metallb-operator with spec {} and Subscription metallb-operator-sub (stable, redhat-operators, Automatic); an OperatorGroup with targetNamespaces metallb-system instead leaves the CSV Failed, reason UnsupportedOperatorGroup. The CSV metallb-operator.v4.22.0-202609151747 reached Succeeded 48 seconds after the Subscription and runs the operator and its webhook. The MetalLB resource metallb, with an empty spec, starts the speaker and the controller, and also turns on FRR-K8s, for BGP. The speaker, a DaemonSet with one pod per node on the host network under SCC privileged, answers ARP on br-ex for the addresses it announces. The controller reads IPAddressPool mongot-pool, 192.168.127.100 to 120 with autoAssign false, whose L2Advertisement mongot-l2 names interface br-ex, and gives each LoadBalancer Service an address from a pool it may use, written to the Service&#x27;s status and to the annotation metallb.io/ip-allocated-from-pool. On node crc, br-ex is 192.168.127.2/24 on the CRC network 192.168.127.0/24, where .1 is gvproxy and .254 is host.crc.testing; the node&#x27;s InternalIP, 192.168.126.11, is on another interface. Four Services hold addresses: 192.168.127.100, mongodb-poc, from mongot-pool, allocated but not announced because it had no ready endpoint; 192.168.127.101, module 17&#x27;s Gateway, and 192.168.127.102, module 19&#x27;s Gateway, both from mongot-pool and announced from crc on br-ex; 192.168.127.130, the ingress shard&#x27;s router, from the shard&#x27;s own ingress-shard-pool, announced from crc on br-ex. The laptop has no route to 192.168.127.0/24: route -n get sends 192.168.127.102 to en0 and its gateway 192.168.166.1, and curl straight to it timed out, exit 28. It reaches the addresses through gvproxy, CRC&#x27;s network proxy at 192.168.127.1, with forwards added through its API by _shared/crc-forward.sh: 127.0.0.1:19080 to 192.168.127.102 port 80 for module 19, and 127.0.0.1:20443 to 192.168.127.130 port 443 for the ingress shard." src="../../docs/diagrams/metallb/metallb.light.png">
+<img alt="MetalLB on CRC, snapshot from 2026-09-28. The catalog offers metallb-operator on channel stable with AllNamespaces support only. Namespace metallb-system holds OperatorGroup metallb-operator with an empty spec and status.namespaces containing the empty string, and Subscription metallb-operator-sub. The CSV reached Succeeded 48 seconds after its first recorded Pending condition. The MetalLB resource metallb starts the controller and speaker. FRR is configured as an additional routing provider; this diagram does not attribute the network change to a particular writer. The controller allocates addresses from IPAddressPool mongot-pool, 192.168.127.100 through 192.168.127.120, with autoAssign false. L2Advertisement mongot-l2 configures the speaker to announce that pool on br-ex. The node&#x27;s gateway annotation records br-ex as 192.168.127.2/24; .1 resolves as gateway.crc.testing and .254 as host.crc.testing. Four Services hold addresses: .100 for mongodb-poc, .101 for module 17 and .102 for module 19 from mongot-pool, and .130 for the ingress shard from ingress-shard-pool. ServiceL2Status records crc and br-ex for .101, .102 and .130; no record is shown for .100, whose EndpointSlices are not included in this snapshot. The laptop&#x27;s route lookup for .102 chooses en0 via 192.168.166.1, and direct curl timed out. Existing gvproxy forwards map 127.0.0.1:19080 to .102:80 and 127.0.0.1:20443 to .130:443. Arrows show install order, configuration inputs and the forwarded traffic path." src="../../docs/diagrams/metallb/metallb.light.png">
 <!-- markdownlint-enable MD033 -->
 
 *The install in order, on the right: the Subscription and an `OperatorGroup`
 with `spec: {}` install the operator, and the `MetalLB` resource starts the
 controller and the speaker. The controller gives each `LoadBalancer` Service an
-address from its pool; the speaker announces it on `br-ex`. On the left, the
-laptop reaches those addresses only through a gvproxy forward. Grey boxes
-configure what they point at.*
+address from an eligible pool; the speaker reports announcements on `br-ex`.
+On the left are the laptop's existing gvproxy forwards. Grey arrows show
+install order or configuration inputs; teal shows traffic and ARP.*
 
 ## Walkthrough
 
@@ -91,13 +108,17 @@ AllNamespaces=true
 
 > **The gotcha.** Many operators are installed with an `OperatorGroup` that
 > names its own namespace (`targetNamespaces: [metallb-system]`). This one
-> refuses it: the CSV ends `Failed`, reason `UnsupportedOperatorGroup`, message
+> refuses it. **From the source, not reproduced in this walk:** the CSV ends
+> `Failed`, reason `UnsupportedOperatorGroup`, message
 > `OwnNamespace InstallModeType not supported, cannot configure to watch own
 > namespace`. That is the check in operator-framework's
 > `InstallModeSet.Supports`: one target namespace equal to the operator's own
 > needs `OwnNamespace`, which step 1 shows is `false`. `mongodb-poc` recorded the
-> failure (`DEPLOYMENT.md`, §3); it was not reproduced here, as it would mean a
-> second install beside the shared one. The fix is `spec: {}`.
+> failure (`DEPLOYMENT.md`, §3); it was not reproduced here, as it would mean
+> changing the shared installation. For a fresh install, use `spec: {}`
+> (omitting `spec` also selects all namespaces). Repairing an existing group
+> requires removing its namespace selectors; applying an empty spec alone does
+> not necessarily remove fields owned by another writer.
 
 ```console
 $ oc apply --dry-run=server -f manifests/10-olm.yaml
@@ -118,23 +139,24 @@ kubectl-client-side-apply  Update  2026-09-24T02:41:13Z
 ```
 
 On a cluster without MetalLB, drop `--dry-run=server`: the first command then
-prints `created` three times.
+prints `created` for each new object; an existing namespace may print
+`unchanged` or `configured`. Status fields populate asynchronously, so the
+following reads may initially be empty; step 3 waits for installation.
 
 **What just happened:**
 
-- `unchanged (server dry run)`: the cluster already holds exactly these three
-  objects, and nothing was written.
+- `unchanged (server dry run)`: applying these manifest fields would make no
+  changes, and nothing was written. The live objects can have additional
+  defaulted fields, labels and status.
 - The OperatorGroup's `namespaces=[""]`: the empty string is Kubernetes'
-  "all namespaces". The API server added `upgradeStrategy: Default` to the empty
-  spec.
+  "all namespaces". The live spec also shows `upgradeStrategy: Default`.
 - `AtLatestKnown`: the Subscription runs the newest CSV its channel offers.
 - The namespace's `pod-security.kubernetes.io` labels (`audit` and `warn`,
-  `privileged`) are not in the manifest, and the operator did not add them.
-  The namespace's `managedFields` say who wrote what: `kubectl-client-side-apply`
-  is the manifest, and OpenShift's
-  `pod-security-admission-label-synchronization-controller` added those labels,
-  to match the SCCs the namespace's pods run under. The speaker runs as
-  `privileged` (step 4).
+  `privileged`) are not in the manifest. The manager list includes OpenShift's
+  `pod-security-admission-label-synchronization-controller`, consistent with
+  SCC-based label synchronization. This projection does not include `fieldsV1`,
+  so it does not prove which manager owns each label. The speaker's
+  `privileged` SCC is shown directly in step 4.
 
 ### Step 3 — wait for the operator
 
@@ -142,7 +164,7 @@ prints `created` three times.
 $ oc get installplan -n metallb-system
 NAME            CSV                                     APPROVAL    APPROVED
 install-frssh   metallb-operator.v4.22.0-202609151747   Automatic   true
-$ for i in $(seq 1 60); do csv=$(oc get subscription metallb-operator-sub -n metallb-system -o jsonpath='{.status.installedCSV}'); [ -n "$csv" ] && break; sleep 5; done; oc wait csv/"$csv" -n metallb-system --for=jsonpath='{.status.phase}'=Succeeded --timeout=300s
+$ (csv=; for i in $(seq 1 60); do csv=$(oc get subscription metallb-operator-sub -n metallb-system -o jsonpath='{.status.installedCSV}') || exit; [ -n "$csv" ] && break; sleep 5; done; if [ -z "$csv" ]; then echo 'Timed out waiting for Subscription installedCSV; inspect the Subscription and InstallPlan.' >&2; exit 1; fi; oc wait csv/"$csv" -n metallb-system --for=jsonpath='{.status.phase}'=Succeeded --timeout=300s)
 clusterserviceversion.operators.coreos.com/metallb-operator.v4.22.0-202609151747 condition met
 $ oc get csv -n metallb-system "$(oc get subscription metallb-operator-sub -n metallb-system -o jsonpath='{.status.installedCSV}')" -o jsonpath='{range .status.conditions[*]}{.lastTransitionTime}  {.phase}  {.reason}{"\n"}{end}'
 2026-09-24T02:51:50Z  Pending  RequirementsUnknown
@@ -180,19 +202,21 @@ servicel2statuses                  metallb.io/v1beta1   true         ServiceL2St
 - OLM made an **InstallPlan** for the CSV, approved by itself
   (`installPlanApproval: Automatic`).
 - The loop waits until the Subscription names its CSV, then `oc wait` until
-  that CSV is `Succeeded`: the operator runs.
+  that CSV is `Succeeded`: the operator runs. It stops on a failed read or
+  reports a timeout if no CSV name appears; do not continue on either failure.
 - The CSV keeps its phases. On 2026-09-24 it went from `Pending` at 02:51:50Z
-  to `Succeeded` at 02:52:38Z, 48 s; the Subscription was created at 02:51:49Z.
-  The later `Failed  ComponentUnhealthy` and reinstall, on 2026-09-26, is OLM
-  waiting for the operator's pods to come back after the CRC VM restarted: it
-  ends `Succeeded` again 33 s later.
+  to `Succeeded` at 02:52:38Z, 48 s. On 2026-09-26,
+  `Failed  ComponentUnhealthy` is followed by reinstall conditions and
+  `Succeeded` 33 s later. These conditions do not establish why the component
+  became unhealthy; a VM restart is not demonstrated by this output.
 - The operator brought MetalLB's resource types. Steps 4 to 7 use five of them:
   `MetalLB`, `IPAddressPool`, `L2Advertisement`, `ConfigurationState` and
   `ServiceL2Status`.
 
 ### Step 4 — start MetalLB
 
-The operator does nothing until a `MetalLB` resource exists.
+The operator deploys MetalLB's controller and speaker when a `MetalLB` resource
+exists.
 [`manifests/20-metallb.yaml`](manifests/20-metallb.yaml) is one, named
 `metallb`, with an empty spec:
 
@@ -212,7 +236,7 @@ daemonset.apps/speaker   1         1         1       1            1           ku
 $ oc get pods -n metallb-system -o wide
 NAME                                                   READY   STATUS    RESTARTS      AGE    IP               NODE   NOMINATED NODE   READINESS GATES
 controller-5b5b99b4cc-9j2hv                            2/2     Running   2             4d7h   10.217.1.2       crc    <none>           <none>
-metallb-operator-controller-manager-69d46f4f5f-pvkpk   1/1     Running   5 (17h ago)   4d7h   10.217.1.0       crc    <none>           <none>
+metallb-operator-controller-manager-69d46f4f5f-pvkpk   1/1     Running   5 (18h ago)   4d7h   10.217.1.0       crc    <none>           <none>
 metallb-operator-webhook-server-75c9c5658d-k5xhs       1/1     Running   1             4d7h   10.217.1.1       crc    <none>           <none>
 speaker-mmqqm                                          2/2     Running   2             4d7h   192.168.126.11   crc    <none>           <none>
 $ oc get pods -n metallb-system -o custom-columns='POD:.metadata.name,CONTAINERS:.spec.containers[*].name,HOSTNETWORK:.spec.hostNetwork,SCC:.metadata.annotations.openshift\.io/scc'
@@ -242,8 +266,9 @@ host's network, under the `privileged` SCC; the others run as `restricted-v2`.
 `oc wait` waited for the condition `Available` that the operator sets on the
 `MetalLB` resource.
 
-Starting MetalLB also turned on **FRR-K8s**, the routing daemon MetalLB uses
-for BGP. Layer 2, used on CRC, does not need it, but it is there:
+**FRR-K8s** is also present. The network configuration names FRR as an
+additional routing provider, and its pods are running. The layer 2
+advertisement in this guide does not configure a BGP peer:
 
 ```console
 $ oc get network.operator.openshift.io cluster -o jsonpath='{.spec.additionalRoutingCapabilities}{"\n"}'
@@ -262,12 +287,14 @@ frr-k8s-statuscleaner-5f6876957b-kps5s   1/1     Running   1          4d7h
 frr-k8s-t8kmw                            7/7     Running   7          4d7h
 ```
 
-The field on the cluster's network configuration was written in the same
-second as the `MetalLB` resource, by the field manager `manager`: the
-operator's container is named `manager` (the `CONTAINERS` column above), and
-its service account may `update` the cluster's network configuration (`yes`).
-The network operator then created `openshift-frr-k8s`, 51 s later, and the
-DaemonSet and Deployment behind its pods, both owned by `Network cluster`.
+The network object's `manager` entry has the same timestamp as creation of
+`MetalLB metallb`. The FRR namespace was created 51 s later, and the
+operator's service account is allowed to update the network configuration.
+Those facts are consistent with operator-driven enablement, but the projection
+does not identify the fields owned by `manager`. A field-manager name matching
+a container name is not proof of identity. This output alone establishes
+configuration and timing, not which controller changed the field or owns the
+FRR workloads.
 
 ### Step 5 — where the addresses can live
 
@@ -287,9 +314,9 @@ $ ssh -i ~/.crc/machines/crc/id_ed25519 -p 2222 -o StrictHostKeyChecking=no -o U
 - The node's gateway bridge is `br-ex`, with `192.168.127.2/24`, and its next
   hop is `192.168.127.1`. That is OVN-Kubernetes' record of the node, on the
   Node object.
-- The node's `InternalIP` is another address, `192.168.126.11`, on another
-  interface (the speaker's pod IP in step 4). The laptop's traffic arrives on
-  `br-ex`, so that is where the addresses must be announced.
+- The host-network speaker has pod IP `192.168.126.11` (step 4), different
+  from the gateway bridge's address. The listed L2Advertisements and
+  ServiceL2Statuses identify `br-ex` as the announcement interface (steps 6–7).
 - Inside the VM (through CRC's own ssh forward, `127.0.0.1:2222`), gvproxy's
   DNS names two more addresses on that network: `.1`, the gateway, which is
   gvproxy itself, and `.254`, `host.crc.testing`, the laptop as the VM reaches
@@ -304,7 +331,7 @@ So a pool on CRC lies in `192.168.127.0/24` and avoids `.1`, `.2` and `.254`.
 | Object | Field | Here | Why |
 |---|---|---|---|
 | `IPAddressPool mongot-pool` | `addresses` | `192.168.127.100-192.168.127.120` | 21 addresses on the CRC network, clear of `.1`, `.2` and `.254` (step 5) |
-| | `autoAssign` | `false` | an address only for a Service that **names** the pool, in the annotation `metallb.io/address-pool` (or the deprecated `metallb.universe.tf/address-pool`). The cluster is shared: nothing gets one of these addresses by accident, such as a `LoadBalancer` Service from a Helm chart |
+| | `autoAssign` | `false` | disables automatic selection of this pool. A Service can still request it by `metallb.io/address-pool` (or the deprecated `metallb.universe.tf/address-pool`), or request a specific address within it using `metallb.io/loadBalancerIPs` (or deprecated `spec.loadBalancerIP`). It is not an access-control boundary |
 | `L2Advertisement mongot-l2` | `ipAddressPools` | `mongot-pool` | which pool it announces |
 | | `interfaces` | `br-ex` | the speaker answers ARP there only. Without the field it answers on every interface of the node (`AllInterfaces`, MetalLB's `config.go`) |
 
@@ -376,8 +403,9 @@ No resources found
   The Gateways get it from their GatewayClass `eg`, whose `EnvoyProxy
   openshift-scc` is module 12's
   ([`20-envoyproxy.yaml`](../../12-gateway-api/manifests/20-envoyproxy.yaml)).
-  The controller logs a `deprecatedAnnotation` warning for it: new Services use
-  `metallb.io/address-pool`. `router-metallb` names no pool: its pool selects it
+  The controller's `valueForAnnotation` emits a `deprecatedAnnotation` warning
+  for the old key (from `controller/service.go`, not captured here); new
+  Services should use `metallb.io/address-pool`. `router-metallb` names no pool: its pool selects it
   by label ([ingress shard, step 3](../ingress-shard/README.md#step-3--a-pool-for-the-shard)).
 - **Allocated from**: the controller writes the pool it used in
   `metallb.io/ip-allocated-from-pool`.
@@ -385,18 +413,33 @@ No resources found
   a Service, from which node and on which interface: `crc`, `br-ex`. The log
   lines are the same event, as it happens.
 - **An address is not an announcement.** `.100` is allocated but has no
-  `ServiceL2Status`: on 2026-09-28 `mongodb-poc` ran no pod behind
-  `mongot-grpc-lb`. The speaker announces a Service only while it has a ready
-  endpoint (`ShouldAnnounce`, "failed no active endpoints", MetalLB's
-  `layer2_controller.go`), so nothing answers ARP for `.100` until one runs.
+  `ServiceL2Status` in this snapshot. That alone does not establish the cause.
+  The EndpointSlices behind `mongot-grpc-lb` were not included in the output
+  above, so absence of backend pods is not demonstrated here.
+  **From the source at `42b0bfe`:** `ShouldAnnounce` returns `notOwner` when
+  `activeEndpointExists` is false. Its `EndpointCanServe` helper accepts
+  `ready=true`, an unset `ready`, or `serving=true` even if `ready=false`. With
+  `externalTrafficPolicy: Local`, the elected node also needs such an endpoint
+  on that node. An eligible endpoint is necessary, but advertisement selection,
+  node eligibility, election and interface availability must also pass.
+  No eligible endpoints would explain `.100`; verify before attributing the
+  missing announcement to that cause:
+
+  ```bash
+  oc get endpointslices.discovery.k8s.io -n mongodb-poc -l kubernetes.io/service-name=mongot-grpc-lb -o yaml
+  ```
+
+  This read-only diagnostic has no recorded output in this walk. Check every
+  slice's `endpoints[].conditions` and, for local traffic policy, `nodeName`.
 - No node carries `node.kubernetes.io/exclude-from-external-load-balancers`.
-  A node with that label announces nothing (Troubleshooting).
+  The source excludes labelled nodes unless the speaker is started with
+  `--ignore-exclude-lb` (Troubleshooting); the failure was not induced here.
 
 ### Step 8 — from the laptop
 
-The laptop does not route to `192.168.127.0/24`: it sends those packets to its
-own default gateway, and nothing answers. Module 19's Gateway, `.102`, is
-announced (step 7), yet:
+In this snapshot, the laptop sends traffic for `192.168.127.102` to its
+own default gateway. Module 19's Gateway at that address has an announcement
+status (step 7), yet the direct request times out:
 
 ```console
 $ route -n get 192.168.127.102 | grep -E 'gateway|interface'
@@ -437,7 +480,7 @@ $ ../../_shared/crc-forward.sh list
   adds one and gets `200` through it. Where the clients are on the network, or
   route to it, no forward is needed.
 
-`.102` was used here, not `.100`: `.100` is not announced (step 7), so a timeout
+`.102` was used here, not `.100`: `.100` has no announcement status (step 7), so a timeout
 there could come from the missing announcement as well as from the routing.
 
 ### Step 9 — check yourself
@@ -445,45 +488,13 @@ there could come from the missing announcement as well as from the routing.
 ```console
 $ oc diff -f manifests/ && echo 'the cluster matches manifests/'
 the cluster matches manifests/
-$ ../check.sh
-
-cluster
-  ✓ reachable, server v1.35.6
-  ✓ client: oc
-  ✓ OpenShift: yes  (SCC rules apply — modules note where)
-
-permissions
-  ✓ can create namespace
-  ✓ can create deployment
-  ✓ can create service
-  ✓ can create configmap
-
-images the modules pull
-  · python:3.12-slim        the echo app
-  · envoyproxy/envoy:v1.39-latest  the proxy
-  · curlimages/curl:8.11.1  the in-cluster client
-  · alpine/openssl:3.3.2    module 03's test certificates
-  · fullstorydev/grpcurl:v1.9.3-alpine  module 07's gRPC client
-  (all public; nothing is built or pushed by this tutorial)
-  (module 07's pods also pip-install grpcio at start: egress to pypi.org)
-
-optional, per module
-  ✓ cert-manager
-  ✓ ClusterIssuer enterprise-ca
-  ✓ Gateway API CRDs
-  ✓ MetalLB
-  ✓ Prometheus Operator CRDs
-  ✓ user-workload monitoring
-
-a real write, end to end
-  ✓ the in-cluster client pod runs — the modules will run
-
-all checks passed
 ```
 
-**What to look for:** `oc diff` finds no difference between
-[`manifests/`](manifests/) and the cluster, and `check.sh` prints
-`✓ MetalLB` under "optional, per module".
+**What to look for:** `oc diff` finds no changes to apply from
+[`manifests/`](manifests/). It uses server-side dry-run and does not persist
+changes. Exit 0 means no differences, 1 means differences, and a higher value
+means an error. Steps 3, 4, 6 and 7 check the operator, workloads, configuration
+and existing announcements. This is not an end-to-end test with a new backend.
 
 ## The options
 
@@ -492,7 +503,7 @@ all checks passed
 | Field | Default | What it does |
 |---|---|---|
 | `nodeSelector` | none: every Linux node | which nodes run a speaker. Only those announce addresses |
-| `speakerTolerations`, `controllerTolerations` | none | let the pods run on tainted nodes |
+| `speakerTolerations`, `controllerTolerations` | not set in this CR | configure additional tolerations for tainted nodes; this does not mean the generated pods have no built-in tolerations |
 | `logLevel` | `info` | the controller's and speaker's log level |
 
 **`IPAddressPool`** (`metallb.io/v1beta1`):
@@ -500,7 +511,7 @@ all checks passed
 | Field | Default | What it does |
 |---|---|---|
 | `addresses` | — | ranges (`a-b`) or CIDRs; pools may not overlap (the webhook refuses it) |
-| `autoAssign` | `true` | whether a Service that names no pool may get an address from it |
+| `autoAssign` | `true` | whether MetalLB may choose this pool automatically; explicit pool or IP requests can still use it when `false` |
 | `serviceAllocation` | none | which Services the pool is for, by namespace or label (the ingress shard uses it) |
 
 **`L2Advertisement`** (`metallb.io/v1beta1`):
@@ -517,28 +528,29 @@ all checks passed
 |---|---|
 | layer 2: one node answers ARP for each address, and all its traffic enters there | often **BGP**: the speakers peer with the network's routers (`BGPPeer`, `BGPAdvertisement`, through FRR-K8s), which spread traffic over several nodes. Layer 2 stays the simple choice where there are no BGP routers; Red Hat's docs name its limits: one node's bandwidth, and failover that "depends on cooperation from the clients" |
 | the pool is on gvproxy's private network; the laptop needs a forward (step 8) | a pool from the network team, **routable** from the clients, so no forward |
-| `autoAssign: false`, every consumer names the pool | often `autoAssign: true` on a default pool, plus pools kept for some teams with `serviceAllocation` (namespaces, labels, `priority`) |
+| `autoAssign: false` on `mongot-pool`; its three listed consumers name it | often `autoAssign: true` on a default pool, plus pools kept for some teams with `serviceAllocation` (namespaces, labels, `priority`) |
 | one node, one speaker | a speaker on each node that should announce (`nodeSelector`), so an address moves to another node if one fails |
 
 ## Troubleshooting
 
 | You see | Why | Fix |
 |---|---|---|
-| the CSV `Failed`, reason `UnsupportedOperatorGroup`, `OwnNamespace InstallModeType not supported, cannot configure to watch own namespace` (`oc get csv -n metallb-system -o jsonpath='{.items[*].status.reason}'`) | the `OperatorGroup` names `targetNamespaces`; this operator supports `AllNamespaces` only (step 1) | set the `OperatorGroup` to `spec: {}` (step 2) |
+| the CSV `Failed`, reason `UnsupportedOperatorGroup`, `OwnNamespace InstallModeType not supported, cannot configure to watch own namespace` (`oc get csv -n metallb-system -o jsonpath='{.items[*].status.reason}'`) | the `OperatorGroup` targets only its own namespace; this operator supports `AllNamespaces` only (step 1). From the source, not reproduced here | use an all-namespace group on a fresh install (step 2); repair of a shared group is outside this read-only walk |
 | no `metallb-operator` in `oc get packagemanifest -n openshift-marketplace` | the `redhat-operators` catalog is off or unreachable | `oc get catalogsource -n openshift-marketplace`; on a disconnected cluster, mirror it |
 | no `controller` or `speaker` pods, but the CSV is `Succeeded` | no `MetalLB` resource | step 4 |
-| a Service stays `<pending>` in `EXTERNAL-IP`; `oc describe svc` shows `AllocationFailed … no available IPs` | no pool may give it an address. On this cluster every pool is either `autoAssign: false` or has a `serviceAllocation`, so a Service that names no pool gets none (`allocator.go`, `Allocate`). From the source, not measured here | add `metallb.io/address-pool: mongot-pool` to the Service, or give it a pool of its own |
-| the Service has an address, but nothing answers, even from the CRC network | not announced: no `ServiceL2Status` for it. Either no ready endpoint (the `.100` case, step 7), or no `L2Advertisement` covers its pool, or the node is excluded (next row) | start the backend pods; check `oc get l2advertisement -n metallb-system` |
-| a node never announces anything | it carries the label `node.kubernetes.io/exclude-from-external-load-balancers`, which the speaker honours (`speakersForPool`, `layer2_controller.go`; the operator does not pass `--ignore-exclude-lb`) | `oc label node <node> node.kubernetes.io/exclude-from-external-load-balancers-` if the label is not wanted there |
+| a Service stays `<pending>` in `EXTERNAL-IP`; `oc describe svc` shows `AllocationFailed … no available IPs` | no pool may give it an address. An ordinary new Service that requests neither a pool nor an IP, and does not match `ingress-shard-pool`'s selectors, has no eligible automatic pool here. A matching Service can use that pool if it has capacity (`allocator.go`, `Allocate`, `pinnedPoolsForService`). From the source, not measured here | add `metallb.io/address-pool: mongot-pool` to the Service, or give it a pool of its own |
+| the Service has an address, but nothing answers, even from the CRC network | not announced: no `ServiceL2Status` for it. Possible causes include no eligible endpoint (source behavior in step 7), or no `L2Advertisement` covers its pool, or the node is excluded (next row) | start the backend pods; check `oc get l2advertisement -n metallb-system` |
+| a node never announces anything | it carries the label `node.kubernetes.io/exclude-from-external-load-balancers`, which `speakersForPool` honours unless `--ignore-exclude-lb` is enabled (from the source, not measured here). Inspect the speaker's arguments before ruling out that override | inspect the label with the read-only command in step 7; deciding whether to remove it is a separate cluster administration change |
 | `the interfaces specified by LB IP … doesn't exist in assigned node` in the Service's events | the `L2Advertisement` names an interface the node does not have | `br-ex` on CRC (step 5) |
 | `admission webhook "ipaddresspoolvalidationwebhook.metallb.io" denied the request: CIDR … overlaps with already defined CIDR` | the new pool overlaps an existing one | pick addresses outside every pool (step 6) |
 | `curl: (28) Connection timed out` to a MetalLB address from the laptop | the laptop does not route to the CRC network (step 8) | a gvproxy forward: [ingress shard, step 8](../ingress-shard/README.md#step-8--from-the-laptop) |
 
 ## Clean up
 
-Nothing: this page wrote nothing to the cluster. Do not remove MetalLB from a
-cluster where it is shared: the four Services in step 7 would lose their
-addresses.
+The dry-run walk has nothing to clean up. If you removed `--dry-run=server`
+for a fresh install, it created persistent shared infrastructure; leave it
+in place for the later modules. Do not remove MetalLB while Services depend
+on it: their load-balancer connectivity depends on its controller and speaker.
 
 ## References
 
@@ -550,11 +562,14 @@ addresses.
   "Load balancing with MetalLB", "Configuring MetalLB address pools".
 - MetalLB upstream: [metallb.io](https://metallb.io/) — "Concepts", "Layer 2
   mode", "Configuration".
-- `openshift/metallb` at the commit in this CSV (the speaker logs
-  `42b0bfe05fecebde1cf1ed6ef0640c35bb3cb3e7`):
+- Source behavior below is checked against `openshift/metallb` at
+  `42b0bfe05fecebde1cf1ed6ef0640c35bb3cb3e7`, the source revision supplied for
+  this operator build; the startup log containing the revision is not pasted here:
   [`speaker/layer2_controller.go`](https://github.com/openshift/metallb/blob/42b0bfe05fecebde1cf1ed6ef0640c35bb3cb3e7/speaker/layer2_controller.go),
   [`internal/allocator/allocator.go`](https://github.com/openshift/metallb/blob/42b0bfe05fecebde1cf1ed6ef0640c35bb3cb3e7/internal/allocator/allocator.go),
-  [`internal/config/config.go`](https://github.com/openshift/metallb/blob/42b0bfe05fecebde1cf1ed6ef0640c35bb3cb3e7/internal/config/config.go).
+  [`internal/config/config.go`](https://github.com/openshift/metallb/blob/42b0bfe05fecebde1cf1ed6ef0640c35bb3cb3e7/internal/config/config.go),
+  [`internal/k8s/epslices/endpoint_slices.go`](https://github.com/openshift/metallb/blob/42b0bfe05fecebde1cf1ed6ef0640c35bb3cb3e7/internal/k8s/epslices/endpoint_slices.go),
+  [`controller/service.go`](https://github.com/openshift/metallb/blob/42b0bfe05fecebde1cf1ed6ef0640c35bb3cb3e7/controller/service.go).
 - operator-framework/api v0.45.0,
   [`InstallModeSet.Supports`](https://github.com/operator-framework/api/blob/v0.45.0/pkg/operators/v1alpha1/clusterserviceversion.go).
 
