@@ -215,14 +215,13 @@ Keycloak always has — for administering Keycloak itself, not for applications.
 
 Keycloak's first administrator comes from the Secret `keycloak-admin`, in
 [`manifests/40-keycloak.yaml`](manifests/40-keycloak.yaml) — the `Keycloak`
-resource names it under `bootstrapAdmin`. Like every credential in this lab, it
-is a **published test value**:
+resource names it under `bootstrapAdmin`. Like every login in this lab, it is a
+lab value, shown in clear:
 
 | | |
 |---|---|
 | console | **https://keycloak.apps-crc.testing/admin/** |
-| user name | `admin` |
-| password | `lab-only-admin-password` |
+| log in with | `admin` / `lab-only-admin-password` |
 
 The same two values, read back from the cluster:
 
@@ -236,12 +235,12 @@ lab-only-admin-password
 Open the console in a browser and sign in with them. The browser will warn about
 the certificate: it is signed by the enterprise CA, which your laptop does not
 trust. Keycloak reads `bootstrapAdmin` only once, when it first creates its
-database — change the Secret later and the admin's password stays what it was.
+database — change the Secret later and the admin's login stays what it was.
 Without `bootstrapAdmin`, the operator makes a random temporary admin instead,
 in the Secret `keycloak-initial-admin`.
 
-Outside a lab, never publish an admin password: follow the operator guide —
-create a named administrator, remove the bootstrap one, and turn on MFA. The rest
+Outside a lab, follow the operator guide instead: create a named administrator,
+remove the bootstrap one, and turn on MFA. The rest
 of this lab does not need the console — everything is in files.
 
 ### Step 8 — the realm
@@ -260,8 +259,8 @@ A **realm** is a separate world of users, roles and applications.
 
 The two clients that get tokens carry an **audience mapper**: their tokens say
 `aud: shop-api`, so an API can refuse tokens that were meant for something else.
-The passwords and the secret are **lab values**, written in clear so every step
-can be repeated. Import it:
+The logins and the client secret are **lab values**, shown in clear so every
+step can be repeated. Import it:
 
 ```console
 $ oc apply -f manifests/60-realm.yaml

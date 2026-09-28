@@ -312,8 +312,9 @@ the gate, are not there.
 ### Step 9 — a token for a directory user
 
 [`token.sh`](token.sh) asks `corp` for a token as module 17's `token.sh` asks
-`tutorial` — the form on standard input, never on the `oc exec` command line. The
-passwords are the directory's published lab values. **sarah.jones**:
+`tutorial` — the form on standard input, never on the `oc exec` command line.
+The directory's users log in with `Ldap123!` (`lateef.o` with `newuser123`).
+**sarah.jones**:
 
 ```console
 $ ./token.sh sarah.jones | python3 -c 'import base64,json,sys; p = sys.stdin.read().strip().split(".")[1]; c = json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4))); [print(" ", k, c.get(k)) for k in ("iss", "aud", "azp", "preferred_username", "given_name", "family_name", "email")]; print("  roles", sorted(c["realm_access"]["roles"]))'
