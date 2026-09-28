@@ -80,7 +80,7 @@ nothing else. [`manifests/20-realm.yaml`](manifests/20-realm.yaml) is the realm:
 | **attribute mappers** | user name ← `uid`, email ← `mail`, first name ← `cn`, last name ← `sn` |
 | a **group mapper** | the groups `(cn=app-ocp-rbac-ocp-*)` under `ou=Groups`, read from each group's `member`, flat, read-only |
 | realm role **`admin`** | and the group `app-ocp-rbac-ocp-keycloak-admin` that grants it — step 10 |
-| clients | `shop-api` (the audience) and `shop-cli` (password grant), as in `tutorial`; `shop-kiosk`, module 19's browser sign-in, and `shop-envoy`, module 20's (each confidential, authorization code with PKCE) |
+| clients | `shop-api` (the audience) and `shop-cli` (password grant), as in `tutorial`; `shop-kiosk`, module 19's browser sign-in, and `shop-envoy`, module 20's (each confidential, authorization code with PKCE); `shop-envoy-cli`, module 20's expiry probe (public, password grant, 45-second access tokens) |
 | **no user cache** | `cachePolicy: NO_CACHE` — each login reads the person and their groups from the directory, so a change there counts at the next login (module 19, step 13) |
 
 The realm file names the bind password only as `${LDAP_BIND_PASSWORD}`, and the

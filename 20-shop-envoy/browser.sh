@@ -21,7 +21,8 @@
 # session: encrypted tokens, never shown) and /tmp/<user>.keycloak.jar (Keycloak's).
 # The password - the directory's published LAB value for the shop's users, Ldap123!
 # (module 17's token.sh says where it is published) - reaches the pod on standard
-# input, never as an argument.
+# input, never as an argument. Redirect URLs (codes and logout token hints)
+# likewise reach curl through a config descriptor, including inside the pod.
 # The scripts in single quotes run in the pod's shell, which expands their variables.
 # shellcheck disable=SC2016
 set -euo pipefail
@@ -53,21 +54,40 @@ case "${1:-}" in
       printf '&credentialId=\n'; } \
     | in_pod -i '
 set -e
+umask 077
+# URL queries can hold a code or id_token_hint. Keep them in a shell builtin
+# and a config descriptor, never curl argv. stdin remains available for a form.
+curl_url() {
+  url=$1; shift
+  case "$url" in
+    ""|*[![:graph:]]*|*\\*|*\"*) echo "browser.sh: invalid redirect URL" >&2; return 1 ;;
+  esac
+  curl -s --max-time 20 -K /dev/fd/3 "$@" 3<<EOF
+url = "$url"
+EOF
+}
 addr=$1 user=$2 fe=/tmp/$2.envoy.jar kc=/tmp/$2.keycloak.jar
 IFS= read -r form
 rm -f "$fe" "$kc"
-at_shop() { curl -s -c "$fe" -b "$fe" --cacert /tmp/ca.crt --connect-to "shop.apps-metallb.crc.testing:20443:$addr:443" "$@"; }
+at_shop() { shop_url=$1; shift; curl_url "$shop_url" -c "$fe" -b "$fe" --cacert /tmp/ca.crt --connect-to "shop.apps-metallb.crc.testing:20443:$addr:443" "$@"; }
 # 1. The shop, with no session: the front Envoy answers with a redirect to corp.
-login=$(at_shop -o /dev/null -w "%{http_code} %{redirect_url}" https://shop.apps-metallb.crc.testing:20443/)
+login=$(at_shop https://shop.apps-metallb.crc.testing:20443/ -o /dev/null -w "%{http_code} %{redirect_url}")
+case "$login" in
+  "302 https://keycloak.apps-crc.testing/realms/corp/protocol/openid-connect/auth?"*) ;;
+  *) echo "browser.sh: shop did not redirect to corp login (${login%% *})" >&2; exit 1 ;;
+esac
 echo "1. GET https://shop.apps-metallb.crc.testing:20443/ -> ${login%% *}, to ${login#* }" | sed "s/?.*/?.../"
 # 2. The login page, and the address its form posts to.
-page=$(curl -s -c "$kc" -b "$kc" --cacert /tmp/ca.crt "${login#* }")
+page=$(curl_url "${login#* }" -c "$kc" -b "$kc" --cacert /tmp/ca.crt)
 action=$(printf "%s" "$page" | sed -n "s/.*id=\"kc-form-login\"[^>]* action=\"\([^\"]*\)\".*/\1/p" | sed "s/&amp;/\&/g")
-[ -n "$action" ] || { echo "2. no login form on the page"; exit 1; }
+case "$action" in
+  https://keycloak.apps-crc.testing/realms/corp/login-actions/authenticate\?*) ;;
+  *) echo "2. no trusted corp login form on the page" >&2; exit 1 ;;
+esac
 echo "2. corp login page: a form posting to ${action%%\?*}"
 # 3. The person signs in. Keycloak answers with a redirect to the redirect URI, with a code...
-back=$(printf "%s" "$form" | curl -s -c "$kc" -b "$kc" --cacert /tmp/ca.crt --data-binary @- \
-         -o /tmp/$user.page -w "%{http_code} %{redirect_url}" "$action")
+back=$(printf "%s" "$form" | curl_url "$action" -c "$kc" -b "$kc" --cacert /tmp/ca.crt --data-binary @- \
+         -o /tmp/$user.page -w "%{http_code} %{redirect_url}")
 case "$back" in
   "302 https://shop.apps-metallb.crc.testing:20443/oauth2/callback?"*) ;;
   *) msg=$(grep -A 1 kc-feedback-text /tmp/$user.page | sed -n "2s/^[[:space:]]*//p")
@@ -76,20 +96,44 @@ esac
 echo "3. signed in as $user -> ${back%% *}, back to ${back#* }" | sed "s/?.*/?code=.../"
 # 4. ...which the browser brings to the front Envoy. It swaps the code for tokens, keeps
 #    them in cookies, and sends the browser on to the page it first asked for.
-done=$(at_shop -o /dev/null -w "%{http_code} %{redirect_url}" "${back#* }")
+done=$(at_shop "${back#* }" -o /dev/null -w "%{http_code} %{redirect_url}")
+[ "$done" = "302 https://shop.apps-metallb.crc.testing:20443/" ] \
+  || { echo "browser.sh: token exchange failed (${done%% *})" >&2; exit 1; }
+# A redirect alone is not a working session: the protected page must accept it.
+code=$(at_shop https://shop.apps-metallb.crc.testing:20443/ -o /dev/null -w "%{http_code}")
+[ "$code" = 200 ] || { echo "browser.sh: session was not accepted ($code)" >&2; exit 1; }
 echo "4. the front Envoy swapped the code for tokens -> ${done%% *}, to ${done#* }"
 echo "   its session cookies: $(grep -v "^#[^H]" "$fe" | awk -F "\t" "NF > 5 && \$3 == \"/\" { print \$6 }" | sort -u | tr "\n" " ")"
 ' "$user" ;;
   sign-out)
     user=${2:-}; [[ $user =~ ^[a-z][a-z.]*$ ]] || usage
     in_pod '
+set -e
+umask 077
+# URL queries can hold a code or id_token_hint. Keep them in a shell builtin
+# and a config descriptor, never curl argv. stdin remains available for a form.
+curl_url() {
+  url=$1; shift
+  case "$url" in
+    ""|*[![:graph:]]*|*\\*|*\"*) echo "browser.sh: invalid redirect URL" >&2; return 1 ;;
+  esac
+  curl -s --max-time 20 -K /dev/fd/3 "$@" 3<<EOF
+url = "$url"
+EOF
+}
 addr=$1 fe=/tmp/$2.envoy.jar kc=/tmp/$2.keycloak.jar
 # 1. The front Envoy clears its cookies and sends the browser to the corp logout...
-out=$(curl -s -c "$fe" -b "$fe" --cacert /tmp/ca.crt --connect-to "shop.apps-metallb.crc.testing:20443:$addr:443" -o /dev/null -w "%{http_code} %{redirect_url}" https://shop.apps-metallb.crc.testing:20443/logout)
+out=$(curl_url https://shop.apps-metallb.crc.testing:20443/logout -c "$fe" -b "$fe" --cacert /tmp/ca.crt --connect-to "shop.apps-metallb.crc.testing:20443:$addr:443" -o /dev/null -w "%{http_code} %{redirect_url}")
+case "$out" in
+  "302 https://keycloak.apps-crc.testing/realms/corp/protocol/openid-connect/logout?"*) ;;
+  *) echo "browser.sh: shop did not redirect to corp logout (${out%% *})" >&2; exit 1 ;;
+esac
 echo "1. GET /logout -> ${out%% *}, to ${out#* }" | sed "s/id_token_hint=[^&]*/id_token_hint=.../"
 echo "   the front Envoy session cookies left: $(awk -F "\t" "NF > 5 && \$3 == \"/\"" "$fe" | wc -l)"
 # 2. ...which ends the Keycloak session and sends it back to the shop.
-kc_out=$(curl -s -c "$kc" -b "$kc" --cacert /tmp/ca.crt -o /dev/null -w "%{http_code} %{redirect_url}" "${out#* }")
+kc_out=$(curl_url "${out#* }" -c "$kc" -b "$kc" --cacert /tmp/ca.crt -o /dev/null -w "%{http_code} %{redirect_url}")
+[ "$kc_out" = "302 https://shop.apps-metallb.crc.testing:20443/" ] \
+  || { echo "browser.sh: corp logout failed (${kc_out%% *})" >&2; exit 1; }
 echo "2. corp logout -> ${kc_out%% *}, to ${kc_out#* }"
 ' "$user" ;;
   ""|-*) usage ;;

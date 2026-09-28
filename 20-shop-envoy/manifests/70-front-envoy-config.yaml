@@ -71,7 +71,9 @@ data:
                     json_format:
                       t: "%START_TIME%"
                       method: "%REQ(:METHOD)%"
-                      path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+                      # OAuth callback queries contain authorization codes and state.
+                      # Log only the path, ignoring caller-supplied original-path headers.
+                      path: "%PATH(NQ:PATH)%"
                       status: "%RESPONSE_CODE%"
                       # Which filter answered, and why: e.g. rbac_access_denied_matched_policy[none],
                       # jwt_authn_access_denied{Jwt_is_expired}, oauth.missing_credentials.
@@ -177,6 +179,9 @@ data:
                       # Meant for the shop's API: shop-envoy's tokens (a browser sign-in) and
                       # shop-cli's (the command line) both carry it.
                       audiences: [shop-api]
+                      # Explicit tolerance for exp/nbf; the CLI expiry probe waits
+                      # another 5 s. Browser token lifetime remains 300 s.
+                      clock_skew_seconds: 5
                       remote_jwks:
                         http_uri:
                           uri: https://keycloak-service.keycloak.svc:8443/realms/corp/protocol/openid-connect/certs

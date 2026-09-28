@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Module 20 — the shop behind a standalone Envoy on an OpenShift Route.  ./run.sh deploy | verify | clean | pause | resume
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 NS=envoy-20
 . ../_shared/lib.sh
 . ../_shared/argocd.sh
@@ -56,14 +56,53 @@ FRONT_ENVOY_INPUTS="configmap/front-envoy-config secret/shop-envoy-client secret
 # secret than the cluster holds (Argo CD updates a ConfigMap; it restarts nothing).
 front_envoy_stale() {
   local written started
+  # Read only metadata, never secret data. A partial `get` can emit usable
+  # rows AND fail; never classify that partial result as current.
   # shellcheck disable=SC2086 # FRONT_ENVOY_INPUTS is a list of names.
   written=$($KUBE get $FRONT_ENVOY_INPUTS -n "$NS" \
-    -o jsonpath='{range .items[*]}{range .metadata.managedFields[*]}{.time}{"\n"}{end}{end}' 2>/dev/null | sort | tail -n 1)
+    -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{range .metadata.managedFields[*]}{.time}{" "}{end}{"\n"}{end}' 2>/dev/null) \
+    || { echo "yes (cannot read all front Envoy inputs)"; return; }
   started=$($KUBE get pods -n "$NS" -l app=front-envoy \
-    -o jsonpath='{range .items[*]}{.status.containerStatuses[0].state.running.startedAt}{"\n"}{end}' 2>/dev/null | sort | head -n 1)
-  if [ -z "$written" ] || [ -z "$started" ]; then echo "yes (unreadable: written [$written], started [$started])"
-  elif [[ $written > $started ]]; then echo "yes (inputs written $written, Envoy started $started)"
-  else echo no; fi
+    -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.containerStatuses[0].state.running.startedAt}{"\n"}{end}' 2>/dev/null) \
+    || { echo "yes (cannot read front Envoy pods)"; return; }
+  python3 -c '
+import datetime, sys
+def stamp(s):
+    d = datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    if d.tzinfo is None:
+        raise ValueError()
+    return d
+try:
+    rows = [line.split("|", 1) for line in sys.stdin.read().splitlines()]
+    expected = {"front-envoy-config", "shop-envoy-client", "shop-envoy-hmac", "keycloak-ca"}
+    if len(rows) != len(expected) or {r[0] for r in rows} != expected:
+        raise ValueError()
+    writes = []
+    for name, times in rows:
+        if not times.strip():
+            raise ValueError()
+        writes.extend(stamp(t) for t in times.split())
+    pods = [line.split("|", 1) for line in open(3).read().splitlines()]
+    if not pods:
+        raise ValueError()
+    starts = [stamp(t) for name, t in pods]
+    # Equal seconds cannot establish ordering; fail conservatively.
+    print("no" if max(writes) < min(starts) else "yes (inputs are not older than every running Envoy)")
+except (ValueError, IndexError):
+    print("yes (incomplete input or pod timestamps)")' <<<"$written" 3<<EOF
+$started
+EOF
+}
+
+# Also called after app_resume: a sync may write inputs after the first check.
+front_envoy_current() {
+  if [ "$(front_envoy_stale)" != no ]; then
+    $KUBE rollout restart deploy/front-envoy -n "$NS" >/dev/null \
+      || { bad "the front Envoy could not be restarted"; exit 1; }
+  fi
+  wait_ready front-envoy
+  [ "$(front_envoy_stale)" = no ] \
+    || { bad "cannot establish that front Envoy runs current inputs: $(front_envoy_stale)"; exit 1; }
 }
 
 # secrets_write - the front Envoy's inputs that are not in git (README step 6):
@@ -124,12 +163,9 @@ deploy() {
   secrets_write
   $KUBE apply -f manifests/70-front-envoy-config.yaml -f manifests/71-front-envoy.yaml >/dev/null \
     || { bad "the front Envoy could not be applied - no Route published"; exit 1; }
-  wait_ready front-envoy
-  if [ "$(front_envoy_stale)" != no ]; then
-    $KUBE rollout restart deploy/front-envoy -n "$NS" >/dev/null || { bad "the front Envoy could not be restarted"; exit 1; }
-    wait_ready front-envoy
-  fi
-  [ "$(front_envoy_stale)" = no ] || { bad "the front Envoy runs older inputs than the cluster holds: $(front_envoy_stale)"; exit 1; }
+  # Restart stale/unreadable pods before waiting: a corrected ConfigMap cannot
+  # repair an old subPath mount in a CrashLooping pod.
+  front_envoy_current
   # 3. Only now the Route.
   $KUBE apply -f manifests/80-route.yaml >/dev/null || { bad "Route shop could not be applied"; exit 1; }
   local admitted=
@@ -157,6 +193,7 @@ deploy() {
     *) bad "$fwd"; exit 1 ;;
   esac
   app_resume "$APP"
+  front_envoy_current
 }
 
 # claims - the JWT on stdin, as "name value" lines: iss, azp, preferred_username, exp,
@@ -265,11 +302,28 @@ verify() {
   client_ready
   ADDR=$(shard_address); export ADDR
   local since; since=$(date -u +%Y-%m-%dT%H:%M:%S.000000Z)
-  # A token taken now is expired by section 9: corp's tokens live 300 s.
-  local OLD; OLD=$($TOKEN shop.alice)
   # request.sh and browser.sh check the router's certificate with this CA.
   $KUBE get secret keycloak-tls -n keycloak -o jsonpath='{.data.ca\.crt}' | base64 -d \
     | $KUBE exec -i -n "$NS" client -- sh -c 'cat > /tmp/ca.crt' || { bad "cannot copy the CA into the client pod"; exit 1; }
+
+  # Prove both ends with the SAME unmodified signed token. Decode only to
+  # measure its lifetime; the successful request proves Envoy accepted it.
+  local OLD OLD_EXP
+  OLD=$(./expiry-token.sh) || { bad "cannot obtain the expiry probe token"; exit 1; }
+  OLD_EXP=$(python3 -c '
+import base64, json, sys
+try:
+    part = sys.stdin.read().strip().split(".")[1]
+    c = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))
+    assert c["azp"] == "shop-envoy-cli"
+    assert type(c["exp"]) is int and type(c["iat"]) is int
+    # Token creation may cross a second boundary between issuedNow and exp.
+    assert 45 <= c["exp"] - c["iat"] <= 46
+except (ValueError, KeyError, IndexError, TypeError, AssertionError):
+    sys.exit("expected shop-envoy-cli exp-iat = 45 s (46 at a second boundary); re-import corp: module 18 step 13")
+print(c["exp"])' <<<"$OLD") || { bad "expiry probe lifetime was not confirmed"; exit 1; }
+  [ "$(with_token "$OLD" GET /v1/items -o /dev/null)" = " -> 200" ] \
+    || { bad "expiry probe token was not accepted while fresh"; exit 1; }
 
   say "1. the objects, and the filters the front Envoy runs"
   assert "Route shop: admitted by the MetalLB ingress shard, and by no other router" "metallb=True" \
@@ -293,6 +347,9 @@ verify() {
   assert "the front Envoy's filter chain: oauth2, jwt_authn, rbac, router" \
     "envoy.filters.http.oauth2 envoy.filters.http.jwt_authn envoy.filters.http.rbac envoy.filters.http.router" \
     "$(./admin.sh 'config_dump?resource=static_listeners' 2>/dev/null | python3 -c 'import json, sys; l = json.load(sys.stdin)["configs"][0]["listener"]; print(" ".join(f["name"] for f in l["filter_chains"][0]["filters"][0]["typed_config"]["http_filters"]))' 2>/dev/null)"
+
+  assert "corp JWT provider: explicit 5 s clock skew" "5" \
+    "$(./admin.sh 'config_dump?resource=static_listeners' | python3 -c 'import json,sys; l=json.load(sys.stdin)["configs"][0]["listener"]; fs=l["filter_chains"][0]["filters"][0]["typed_config"]["http_filters"]; print(next(f for f in fs if f["name"] == "envoy.filters.http.jwt_authn")["typed_config"]["providers"]["corp"].get("clock_skew_seconds", "default"))')"
 
   say "2. a browser with no session is sent to realm corp's login page"
   local fwd; fwd=$(shop_forward)
@@ -423,8 +480,12 @@ print(".".join([h, base64.urlsafe_b64encode(json.dumps(c).encode()).decode().rst
   echo "  (the change itself - shop.bob out of the admin group and back - is README step 13: verify does not change the directory)"
 
   say "9. an expired JWT"
-  local wait_s; wait_s=$(( $(claim exp "$(claims <<<"$OLD")") + 65 - $(date +%s) ))
-  if [ "$wait_s" -gt 0 ]; then echo "  (waiting ${wait_s} s for the token taken at the start to expire, plus Envoy's 60 s clock skew and 5 s for the clocks)"; sleep "$wait_s"; fi
+  local wait_s; wait_s=$(( OLD_EXP + 5 + 5 - $(date +%s) ))
+  [ "$wait_s" -le 60 ] || { bad "expiry wait exceeds 60 s: check laptop/CRC clocks"; exit 1; }
+  if [ "$wait_s" -gt 0 ]; then
+    echo "  (waiting ${wait_s} s: exp + 5 s provider skew + 5 s margin)"
+    sleep "$wait_s"
+  fi
   assert_contains "shop.alice's JWT once it has expired -> 401" "Jwt is expired -> 401" "$(with_token "$OLD" GET /v1/items)"
 
   say "10. the Route is the only way in"

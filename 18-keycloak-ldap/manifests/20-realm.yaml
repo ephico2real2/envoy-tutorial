@@ -69,6 +69,24 @@ spec:
           included.client.audience: shop-api
           access.token.claim: "true"
           id.token.claim: "false"
+    # Module 20's expiry probe only. Keep shop-cli's lifetime unchanged for
+    # modules 17 and 19; browser clients inherit the realm's 300 seconds too.
+    # Re-import an existing corp using module 18 README step 13.
+    - clientId: shop-envoy-cli
+      enabled: true
+      publicClient: true
+      standardFlowEnabled: false
+      directAccessGrantsEnabled: true
+      attributes:
+        access.token.lifespan: "45"
+      protocolMappers:
+      - name: audience-shop-api
+        protocol: openid-connect
+        protocolMapper: oidc-audience-mapper
+        config:
+          included.client.audience: shop-api
+          access.token.claim: "true"
+          id.token.claim: "false"
     # The shop's kiosk (module 19): a person signs in on this realm's login page,
     # and Envoy Gateway - this confidential client - swaps the code for tokens.
     # Its tokens carry shop-api in aud, as shop-cli's do, so the Gateway checks

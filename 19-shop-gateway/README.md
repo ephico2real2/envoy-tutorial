@@ -1105,7 +1105,13 @@ both front doors with the same tokens and compares the answers (its section 7):
 | `shop.bob` out of the LDAP group, signed in again | `403`; back in: `200` | `403`; back in: `200` (module 20, step 13, both measured) |
 | the JWT the app receives | `azp: shop-kiosk`, `x-user`, no cookie on `/whoami` | `azp: shop-envoy`, `x-user`, no cookie on any route |
 
-**Measured differences:**
+One configuration difference, measured: module 20 allows 5 seconds of JWT clock
+skew (`clock_skew_seconds: 5` in the running `config_dump`); module 19 keeps the default 60.
+Both reject expired tokens, at different boundaries. Module 20 uses a dedicated
+45-second `shop-envoy-cli` token for its expiry test; regular `shop-cli` and
+browser token lifetimes remain 300 seconds.
+
+**Other measured differences:**
 
 - **A path the shop does not have** (`/nothing`), without a session: module 19
   answers `404` at once — Envoy Gateway turns the filters on per route, and no
@@ -1154,7 +1160,7 @@ is Envoy's **whole** configuration — listener, routes, filters, clusters, secr
 |---|---|---|
 | where each filter's settings are | at the listener, `oauth2` and `rbac` **empty** (off); each of the five routes turns all three on in `typed_per_filter_config` — the same `oauth2` block five times | at the listener, once, for every route |
 | `oauth2` | `OAuth2PerRoute.config`: the endpoints, `credentials` with `token_secret`/`hmac_secret` by SDS name (`oauth2/client_secret/securitypolicy/envoy-19/sign-in`), `cookie_names` with a suffix, `cookie_configs` `LAX` (nonce and verifier on `/oauth2/callback`), `forward_bearer_token`, `pass_through_matcher` `Authorization: Bearer `, `auth_type: BASIC_AUTH`, `use_refresh_token`, `end_session_endpoint` | the same fields, with `token_secret`/`hmac_secret` naming static secrets read from files, Envoy's default cookie names, and `post_logout_redirect_uri` written out |
-| `jwt_authn` | provider `corp_ce9edcdadc53325b` (a hash), cluster `securitypolicy/envoy-19/sign-in/jwt/0`, `cache_duration: 300s`, `async_fetch`, `forward`, `payload_in_metadata: corp`, `claim_to_headers`; a `requirement_map`, chosen per route by `requirement_name` | provider `corp`, cluster `keycloak`, the same settings; one `rules` entry, prefix `/` |
+| `jwt_authn` | provider `corp_ce9edcdadc53325b` (a hash), cluster `securitypolicy/envoy-19/sign-in/jwt/0`, `cache_duration: 300s`, `async_fetch`, `forward`, `payload_in_metadata: corp`, `claim_to_headers`; a `requirement_map`, chosen per route by `requirement_name` | provider `corp`, cluster `keycloak`, those settings plus explicit `clock_skew_seconds: 5`; one `rules` entry, prefix `/` |
 | `rbac` | the **matcher** API: a `matcher_list` of predicates on `DynamicMetadataInput` (`jwt_authn`/`corp`/…) and `HttpRequestHeaderMatchInput` (`:method` with `ignore_case`, `:path` with a `safe_regex`), first match wins, `on_no_match: DENY` | the **policy** API: `action: ALLOW` and three named `policies`, each `permissions` (`:method`, `:path`) and `principals` (`sourced_metadata` from `jwt_authn`/`corp`); no policy matches → `403` |
 | the listener | `normalize_path`, `merge_slashes`, `path_with_escaped_slashes_action: UNESCAPE_AND_REDIRECT`, set by Envoy Gateway | the same three, written out, and `scheme_header_transformation` (the router in front) |
 | names | derived: `httproute/envoy-19/shop/rule/0/match/0/*`, `securitypolicy/envoy-19/sign-in/oidc/0` | chosen: `shop`, `keycloak`, `echo` |

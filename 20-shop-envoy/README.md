@@ -40,8 +40,9 @@ puts the two configurations, and their measured answers, next to each other.
   checks (step 13 and `./run.sh verify`); without it they say so and skip.
 - Work from this folder: `cd 20-shop-envoy`.
 - This module uses the namespace **`envoy-20`**, adds a client to realm `corp`
-  (step 2), and takes about 40 minutes — its `verify` alone waits six minutes for
-  a token to expire. On the operator's CRC it is **permanent**, kept by Argo CD:
+  (step 2). A walk from scratch takes about 3 minutes (measured: 174 s, after
+  `./run.sh clean`), and `verify` about 80 s: its expiry probe uses a 45-second
+  test token. On the operator's CRC it is **permanent**, kept by Argo CD:
   see [Permanent lab](#permanent-lab) before you change anything by hand there.
 
 ## The concept
@@ -722,13 +723,48 @@ Jwt issuer is not configured  -> 401
 **What just happened:** **`401 Jwt verification fails`** — the claims no longer
 match `corp`'s signature; **`401 Jwt issuer is not configured`** — the front
 Envoy trusts one issuer, `…/realms/corp`. And a token that was good and has
-**expired** — taken, then used 365 s later (`corp`'s tokens live 300 s; Envoy
-allows 60 s of clock skew, `jwt_verify_lib`'s `kClockSkewInSecond`):
+**expired**. The regular CLI path remains `../17-keycloak-jwt/token.sh`:
+realm `corp`, public client `shop-cli`, password grant. The expiry probe uses
+`./expiry-token.sh`: the same grant and user, but client **`shop-envoy-cli`**
+with `attributes.access.token.lifespan: "45"`. Only this test client gets short
+tokens; `shop-cli`, both browser clients and realm `accessTokenLifespan: 300`
+are unchanged. This avoids shortening modules 17 and 19's test tokens.
 
-```console
-$ t=$(../17-keycloak-jwt/token.sh shop.alice); sleep 365; printf '%s\n' "$t" | ./request.sh GET /v1/items -w '  -> %{http_code}\n'
-Jwt is expired  -> 401
+Keycloak 26.6 reads the client override for non-implicit grants in
+[TokenManager.getTokenExpiration](https://github.com/keycloak/keycloak/blob/26.6.0/services/src/main/java/org/keycloak/protocol/oidc/TokenManager.java#L1004-L1039);
+[OIDCConfigAttributes](https://github.com/keycloak/keycloak/blob/26.6.0/server-spi-private/src/main/java/org/keycloak/protocol/oidc/OIDCConfigAttributes.java#L52)
+names the attribute. The password grant therefore honors it. Envoy's
+[JwtProvider proto](https://github.com/envoyproxy/envoy/blob/v1.39.1/api/envoy/extensions/filters/http/jwt_authn/v3/config.proto)
+defines `clock_skew_seconds` for `exp` and `nbf`, default 60; this provider now
+sets **5**, and the probe waits to `exp + 5 + 5` (skew plus clock margin).
+This tightens the verifier's tolerance for all tokens without changing browser
+session lifetimes or refresh behavior.
+
+**Existing realm: re-import `corp` using module 18 README step 13**, as in step 2
+above. Applying the import alone does not add the client or its attribute.
+Keep the Applications paused while testing branch changes that are not on
+`main`. Rebuilding the realm invalidates sessions and changes its signing keys;
+allow the existing 300-second JWKS caches to age out before testing.
+
+Measure the issued token before relying on the override, from this directory
+(bash 3.2 or zsh; no token printed or passed as a process argument):
+
+```sh
+t=$(./expiry-token.sh) || exit 1
+printf '%s' "$t" | python3 -c 'import base64,json,sys; p=sys.stdin.read().strip().split(".")[1]; c=json.loads(base64.urlsafe_b64decode(p+"="*(-len(p)%4))); d=c["exp"]-c["iat"]; print("azp:",c["azp"],"exp - iat:",d,"seconds"); assert c["azp"]=="shop-envoy-cli" and 45 <= d <= 46'
+printf '%s\n' "$t" | ./request.sh GET /v1/items -o /dev/null -w '%{http_code}\n'
+wait_s=$(printf '%s' "$t" | python3 -c 'import base64,json,sys,time; p=sys.stdin.read().strip().split(".")[1]; c=json.loads(base64.urlsafe_b64decode(p+"="*(-len(p)%4))); print(max(0,c["exp"]+10-int(time.time())))')
+sleep "$wait_s"
+printf '%s\n' "$t" | ./request.sh GET /v1/items -w ' -> %{http_code}\n'
+unset t
 ```
+
+Measured on CRC (2026-09-28): `azp: shop-envoy-cli exp - iat: 45 seconds`, then
+`200`, then, after a 55 s wait, `Jwt is expired -> 401`; the whole probe took
+56 s. (46 is possible across a second boundary.) `verify` enforces the lifetime and both responses using
+one unchanged token. It stops with re-import instructions if the override is
+missing, rather than silently waiting six minutes. Other verification work can
+consume most or all of the wait; total run time also depends on the cluster.
 
 ### Step 13 — the directory decides, at both front doors
 
@@ -788,12 +824,12 @@ envoy.filters.http.jwt_authn
 envoy.filters.http.rbac
 envoy.filters.http.router
 $ ./admin.sh stats | grep -E '^http\.shop\.(oauth_(unauthorized_rq|passthrough|success)|jwt_authn\.(allowed|denied)|rbac\.(allowed|denied)):' | sed 's/^http\.shop\.//'
-jwt_authn.allowed: 27
-jwt_authn.denied: 3
-oauth_passthrough: 18
-oauth_success: 16
+jwt_authn.allowed: 31
+jwt_authn.denied: 2
+oauth_passthrough: 17
+oauth_success: 20
 oauth_unauthorized_rq: 8
-rbac.allowed: 14
+rbac.allowed: 18
 rbac.denied: 13
 ```
 
@@ -806,15 +842,20 @@ edited, the `tutorial` and the expired JWT; `rbac.denied` — the `403`s. Unlike
 module 19's, the configuration is one file, the same on every route: the filters
 are on at the listener, not turned on route by route.
 
+The front Envoy access log uses `%PATH(NQ:PATH)%`: callback query parameters
+(`code`, `state`) are omitted. Do not enable request-header or cookie logging;
+those carry credentials. Validate this with a new sign-in after restarting the
+front Envoy; historical logs are not rewritten by a configuration change.
+
 ### Step 15 — check yourself
 
 `./run.sh verify` asks everything above again — the Route and the front Envoy's
 inputs, the browser's sign-in, both users' answers, `bob.wilson`, the command
 line and the requests shaped to slip past the reserve rule; the **same requests
 at module 19's Gateway**, whose answers must be the same; the expired token (it
-waits for one to expire, about six minutes); every layer blocked from the client
+measures a 45-second test token, proves it works, then waits until `exp + 10`); every layer blocked from the client
 pod — and reads the API server's audit log to check that no token or password
-was in any `oc exec`'s arguments. Its reservations are real ones, on items
+was in any `oc exec`'s arguments. The whole run takes about 80 s (measured). Its reservations are real ones, on items
 `shop.bob` makes for the check and removes after it:
 
 ```console
@@ -830,6 +871,7 @@ $ ./run.sh verify
   ✓ it started after its configuration, Secrets and CA were last written - it runs them
   ✓ realm corp's client shop-envoy: its redirect URI, PKCE S256
   ✓ the front Envoy's filter chain: oauth2, jwt_authn, rbac, router
+  ✓ corp JWT provider: explicit 5 s clock skew
 
 2. a browser with no session is sent to realm corp's login page
   ✓ the ingress shard's forward: 127.0.0.1:20443 -> 192.168.127.130:443
@@ -848,10 +890,10 @@ $ ./run.sh verify
   ✓ ...and no session cookie reaches the app
   ✓ GET /v1/items -> 200
   ✓ GET /v1/warehouses -> 200
-  ✓ (shop.bob makes a disposable item, VERIFY-20-B-1790564574)
-  ✓ POST /v1/items/VERIFY-20-B-1790564574:reserve -> reserved (ok true, 1 reserved)
+  ✓ (shop.bob makes a disposable item, VERIFY-20-B-1790568999)
+  ✓ POST /v1/items/VERIFY-20-B-1790568999:reserve -> reserved (ok true, 1 reserved)
   ✓ POST /v1/items (create) -> 403
-  ✓ DELETE /v1/items/VERIFY-20-B-1790564574 -> 403
+  ✓ DELETE /v1/items/VERIFY-20-B-1790568999 -> 403
   ✓ POST /v1/items:reset -> 403
 
 4. shop.bob signs in: admin, from his LDAP group - he may create and delete
@@ -860,7 +902,7 @@ $ ./run.sh verify
   ✓ POST /v1/items (create SKU-V20) -> 200
   ✓ DELETE /v1/items/SKU-V20 -> 200
   ✓ POST /v1/items:reset -> 200
-  ✓ DELETE /v1/items/VERIFY-20-B-1790564574 (the disposable item) -> 200
+  ✓ DELETE /v1/items/VERIFY-20-B-1790568999 (the disposable item) -> 200
   ✓ shop.bob signs out: back to corp's logout, then the shop
 
 5. bob.wilson - in the directory, outside the login gate - cannot sign in
@@ -869,25 +911,25 @@ $ ./run.sh verify
 
 6. the command line: a bearer JWT, the same answers
   ✓ shop.alice: GET /v1/items -> 200
-  ✓ (shop.bob makes a disposable item, VERIFY-20-C-1790564577)
+  ✓ (shop.bob makes a disposable item, VERIFY-20-C-1790569002)
   ✓ shop.alice: reserve -> reserved (ok true, 1 reserved)
   ✓ shop.alice: create -> 403 RBAC
   ✓ shop.alice: delete -> 403 RBAC
   ✓ shop.alice: reset -> 403 RBAC
   ✓ shop.bob: create -> 200
   ✓ shop.bob: delete -> 200
-  ✓ shop.alice: POST /v1/items/VERIFY-20-C-1790564577%2Fx:reserve -> 307
-  ✓ shop.alice: POST /v1/items/VERIFY-20-C-1790564577%3Fx:reserve -> 403
-  ✓ shop.alice: POST /v1/items/VERIFY-20-C-1790564577%3Bx:reserve -> 403
-  ✓ shop.alice: POST /v1/items/VERIFY-20-C-1790564577:reserve/ -> 403
-  ✓ shop.alice: POST /v1/items/VERIFY-20-C-1790564577:reserve?x=1 -> 403
-  ✓ shop.alice: POST /v1/items/VERIFY-20-C-1790564577:restock -> 403
-  ✓ shop.alice: PATCH /v1/items/VERIFY-20-C-1790564577 -> 403
-  ✓ shop.alice: POST /v1/items/VERIFY-20-C-1790564577 + X-HTTP-Method-Override: DELETE -> 403
-  ✓ shop.alice: post /v1/items/VERIFY-20-C-1790564577:reserve -> 400
-  ✓ ...and the %2F one's redirect, /v1/items/VERIFY-20-C-1790564577/x:reserve -> 403
-  ✓ ...and VERIFY-20-C-1790564577 holds only the one reservation made above
-  ✓ (shop.bob removes VERIFY-20-C-1790564577)
+  ✓ shop.alice: POST /v1/items/VERIFY-20-C-1790569002%2Fx:reserve -> 307
+  ✓ shop.alice: POST /v1/items/VERIFY-20-C-1790569002%3Fx:reserve -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-20-C-1790569002%3Bx:reserve -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-20-C-1790569002:reserve/ -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-20-C-1790569002:reserve?x=1 -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-20-C-1790569002:restock -> 403
+  ✓ shop.alice: PATCH /v1/items/VERIFY-20-C-1790569002 -> 403
+  ✓ shop.alice: POST /v1/items/VERIFY-20-C-1790569002 + X-HTTP-Method-Override: DELETE -> 403
+  ✓ shop.alice: post /v1/items/VERIFY-20-C-1790569002:reserve -> 400
+  ✓ ...and the %2F one's redirect, /v1/items/VERIFY-20-C-1790569002/x:reserve -> 403
+  ✓ ...and VERIFY-20-C-1790569002 holds only the one reservation made above
+  ✓ (shop.bob removes VERIFY-20-C-1790569002)
   ✓ shop.bob: reset -> 200
   ✓ shop.alice's JWT edited to add admin -> 401
   ✓ a JWT from realm tutorial -> 401
@@ -910,7 +952,7 @@ $ ./run.sh verify
   (the change itself - shop.bob out of the admin group and back - is README step 13: verify does not change the directory)
 
 9. an expired JWT
-  (waiting 352 s for the token taken at the start to expire, plus Envoy's 60 s clock skew and 5 s for the clocks)
+  (waiting 41 s: exp + 5 s provider skew + 5 s margin)
   ✓ shop.alice's JWT once it has expired -> 401
 
 10. the Route is the only way in
@@ -991,7 +1033,7 @@ A request no policy allows gets `403` `RBAC: access denied`.
 | Keycloak says `Invalid parameter: redirect_uri` | the client's `redirectUris` and the filter's `redirect_uri` differ | the same value in both (step 2) |
 | the browser cannot load `shop.apps-metallb.crc.testing:20443` | no forward — CRC was restarted, or the shard cleaned — or the host is not in `/etc/hosts` | `../00-prerequisites/ingress-shard/run.sh deploy`; the Route must be admitted |
 | `503` from the router | the Route is admitted, but the front Envoy has no ready pod | `oc get pods -n envoy-20 -l app=front-envoy` |
-| `401 Jwt is expired` | the token outlived `corp`'s 300 s (plus 60 s of skew) | a fresh token; a browser session refreshes by itself |
+| `401 Jwt is expired` | the token outlived its lifespan (300 s normally, 45 s for the expiry probe) plus 5 s of skew | a fresh token; a browser session refreshes by itself |
 | `401 Jwt issuer is not configured` | a token from another realm — `tutorial`'s | a `corp` token |
 | the front Envoy, called from a pod, does not answer | the NetworkPolicies — by design (step 4) | call it through the Route |
 | a path the shop does not have: `302` to the login page, then `404` | the filters are on at the listener, for every path (step 14) — module 19's Gateway answers `404` at once (its filters are per route) | nothing to fix; see the last section |
@@ -1092,7 +1134,13 @@ both front doors with the same tokens and compares the answers (its section 7):
 | `shop.bob` out of the LDAP group, signed in again | `403`; back in: `200` | `403`; back in: `200` (module 20, step 13, both measured) |
 | the JWT the app receives | `azp: shop-kiosk`, `x-user`, no cookie on `/whoami` | `azp: shop-envoy`, `x-user`, no cookie on any route |
 
-**Measured differences:**
+One configuration difference, measured: module 20 allows 5 seconds of JWT clock
+skew (`clock_skew_seconds: 5` in the running `config_dump`); module 19 keeps the default 60.
+Both reject expired tokens, at different boundaries. Module 20 uses a dedicated
+45-second `shop-envoy-cli` token for its expiry test; regular `shop-cli` and
+browser token lifetimes remain 300 seconds.
+
+**Other measured differences:**
 
 - **A path the shop does not have** (`/nothing`), without a session: module 19
   answers `404` at once — Envoy Gateway turns the filters on per route, and no
@@ -1141,7 +1189,7 @@ is Envoy's **whole** configuration — listener, routes, filters, clusters, secr
 |---|---|---|
 | where each filter's settings are | at the listener, `oauth2` and `rbac` **empty** (off); each of the five routes turns all three on in `typed_per_filter_config` — the same `oauth2` block five times | at the listener, once, for every route |
 | `oauth2` | `OAuth2PerRoute.config`: the endpoints, `credentials` with `token_secret`/`hmac_secret` by SDS name (`oauth2/client_secret/securitypolicy/envoy-19/sign-in`), `cookie_names` with a suffix, `cookie_configs` `LAX` (nonce and verifier on `/oauth2/callback`), `forward_bearer_token`, `pass_through_matcher` `Authorization: Bearer `, `auth_type: BASIC_AUTH`, `use_refresh_token`, `end_session_endpoint` | the same fields, with `token_secret`/`hmac_secret` naming static secrets read from files, Envoy's default cookie names, and `post_logout_redirect_uri` written out |
-| `jwt_authn` | provider `corp_ce9edcdadc53325b` (a hash), cluster `securitypolicy/envoy-19/sign-in/jwt/0`, `cache_duration: 300s`, `async_fetch`, `forward`, `payload_in_metadata: corp`, `claim_to_headers`; a `requirement_map`, chosen per route by `requirement_name` | provider `corp`, cluster `keycloak`, the same settings; one `rules` entry, prefix `/` |
+| `jwt_authn` | provider `corp_ce9edcdadc53325b` (a hash), cluster `securitypolicy/envoy-19/sign-in/jwt/0`, `cache_duration: 300s`, `async_fetch`, `forward`, `payload_in_metadata: corp`, `claim_to_headers`; a `requirement_map`, chosen per route by `requirement_name` | provider `corp`, cluster `keycloak`, those settings plus explicit `clock_skew_seconds: 5`; one `rules` entry, prefix `/` |
 | `rbac` | the **matcher** API: a `matcher_list` of predicates on `DynamicMetadataInput` (`jwt_authn`/`corp`/…) and `HttpRequestHeaderMatchInput` (`:method` with `ignore_case`, `:path` with a `safe_regex`), first match wins, `on_no_match: DENY` | the **policy** API: `action: ALLOW` and three named `policies`, each `permissions` (`:method`, `:path`) and `principals` (`sourced_metadata` from `jwt_authn`/`corp`); no policy matches → `403` |
 | the listener | `normalize_path`, `merge_slashes`, `path_with_escaped_slashes_action: UNESCAPE_AND_REDIRECT`, set by Envoy Gateway | the same three, written out, and `scheme_header_transformation` (the router in front) |
 | names | derived: `httproute/envoy-19/shop/rule/0/match/0/*`, `securitypolicy/envoy-19/sign-in/oidc/0` | chosen: `shop`, `keycloak`, `echo` |
