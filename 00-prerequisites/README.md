@@ -95,7 +95,7 @@ permissions
 
 images the modules pull
   · python:3.12-slim        the echo app
-  · envoyproxy/envoy:v1.39-latest  the proxy
+  · envoyproxy/envoy:v1.39.1  the proxy (pinned: the walkthroughs were measured on it)
   · curlimages/curl:8.11.1  the in-cluster client
   · alpine/openssl:3.3.2    module 03's test certificates
   · fullstorydev/grpcurl:v1.9.3-alpine  module 07's gRPC client

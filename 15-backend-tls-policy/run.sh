@@ -102,9 +102,11 @@ verify() {
 }
 
 clean() {
-  gw_down "$NS" eg
-  $KUBE delete -f manifests/10-gateway.yaml --ignore-not-found --wait=false >/dev/null 2>&1
-  ok "namespace $NS deleting (module 12's GatewayClass eg is left for other modules)"
+  gw_down "$NS" eg || exit 1
+  # The Gateway lives in the namespace; deleting it removes the generated Envoy.
+  checked "delete namespace $NS" "$KUBE" delete -f manifests/10-gateway.yaml --ignore-not-found --wait=false
+  gone "namespace $NS" "ns/$NS"
+  ok "namespace $NS deleted (module 12's GatewayClass eg is left for other modules)"
 }
 
 case "${1:-deploy}" in

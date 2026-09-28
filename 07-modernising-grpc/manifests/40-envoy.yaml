@@ -59,7 +59,7 @@ spec:
           capabilities: { drop: ["ALL"] }
       containers:
       - name: envoy
-        image: envoyproxy/envoy:v1.39-latest
+        image: envoyproxy/envoy:v1.39.1
         args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
         ports:
         - { name: http,  containerPort: 8080 }

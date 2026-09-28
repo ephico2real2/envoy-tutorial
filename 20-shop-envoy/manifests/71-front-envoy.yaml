@@ -27,7 +27,7 @@ spec:
       containers:
       - name: envoy
         # The same tag as the shop's own Envoy (26-shop-envoy.yaml).
-        image: envoyproxy/envoy:v1.39-latest
+        image: envoyproxy/envoy:v1.39.1
         args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
         ports:
         - { name: http, containerPort: 8080 }
