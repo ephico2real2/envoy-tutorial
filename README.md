@@ -58,6 +58,12 @@ why, and how to pause Argo CD before changing anything by hand
 (`./run.sh pause`, then `./run.sh resume`). Module 16's also says how to add an
 integration, and lists them.
 
+### Try the shop
+
+- Module 19: <http://localhost:19080>
+- Module 20: <https://shop.apps-metallb.crc.testing:20443>
+- Log in with `shop.alice` or `shop.bob` / `Ldap123!` (lab users)
+
 ## What you need
 
 A Kubernetes or OpenShift cluster you can create namespaces in, and `oc` (or
