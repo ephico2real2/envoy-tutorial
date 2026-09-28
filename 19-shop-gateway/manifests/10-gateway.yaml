@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: envoy-19
+---
+# The same kind of Gateway as modules 13 to 17, in this module's own namespace,
+# of module 12's GatewayClass "eg". Plain HTTP on port 80: inside the cluster the
+# client pod calls it at its MetalLB address; a browser on the laptop reaches the
+# same address through a CRC network-proxy forward from 127.0.0.1:19080 (README,
+# step 7) - MetalLB addresses are on the CRC VM's network, which the laptop does
+# not route to by itself.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: envoy-19
+spec:
+  gatewayClassName: eg
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    allowedRoutes:
+      namespaces:
+        from: Same

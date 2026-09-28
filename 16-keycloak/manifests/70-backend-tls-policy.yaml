@@ -1,0 +1,25 @@
+# How any Gateway reaches Keycloak's Service over TLS: the CA to trust and the name
+# to expect - the one its certificate carries for callers inside the cluster
+# (30-certificate.yaml). Every Gateway that sends Keycloak a request -
+# module 17's JWKS fetch, module 19's JWKS fetch and sign-in - gets it from here:
+# a BackendTLSPolicy attaches to the Service, and a Service port takes one (module 15).
+#
+# Part of the offering, beside the Service it concerns: the Gateways that use it
+# come and go, it stays. Each Gateway's namespace still needs its own ReferenceGrant
+# here to point at keycloak-service (modules 17 and 19).
+#
+# The CA is ConfigMap keycloak-ca, under ca.crt: ./run.sh deploy copies it from
+# Secret keycloak-tls. Not in git - it is this cluster's own CA (enterprise-ca,
+# module 00); a copy in git would be wrong on every other cluster.
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: keycloak-service
+  namespace: keycloak
+spec:
+  targetRefs:
+  - { group: "", kind: Service, name: keycloak-service, sectionName: https }
+  validation:
+    caCertificateRefs:
+    - { group: "", kind: ConfigMap, name: keycloak-ca }
+    hostname: keycloak-service.keycloak.svc

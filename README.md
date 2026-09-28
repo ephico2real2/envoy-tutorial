@@ -37,6 +37,7 @@ Every command runs as written from your laptop.
 | [`16-keycloak`](16-keycloak/README.md) | a lab: the Red Hat build of Keycloak by its operator — manual InstallPlan approval, PostgreSQL, TLS, a realm with users, roles and clients, and reading a token | **done** |
 | [`17-keycloak-jwt`](17-keycloak-jwt/README.md) | Keycloak's tokens checked at the Gateway: remoteJWKS over TLS with a ReferenceGrant and BackendTLSPolicy, issuer and audience, role-based `/admin`, and failing closed | **done** |
 | [`18-keycloak-ldap`](18-keycloak-ldap/README.md) | a realm federated from the cluster's LDAP: the directory's CA fetched from the wire and checked out of band, `spec.truststores`, the LDAP provider and group mapper by `KeycloakRealmImport`, a login gate, an LDAP group as a role | **done** |
+| [`19-shop-gateway`](19-shop-gateway/README.md) | a real app behind the Gateway: the shop (kiosk + gRPC inventory) signs people in on realm `corp`'s login page (OIDC, PKCE), checks a JWT on every call — browser and command line alike — and LDAP groups decide create, delete and reset; one `SecurityPolicy`, and what Envoy Gateway made of it | **done** |
 
 Module 12 was written first because it was the immediate need. The numbering is
 the reading order, not the build order.
@@ -46,7 +47,8 @@ the reading order, not the build order.
 Most modules are deployed, read and removed. Modules 16, 17 and 18 are also a
 **standing Keycloak offering** on the operator's CRC — Keycloak with realm
 `tutorial` and the LDAP-federated realm `corp`, and the Gateway that checks their
-tokens — that other work depends on. Each module's `run.sh` builds and checks it;
+tokens — that other work depends on. Module 19's shop is the first application
+integrated with it, and stays too. Each module's `run.sh` builds and checks it;
 one Argo CD Application per module, in [`argocd/`](argocd/README.md), keeps the
 same manifests as git declares them and puts back what changes. Each of the three
 READMEs has a "Permanent lab" section: what is kept, what stays `run.sh`'s and
@@ -71,7 +73,7 @@ each module's `run.sh` does them in one go:
 ./run.sh clean      # delete the namespace
 ```
 
-Modules 16 to 18 add `./run.sh pause` and `./run.sh resume`, for their Argo CD
+Modules 16 to 19 add `./run.sh pause` and `./run.sh resume`, for their Argo CD
 Applications ([`argocd/`](argocd/README.md)). Module 16's `clean` keeps its
 namespace and its database's claim; `./run.sh clean --delete-data` deletes them.
 

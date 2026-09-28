@@ -3,16 +3,18 @@
 Modules 16, 17 and 18 are not only lessons: on the operator's CRC they are a
 **standing Keycloak offering** that other work depends on
 ([#9](https://github.com/ephico2real2/envoy-tutorial/issues/9)). `./run.sh` in
-each module builds it and checks it; the three Argo CD **Applications** here keep
-it as git declares it. One per module, in OpenShift GitOps' instance
+each module builds it and checks it; the Argo CD **Applications** here keep
+it as git declares it — with module 19's shop, the first application integrated
+with it. One per module, in OpenShift GitOps' instance
 `openshift-gitops`, each on the `main` branch of this repository and on the
 **same files** that module's `./run.sh deploy` applies:
 
 | Application | Source | Keeps |
 |---|---|---|
-| [`16-keycloak`](16-keycloak.yaml) | `16-keycloak/manifests` | namespace `keycloak`, the operator's `Subscription`, PostgreSQL, the certificate, the `Keycloak` resource, its Route, realm import `tutorial` |
-| [`17-keycloak-jwt`](17-keycloak-jwt.yaml) | `17-keycloak-jwt/manifests`, and `_shared/echo-app.yaml` into `envoy-17` | namespace `envoy-17`, Gateway `eg`, its routes and SecurityPolicies, the `ReferenceGrant` and `BackendTLSPolicy` in `keycloak`, the echo app |
-| [`18-keycloak-ldap`](18-keycloak-ldap.yaml) | `18-keycloak-ldap/manifests` | the LDAP bind password's Secret, realm import `corp` |
+| [`16-keycloak`](16-keycloak.yaml) | `16-keycloak/manifests` | namespace `keycloak`, the operator's `Subscription`, PostgreSQL, the certificate, the `Keycloak` resource, its Route, realm import `tutorial`, the `BackendTLSPolicy` every Gateway reaches `keycloak-service` with |
+| [`17-keycloak-jwt`](17-keycloak-jwt.yaml) | `17-keycloak-jwt/manifests`, and `_shared/echo-app.yaml` into `envoy-17` | namespace `envoy-17`, Gateway `eg`, its routes and SecurityPolicies, the `ReferenceGrant` in `keycloak`, the echo app |
+| [`18-keycloak-ldap`](18-keycloak-ldap.yaml) | `18-keycloak-ldap/manifests` | the LDAP bind password's Secret, realm import `corp` (not Secret `shop-kiosk-client`, which `run.sh` generates) |
+| [`19-shop-gateway`](19-shop-gateway.yaml) | `19-shop-gateway/manifests`, and `_shared/echo-app.yaml` into `envoy-19` | namespace `envoy-19`, Gateway `eg`, the shop (vendored from `envoy-grpc-modernization`), its NetworkPolicies, route and `SecurityPolicy`, the `ReferenceGrant` in `keycloak` (not the client Secret, which `run.sh` copies), the echo app behind `/whoami` — an integration of the offering (module 16's index) |
 
 Beside the Keycloak offering, one more Application keeps a piece of platform that
 module 20 builds on
@@ -25,8 +27,13 @@ same pattern:
 
 The laptop's forward to the shard's address is not in the cluster, so it stays
 `run.sh`'s ([its Permanent lab](../00-prerequisites/ingress-shard/README.md#permanent-lab)).
-Its health and sync are not measured yet: the Application reads `main`, where
-this folder does not exist until #17 is merged.
+Measured after #17 merged (`main` at `9d9c029`), on the lab `./run.sh deploy`
+had built: `Synced/Healthy` 10 s after `oc apply -f argocd/ingress-shard.yaml`;
+every object's UID unchanged — adopted, not re-created; over 3 minutes, 0 of 36
+samples off `Synced/Healthy`, and one sync operation. The default
+`IngressController`, whose route selector the shard's `run.sh` sets, is not
+tracked: it carries no `tracking-id` and is not among the Application's resources
+(read again 2026-09-27 during #15).
 
 Argo CD applies these files and puts back whatever differs from them — a deleted
 object, an edited field. It does **not** run `run.sh`: what `deploy` does by hand
@@ -34,7 +41,7 @@ object, an edited field. It does **not** run `run.sh`: what `deploy` does by han
 CA, fetching and checking the directory's root — stays `run.sh`'s, each with its
 reason in the module's "Permanent lab" section
 ([16](../16-keycloak/README.md#permanent-lab), [17](../17-keycloak-jwt/README.md#permanent-lab),
-[18](../18-keycloak-ldap/README.md#permanent-lab)).
+[18](../18-keycloak-ldap/README.md#permanent-lab), [19](../19-shop-gateway/README.md#permanent-lab)).
 
 ## Putting them on a cluster
 
@@ -42,7 +49,7 @@ reason in the module's "Permanent lab" section
 must pass. Then the Applications:
 
 ```bash
-16-keycloak/run.sh deploy && 18-keycloak-ldap/run.sh deploy && 17-keycloak-jwt/run.sh deploy
+16-keycloak/run.sh deploy && 18-keycloak-ldap/run.sh deploy && 17-keycloak-jwt/run.sh deploy && 19-shop-gateway/run.sh deploy
 oc apply -f argocd/
 ```
 
@@ -111,10 +118,14 @@ it happens. Each module's `run.sh` has two more commands, from
   Measured: `echo-src` was back in the second `resume` was run, and `resume`
   returned 5 s later.
 - **`./run.sh clean`** pauses before it deletes anything (module 16's pauses 16,
-  17 and 18: the other two keep objects in `keycloak`). Measured with module 17:
-  for 4 minutes after its clean, namespace `envoy-17`, the `BackendTLSPolicy` and
-  ConfigMap `keycloak-ca` stayed gone, and the Application said `OutOfSync` /
-  `Missing`.
+  17, 18 and 19: the other three keep objects in `keycloak`; module 18's pauses 18
+  and 19, whose shop signs in on realm `corp`). Measured with module 17, before
+  #15: for 4 minutes after its clean, namespace `envoy-17` stayed gone and the
+  Application said `OutOfSync` / `Missing`. Since #15 module 17's clean removes
+  namespace `envoy-17` and its `ReferenceGrant` only: module 16's `BackendTLSPolicy
+  keycloak-service` and ConfigMap `keycloak-ca` stay, because every Gateway that
+  calls Keycloak shares them. Each clean fails, with the step's own error, when a
+  deletion fails; an object already gone counts as deleted.
 - **`./run.sh deploy`** resumes its Application at the end, once the lab is up.
 
 Why this switch: `automated.enabled` exists for it (`oc explain
@@ -126,6 +137,35 @@ altogether (`controller/appcontroller.go`, `canProcessApp`), so its status would
 no longer show what differs. The `argocd`
 CLI is not installed here (`which argocd`: not found); `oc patch` is all it takes.
 `oc apply -f argocd/` resumes too: the files say `enabled: true`.
+
+## Moving an object from one Application to another
+
+Argo CD here tracks what it keeps by an **annotation**, not a label: `argocd-cm`
+says `application.resourceTrackingMethod: annotation`, and each kept object
+carries `argocd.argoproj.io/tracking-id: <application>:<group>/<kind>:<namespace>/<name>`
+(no `app.kubernetes.io/instance` label — measured on the `BackendTLSPolicy` below).
+An Application's own objects are the live ones whose annotation names it, plus the
+ones its git files declare (gitops-engine, `pkg/cache/cluster.go`,
+`GetManagedLiveObjs`; argo-cd v3.4.7, `controller/cache/cache.go`); what it owns
+and git no longer declares, it **prunes** (`prune: true`). An object git declares
+for an Application while another's annotation is on it gets a
+`SharedResourceWarning` (`controller/state.go`), and a sync of the declaring
+Application writes its own annotation (read in the source, not yet measured for
+an object another Application annotated — step 3 below checks it).
+
+So when a file moves from one module's `manifests/` to another's — the
+`BackendTLSPolicy` `keycloak/keycloak-service`, from 17 to 16 (#15) — the old
+Application must not look before the new one has taken it: seeing its annotation
+and no file, it deletes the object. The order, around the merge:
+
+1. `17-keycloak-jwt/run.sh pause` — the old owner makes no change.
+2. Merge.
+3. Let `16-keycloak` compare and sync (`16-keycloak/run.sh resume` asks for it and
+   waits for `Synced/Healthy`) until the object's `tracking-id` names
+   `16-keycloak`.
+4. `17-keycloak-jwt/run.sh resume` — the annotation is not 17's any more: nothing
+   to prune.
+5. The object's `uid` is the one recorded before step 1: it was never deleted.
 
 ## How these differ from the cluster's other Applications
 

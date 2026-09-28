@@ -41,7 +41,9 @@ import re
 import subprocess
 import sys
 
-TIMEOUT_S = 240
+# Long enough for module 19's verify, which waits for a token to expire: its
+# realm's 300 s lifetime plus Envoy's 60 s clock skew.
+TIMEOUT_S = 600
 DIRECTIVE = re.compile(r"<!--\s*walkthrough:\s*(skip|expect-exit\s+(\d+))\s*-->")
 # CSI sequences such as ESC[1m / ESC[32m: the scripts colour their output for a
 # terminal, and markdown shows the codes as literal text.

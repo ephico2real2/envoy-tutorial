@@ -13,11 +13,18 @@ metadata:
   namespace: keycloak
 spec:
   keycloakCRName: keycloak
-  # ${LDAP_BIND_PASSWORD} below is replaced, in the import Job only, with this
-  # Secret's value (10-bind-secret.yaml). The realm file holds no credential.
+  # ${LDAP_BIND_PASSWORD} and ${SHOP_KIOSK_CLIENT_SECRET} below are replaced, in
+  # the import Job only, with these Secrets' values. The realm file holds no
+  # credential.
   placeholders:
+    # 10-bind-secret.yaml.
     LDAP_BIND_PASSWORD:
       secret: { name: keycloak-ldap-bind, key: password }
+    # Not in git: ../run.sh deploy generates it once, a random value, and never
+    # changes it (README, step 2). Missing, the import cannot run: its Job waits
+    # for the Secret (README, "Permanent lab").
+    SHOP_KIOSK_CLIENT_SECRET:
+      secret: { name: shop-kiosk-client, key: client-secret }
   realm:
     realm: corp
     enabled: true
@@ -51,6 +58,36 @@ spec:
       publicClient: true
       standardFlowEnabled: false
       directAccessGrantsEnabled: true
+      protocolMappers:
+      - name: audience-shop-api
+        protocol: openid-connect
+        protocolMapper: oidc-audience-mapper
+        config:
+          included.client.audience: shop-api
+          access.token.claim: "true"
+          id.token.claim: "false"
+    # The shop's kiosk (module 19): a person signs in on this realm's login page,
+    # and Envoy Gateway - this confidential client - swaps the code for tokens.
+    # Its tokens carry shop-api in aud, as shop-cli's do, so the Gateway checks
+    # both with the same JWT provider.
+    - clientId: shop-kiosk
+      enabled: true
+      publicClient: false
+      # From Secret shop-kiosk-client (placeholders, above). Module 19's run.sh
+      # copies the same value into the Gateway's namespace.
+      secret: ${SHOP_KIOSK_CLIENT_SECRET}
+      standardFlowEnabled: true
+      directAccessGrantsEnabled: false
+      # The one place Keycloak sends a code back to: module 19's Gateway, which
+      # a browser on the CRC laptop reaches at localhost:19080 (module 19, step 7).
+      redirectUris: ["http://localhost:19080/oauth2/callback"]
+      attributes:
+        # Refuse a code request without a PKCE S256 challenge. Envoy's oauth2
+        # filter always sends one (v1.39.1, oauth2/filter.cc).
+        pkce.code.challenge.method: S256
+        # Where Keycloak may send the browser after /logout: the Gateway's root,
+        # the address Envoy asks for (post_logout_redirect_uri).
+        post.logout.redirect.uris: "http://localhost:19080/"
       protocolMappers:
       - name: audience-shop-api
         protocol: openid-connect
@@ -103,6 +140,12 @@ spec:
           # in or are looked up.
           fullSyncPeriod: ["-1"]
           changedSyncPeriod: ["-1"]
+          # Read the person from the directory at every login, groups included.
+          # With the default policy Keycloak kept a user in its cache: shop.bob,
+          # removed from app-ocp-rbac-ocp-keycloak-admin, still got admin in his
+          # next tokens, until the realm's user cache was cleared (measured, #15).
+          # NO_CACHE makes a change in the directory count at the next login.
+          cachePolicy: ["NO_CACHE"]
         subComponents:
           org.keycloak.storage.ldap.mappers.LDAPStorageMapper:
           # Explicit mappers from LDAP attributes to the Keycloak user. The

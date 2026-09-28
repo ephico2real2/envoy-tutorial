@@ -80,10 +80,25 @@ nothing else. [`manifests/20-realm.yaml`](manifests/20-realm.yaml) is the realm:
 | **attribute mappers** | user name ← `uid`, email ← `mail`, first name ← `cn`, last name ← `sn` |
 | a **group mapper** | the groups `(cn=app-ocp-rbac-ocp-*)` under `ou=Groups`, read from each group's `member`, flat, read-only |
 | realm role **`admin`** | and the group `app-ocp-rbac-ocp-keycloak-admin` that grants it — step 10 |
-| clients | `shop-api` (the audience) and `shop-cli` (password grant), as in `tutorial` |
+| clients | `shop-api` (the audience) and `shop-cli` (password grant), as in `tutorial`; `shop-kiosk`, module 19's browser sign-in (confidential, authorization code with PKCE) |
+| **no user cache** | `cachePolicy: NO_CACHE` — each login reads the person and their groups from the directory, so a change there counts at the next login (module 19, step 13) |
 
-The realm file names the bind password only as `${LDAP_BIND_PASSWORD}`; the
-import's `placeholders` field fills it from the Secret, inside the import Job.
+The realm file names the bind password only as `${LDAP_BIND_PASSWORD}`, and
+`shop-kiosk`'s client secret only as `${SHOP_KIOSK_CLIENT_SECRET}`; the import's
+`placeholders` field fills each from a Secret, inside the import Job. The client
+secret is one only Keycloak and module 19's Gateway need to know, so it is written
+nowhere: its Secret, `shop-kiosk-client`, gets a random value once, and keeps it —
+an existing one is never replaced (the realm keeps the value it was imported
+with). Module 19 copies it for its Gateway. `./run.sh deploy` does the same:
+
+```console
+$ oc get secret shop-kiosk-client -n keycloak >/dev/null 2>&1 && echo "Secret shop-kiosk-client kept" || python3 -c 'import secrets; print(secrets.token_urlsafe(32), end="")' | oc create secret generic shop-kiosk-client -n keycloak --from-file=client-secret=/dev/stdin
+secret/shop-kiosk-client created
+```
+
+The value goes from Python's `secrets` module straight into the Secret, on
+standard input: never on a command line, never on the screen. Now the bind
+password and the realm:
 
 ```console
 $ oc apply -f manifests/10-bind-secret.yaml -f manifests/20-realm.yaml
@@ -412,22 +427,27 @@ out of that window):
 
 ```console
 $ sleep 2; T=$(date -u +%Y-%m-%dT%H:%M:%SZ); sleep 1; ./token.sh sarah.jones >/dev/null; sleep 2; oc logs -n ldap-testing deploy/openldap-server -c openldap --since-time="$T" | grep -E 'BIND dn="(cn=keycloak-bind-serviceid|uid=sarah.jones)[^"]*" mech|SRCH base="ou=People|SRCH base="ou=Groups' | sed -E 's/^[0-9a-f]+ //; s/(filter=".{60}).*/\1.../'
-conn=10454 op=0 BIND dn="cn=keycloak-bind-serviceid,ou=TrustedApplications,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
-conn=10454 op=1 SRCH base="ou=People,dc=ephico2real,dc=com" scope=1 deref=3 filter="(&(entryUUID=499e85a4-480f-1041-84a7-371855b7826b)(memberOf=...
-conn=10455 op=0 BIND dn="uid=sarah.jones,ou=People,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
+conn=23241 op=0 BIND dn="cn=keycloak-bind-serviceid,ou=TrustedApplications,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
+conn=23241 op=1 SRCH base="ou=People,dc=ephico2real,dc=com" scope=1 deref=3 filter="(&(entryUUID=499e85a4-480f-1041-84a7-371855b7826b)(memberOf=...
+conn=23242 op=0 BIND dn="uid=sarah.jones,ou=People,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
+conn=23243 op=0 BIND dn="cn=keycloak-bind-serviceid,ou=TrustedApplications,dc=ephico2real,dc=com" mech=SIMPLE ssf=0
+conn=23243 op=1 SRCH base="ou=Groups,dc=ephico2real,dc=com" scope=1 deref=3 filter="(&(cn=app-ocp-rbac-ocp-*)(member=uid=sarah.jones,ou=people,d...
 ```
 
 **What just happened:** Keycloak opened a connection, **bound as the bind
 account**, looked sarah up — by her `entryUUID`, through the gate — and then
-bound **as sarah** on a second connection: that bind is the password check. Each
-of the bind account's connections carries its bind and **one** search (`op=0`,
+bound **as sarah** on a second connection: that bind is the password check —
+and on a third, as the bind account again, read the groups whose `member` is
+sarah. Each of the bind account's connections carries its bind and **one** search (`op=0`,
 `op=1`), then is closed. Keycloak 26.7.0's release notes
 list a fix, #50201, "LDAP user federation re-binds the service account on every
 operation since 26.6.0 (connection pool not reused)"; this Keycloak is
 `26.6.7.redhat-00003`, its connection pooling is on (the default, `true`), and
 measured here the bind account binds once **per search**, on a new connection
-each time: 1 bind for a returning user's login, 2 for a first login (the user
-search and the group search). The pool is not reused — the behaviour that fix
+each time: 2 per login, the user search and the group search. (Before the LDAP
+provider got `cachePolicy: NO_CACHE` — module 19, the options below — a returning
+user's login needed only the first: Keycloak kept the rest in its user cache.)
+The pool is not reused — the behaviour that fix
 describes. It costs one TLS handshake and one bind per operation; it is not an
 error.
 
@@ -441,6 +461,7 @@ An import only **creates** a realm. Measured, one change at a time:
 | delete the realm only | nothing — the import still says `Done=True`, and does not run again (watched for 4 minutes) |
 | delete and re-apply the import while `corp` exists | a new Job, which logs `Realm 'corp' already exists. Import skipped` — and the import still says `Done=True` |
 | **delete the realm, then delete and re-apply the import** | a new Job creates `corp` from the file |
+| the same, with Secret `shop-kiosk-client` missing (#15, 2026-09-27) | the import says `Started=True`, `Import Job running`; its Job's pod waits, `CreateContainerConfigError`, `secret "shop-kiosk-client" not found` — no failure in 1 min 48 s; created then (step 2's command), the Job ran and the import was `Done` 17 s later |
 
 So a change is: change the file, delete the realm, delete the import, apply.
 On the permanent lab Argo CD would undo each step as it happens, so the steps
@@ -513,6 +534,8 @@ $ ./run.sh verify
   ✓ realm corp exists
   ✓ provider: test connection
   ✓ provider: test authentication (the bind account)
+  ✓ provider: cachePolicy NO_CACHE - the directory is read at every login
+  ✓ client shop-kiosk (module 19): its secret is Secret shop-kiosk-client's
 
 3. who gets a corp token
   ✓ sarah.jones (gate member): issued by corp
@@ -552,6 +575,7 @@ all checks passed
 | `importEnabled` | `true` | copy users into Keycloak's database, linked to LDAP | `false` to look them up on every request |
 | `fullSyncPeriod`, `changedSyncPeriod` | `-1` | no periodic sync: users are imported as they are looked up | a sync interval, in seconds |
 | `connectionPooling` | not set (`true`) | reuse connections — measured not to be reused (step 12) | — |
+| `cachePolicy` | `NO_CACHE` | read the person and their groups from the directory at every login. Measured with the default (`DEFAULT`, Keycloak's user cache): a person taken out of `app-ocp-rbac-ocp-keycloak-admin` still got `admin` in the next tokens, until the realm's user cache was cleared (module 19, step 13) `./run.sh deploy` (fatal) and `verify` read the live value: an import only creates, so a realm imported before it keeps `DEFAULT` | `MAX_LIFESPAN`, with `maxLifespan` in milliseconds, to trade freshness for fewer directory searches |
 
 **The group mapper** (`subComponents`, `group-ldap-mapper`)
 
@@ -592,6 +616,7 @@ the realm is replaced with the Secret's value inside the import Job.
 | Test connection `204`, Test authentication `CommunicationError` | no LDAP server answered — wrong scheme or port | `ldaps://` on 443, or on 636 in the cluster |
 | `invalid_grant`, `Invalid user credentials`; the log says `user_not_found` | the person is not in the gate, or not under `ou=People` | add them to `app-ssb-autobahnusers` in the directory |
 | an edited `20-realm.yaml`, applied, changes nothing | an import only creates | step 13 |
+| a change of group in the directory does not show in the next token | the LDAP provider's user cache | `cachePolicy: NO_CACHE`, as here (module 19, step 13) |
 | the import says `Done=True`, the realm is unchanged, its Job logs `Import skipped` | the realm already existed when the Job ran | delete the realm first (step 13) |
 | `zsh: no matches found: chain-*.pem` | step 4's `for` loop ran before the `awk` that writes the files | run the `awk` command first |
 | `unknown option -noservername` / `-verify_hostname` | macOS LibreSSL | OpenSSL 3 (`brew install openssl`) |
@@ -635,6 +660,7 @@ run as written.)
 | What | Made by | Kept by | Why |
 |---|---|---|---|
 | Secret `keycloak-ldap-bind`, `KeycloakRealmImport corp` | `manifests/` | Argo CD | manifests. Measured: a deleted import was back in 0.7 s, and its new Job logged `Realm 'corp' already exists. Import skipped` |
+| **Secret `shop-kiosk-client`** — client `shop-kiosk`'s secret (step 2) | `./run.sh deploy`: a random value, once; never replaced | nobody — `run.sh` only | a secret in git is a published secret. Not in git, so not Argo CD's: measured, after `./run.sh resume` the Application is `Synced/Healthy`, lists only `keycloak-ldap-bind` and `corp`, and the Secret carries no tracking annotation. **The import needs it:** measured with it missing, the import said `Started=True`, `Import Job running`, and its Job's pod waited in `CreateContainerConfigError` (`secret "shop-kiosk-client" not found`) — 1 min 48 s, no failure; created then, the same Job ran and the import was `Done` 17 s later. So on a new cluster run `./run.sh deploy` before `oc apply -f argocd/` (as [`../argocd`](../argocd/README.md) says); an import Argo CD applies first waits, and completes once `deploy` writes the Secret. `./run.sh deploy` also checks that the realm's client has the Secret's value, and fails with the fix (step 13) when a realm predates the Secret |
 | realm `corp` itself, in Keycloak's database | the import's Job, once | nobody | an import only creates. A deleted realm is not imported again while its import says `Done` (step 13), and Argo CD sees nothing to repair: the import is unchanged. `./run.sh deploy` repairs it — it pauses the Application, deletes the import and applies it again (measured with Argo CD on: realm deleted, `deploy` brought it back and resumed the Application, `Synced/Healthy`) |
 | **Secret `ldap-root-ca`** — the directory's root CA, fetched from the wire and checked (steps 4 to 6) | `./run.sh deploy` | nobody — `run.sh` only | [below](#why-the-directorys-root-is-not-in-git) |
 | the truststore entry that mounts it | module 16's `Keycloak` resource | Argo CD, `16-keycloak` | one owner (step 6) |
@@ -682,10 +708,16 @@ cluster without the Application.
 ## Clean up
 
 Leave `corp` in place if you go on: module 17's Gateway accepts its tokens beside
-realm `tutorial`'s (module 17, steps 8 to 10).
+realm `tutorial`'s (module 17, steps 8 to 10), and module 19's shop signs people in
+on it — it needs the realm, its LDAP provider, client `shop-kiosk` and Secret
+`shop-kiosk-client`, which module 19 copies for its Gateway. Cleaning this module
+breaks both until `./run.sh deploy` (re-importing `corp` if needed), then
+`../17-keycloak-jwt/run.sh deploy` and `../19-shop-gateway/run.sh deploy`, which
+copies the new client secret.
 On the permanent lab a clean-up is a deliberate reset: pause Argo CD first
-(`./run.sh pause`), or it puts the import and the bind Secret back as you delete
-them. To remove what this module added — the realm, its import, the two Secrets.
+(`./run.sh pause`, and `../19-shop-gateway/run.sh pause` once module 19's
+Application exists), or it puts the import and the bind Secret back as you delete
+them. `./run.sh clean` pauses both. To remove what this module added — the realm, its import, the three Secrets.
 Module 16's `Keycloak` keeps its `truststores` entry: it is optional. But the
 Secret it names is gone, so the operator **restarts Keycloak** — measured: it
 stopped `keycloak-0` 5 seconds after the delete, and the new Keycloak trusts the
@@ -700,6 +732,7 @@ $ ./run.sh pause
 $ ./admin.sh DELETE /admin/realms/corp
 $ oc delete keycloakrealmimport corp -n keycloak
 $ oc delete -f manifests/10-bind-secret.yaml
+$ oc delete secret shop-kiosk-client -n keycloak
 $ rm -f chain-1.pem chain-2.pem ldap-root-ca.pem
 $ old=$(oc get pod keycloak-0 -n keycloak -o jsonpath='{.metadata.uid}'); new=$old; oc delete secret ldap-root-ca -n keycloak && for i in $(seq 1 60); do new=$(oc get pod keycloak-0 -n keycloak -o jsonpath='{.metadata.uid}'); [ -n "$new" ] && [ "$new" != "$old" ] && break; sleep 5; done; [ -n "$new" ] && [ "$new" != "$old" ] && oc wait pod/keycloak-0 -n keycloak --for=condition=Ready --timeout=300s && oc wait keycloak/keycloak -n keycloak --for=condition=Ready --timeout=300s || { echo "Keycloak has not restarted and become Ready - oc get pod keycloak-0 -n keycloak"; false; }
 ```

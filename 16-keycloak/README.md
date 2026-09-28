@@ -344,7 +344,38 @@ $ oc exec -n keycloak client -- curl -s --cacert /tmp/ca.crt -d grant_type=passw
 {"error":"invalid_grant","error_description":"Invalid user credentials"}
 ```
 
-### Step 11 — check yourself
+### Step 11 — for Gateways: Keycloak's Service over TLS
+
+A Gateway that checks this realm's tokens fetches the public keys itself, from
+`keycloak-service` inside the cluster (module 17), and one that signs people in
+also swaps codes for tokens there (module 19). It needs to reach that Service
+over **TLS**, trusting the enterprise CA and expecting the Service's name — which
+the certificate from step 4 carries for exactly this. A `BackendTLSPolicy`
+(module 15) says so, and it belongs **here**, beside the Service: it attaches to
+the Service, a Service port takes one, and every Gateway that calls Keycloak uses
+it ([`manifests/70-backend-tls-policy.yaml`](manifests/70-backend-tls-policy.yaml)).
+The CA goes in a ConfigMap, under `ca.crt`, copied from the Secret cert-manager
+wrote — not a file in git: it is this cluster's own CA:
+
+```console
+$ oc create configmap keycloak-ca -n keycloak --dry-run=client -o yaml --from-literal=ca.crt="$(oc get secret keycloak-tls -n keycloak -o jsonpath='{.data.ca\.crt}' | base64 -d)" | oc apply -f -
+configmap/keycloak-ca unchanged
+$ oc apply -f manifests/70-backend-tls-policy.yaml
+Warning: resource backendtlspolicies/keycloak-service is missing the kubectl.kubernetes.io/last-applied-configuration annotation which is required by oc apply. oc apply should only be used on resources created declaratively by either oc create --save-config or oc apply. The missing annotation will be patched automatically.
+backendtlspolicy.gateway.networking.k8s.io/keycloak-service configured
+$ oc get backendtlspolicy keycloak-service -n keycloak -o jsonpath='{range .status.ancestors[*]}{.ancestorRef.namespace}/{.ancestorRef.name}: {range .conditions[?(@.type=="Accepted")]}{.type}={.status}{end}{"\n"}{end}'
+envoy-17/admin-only: Accepted=True
+envoy-17/keycloak-jwt: Accepted=True
+envoy-19/sign-in: Accepted=True
+```
+
+**What just happened:** both already existed on this lab — the policy was module
+17's until it moved here (#15), which is why `oc apply` found it without its own
+annotation and added it. The policy's status lists every `SecurityPolicy` that
+reaches Keycloak through it, each `Accepted`: module 17's two and module 19's. On
+a cluster with no Gateway yet, the list is empty, and the policy waits for one.
+
+### Step 12 — check yourself
 
 ```console
 $ ./run.sh verify
@@ -358,6 +389,8 @@ $ ./run.sh verify
   ✓ the discovery document names the issuer
   ✓ the JWKS has an RS256 signing key
   ✓ ...reachable at the Service too, for in-cluster callers
+  ✓ for Gateways: BackendTLSPolicy keycloak-service expects the Service's name
+  ✓ ...and trusts Keycloak's CA (ConfigMap keycloak-ca = Secret keycloak-tls's ca.crt)
 
 3. tokens
   ✓ alice: issued by the realm
@@ -444,6 +477,8 @@ by hand, and what other controllers make, is not:
 | `Certificate keycloak-tls` | `30-certificate.yaml` | Argo CD; its Secret, cert-manager, which renews it | a manifest |
 | Secret `keycloak-admin`, the `Keycloak` resource — with module 18's truststore entry | `40-keycloak.yaml` | Argo CD | a manifest |
 | Route `keycloak` | `50-route.yaml` | Argo CD | a manifest |
+| `BackendTLSPolicy keycloak-service` — how every Gateway reaches `keycloak-service` over TLS (step 11) | `70-backend-tls-policy.yaml` | Argo CD | a manifest. Module 17's until #15; module 19 uses it too |
+| **ConfigMap `keycloak-ca`** — the CA that policy trusts (step 11) | `./run.sh deploy`, from Secret `keycloak-tls` | nobody — `run.sh` only | the cluster's own CA (`enterprise-ca`, module 00): a copy in git would be this CRC's, wrong on every other cluster. Missing, the policy is refused — `Accepted=False` `NoValidCACertificate` (module 15's Troubleshooting) — and every Gateway's calls to Keycloak fail; `./run.sh deploy` writes it again |
 | `KeycloakRealmImport tutorial` | `60-realm.yaml` | Argo CD keeps the resource; the realm is created once | an import only creates (step 8): no sync ever changes realm `tutorial` |
 | **approving the InstallPlan** (step 2) | `./run.sh deploy`: `oc patch installplan … approved: true` | nobody — `run.sh` only | `Manual` approval is the point: a person decides on each operator version. OLM makes one InstallPlan per version, under a generated name; approving it from git would make `Manual` automatic. While a new version waits, Argo CD's health check for a `Subscription` says `Progressing` (`status.state` `UpgradePending`; argo-cd v3.4.7, `resource_customizations/operators.coreos.com/Subscription/health.lua`), so the Application shows it |
 | the operator's CSV and Deployment | OLM | OLM | |
@@ -478,15 +513,15 @@ because Argo CD waits up to five before a repair it makes soon after another
 ([`../argocd`](../argocd/README.md)). A request or read that fails makes either
 command fail. Neither checks the lab itself: `./run.sh verify` does.
 
-- **`./run.sh clean`** pauses first — this Application, and 17's and 18's, which
-  keep objects in `keycloak` too — so the clean-up is not undone. It is a
+- **`./run.sh clean`** pauses first — this Application, and 17's, 18's and 19's,
+  which keep objects in `keycloak` too — so the clean-up is not undone. It is a
   deliberate reset. It keeps namespace `keycloak` and the database's claim, so
   the realms and their users survive; only `./run.sh clean --delete-data`
   deletes them, with the volume ([Clean up](#clean-up)).
 - **`./run.sh deploy`** resumes the Application at its end. After a clean, bring
   the offering back in order: `./run.sh deploy`, then
-  `../18-keycloak-ldap/run.sh deploy`, then `../17-keycloak-jwt/run.sh deploy` —
-  each resumes its own Application.
+  `../18-keycloak-ldap/run.sh deploy`, then `../17-keycloak-jwt/run.sh deploy`
+  and `../19-shop-gateway/run.sh deploy` — each resumes its own Application.
 - **Deleting an Application leaves the lab running.** These Applications carry no
   `resources-finalizer.argocd.argoproj.io`, which would make Argo CD delete
   every object they keep — namespace `keycloak`, and with it the database's claim.
@@ -509,10 +544,19 @@ recipe, not a redesign — module 18 is the worked example of every item:
    PKI owner's copy before writing it, as module 18 does (steps 4 to 6). A CA
    each cluster makes for itself, like the directory's here, does not go in git
    (module 18, "Why the directory's root is not in git"). A new Secret restarts
-   Keycloak about 45 s later (measured, module 18 step 6).
+   Keycloak about 45 s later (measured, module 18 step 6). The other way round —
+   a Gateway trusting **Keycloak** — is already here: the `BackendTLSPolicy` of
+   step 11. An integration's Gateway needs only its own `ReferenceGrant` in
+   `keycloak` (module 19's `50-trust-keycloak.yaml`).
 2. **Content.** A new integration gets **its own realm**, from its own
    `KeycloakRealmImport` in its own module folder. Credentials reach it only
-   through `spec.placeholders` from a Secret (module 18's `LDAP_BIND_PASSWORD`).
+   through `spec.placeholders` from a Secret (module 18's `LDAP_BIND_PASSWORD`),
+   owned by whoever owns the import. A secret only Keycloak and its client need
+   to share — a client secret — is not written anywhere: the owner's `run.sh
+   deploy` generates it once, randomly, and never replaces it; the client's side
+   copies it from the live Secret (module 18's `shop-kiosk-client`, copied by
+   module 19). Realm `tutorial`'s `orders-service-lab-secret`, written in its
+   realm file, predates this rule.
    An import only creates a realm: a second import naming an existing realm is
    skipped (`Realm '…' already exists. Import skipped`, module 18), so it cannot
    add clients to one. To add clients to an existing realm — `corp`, say —
@@ -539,8 +583,9 @@ or an epic, when it is large.
 
 | Integration | Realm and clients | Trust | Gate | Role groups | Argo CD Application | Check | Issue |
 |---|---|---|---|---|---|---|---|
-| `tutorial` — modules 16, 17 | realm `tutorial`; `shop-api`, `shop-cli`, `orders-service` | Keycloak's own certificate, `enterprise-ca`; the Gateway trusts it through a `BackendTLSPolicy` (module 17) | none: users written in the realm file (lab only) | realm roles `reader`, `admin`, given in the realm file | `16-keycloak`; `17-keycloak-jwt` (the Gateway) | `./run.sh verify`; `../17-keycloak-jwt/run.sh verify` | built in [PR #2](https://github.com/ephico2real2/envoy-tutorial/pull/2); kept by [#9](https://github.com/ephico2real2/envoy-tutorial/issues/9) |
-| `corp` — module 18 (and 17's second issuer) | realm `corp`, LDAP-federated; `shop-api`, `shop-cli` | truststore `ldap-root-ca`: the directory's root, checked out of band | `app-ssb-autobahnusers` | `app-ocp-rbac-ocp-keycloak-admin` → role `admin` | `18-keycloak-ldap`; `17-keycloak-jwt` (the Gateway) | `../18-keycloak-ldap/run.sh verify`; `../17-keycloak-jwt/run.sh verify` | [#7](https://github.com/ephico2real2/envoy-tutorial/issues/7), [#8](https://github.com/ephico2real2/envoy-tutorial/issues/8) |
+| `tutorial` — modules 16, 17 | realm `tutorial`; `shop-api`, `shop-cli`, `orders-service` | Keycloak's own certificate, `enterprise-ca`; every Gateway trusts it through this module's `BackendTLSPolicy` (step 11) | none: users written in the realm file (lab only) | realm roles `reader`, `admin`, given in the realm file | `16-keycloak`; `17-keycloak-jwt` (the Gateway) | `./run.sh verify`; `../17-keycloak-jwt/run.sh verify` | built in [PR #2](https://github.com/ephico2real2/envoy-tutorial/pull/2); kept by [#9](https://github.com/ephico2real2/envoy-tutorial/issues/9) |
+| `corp` — module 18 (and 17's second issuer) | realm `corp`, LDAP-federated; `shop-api`, `shop-cli` (and module 19's `shop-kiosk`) | truststore `ldap-root-ca`: the directory's root, checked out of band | `app-ssb-autobahnusers` | `app-ocp-rbac-ocp-keycloak-admin` → role `admin` | `18-keycloak-ldap`; `17-keycloak-jwt` (the Gateway) | `../18-keycloak-ldap/run.sh verify`; `../17-keycloak-jwt/run.sh verify` | [#7](https://github.com/ephico2real2/envoy-tutorial/issues/7), [#8](https://github.com/ephico2real2/envoy-tutorial/issues/8) |
+| the shop — module 19: kiosk + inventory (`envoy-grpc-modernization`) behind Gateway `eg` in `envoy-19` | realm `corp`; client `shop-kiosk` (confidential, authorization code + PKCE S256, redirect `http://localhost:19080/oauth2/callback`) added to `corp`'s import; its secret a placeholder from Secret `keycloak/shop-kiosk-client`, generated once by module 18's `run.sh deploy` and copied by module 19's into `envoy-19/shop-kiosk-oidc` | this module's `BackendTLSPolicy` to `keycloak-service` (step 11); a `ReferenceGrant` in `keycloak` | `app-ssb-autobahnusers` | `app-ocp-rbac-ocp-keycloak-admin` → `admin`: create, delete, reset; any `corp` token: read, reserve; read from the directory at every login (`cachePolicy: NO_CACHE`) | `19-shop-gateway` | `../19-shop-gateway/run.sh verify` | [#15](https://github.com/ephico2real2/envoy-tutorial/issues/15) |
 | Cilium JWT — **parked** | tokens from realm `corp`, checked by Cilium's Envoy (`jwt_authn`) with module 17's checks | — | — | — | — | — | [cilium-implementation-poc#85](https://github.com/ephico2real2/cilium-implementation-poc/issues/85), lab [#86](https://github.com/ephico2real2/cilium-implementation-poc/issues/86) — parked until a stable homelab host exists |
 
 ## Clean up
@@ -550,19 +595,22 @@ clean-up is a deliberate reset, never the end of a walkthrough. Where Argo CD
 keeps the lab, pause it first — this module's Application, and 17's and 18's,
 which keep objects in `keycloak` too — or it puts each object back as you delete
 it. `./run.sh clean` does, and then removes the server, the operator and the
-database's pod, and **keeps** namespace `keycloak` and the database's claim
-`data-postgres-0`: the database — realms `tutorial` and `corp`, their users —
-survives, and so does what modules 17 and 18 keep in `keycloak`. The next
+database's pod, and the `BackendTLSPolicy` and its CA (step 11) — every
+Gateway's calls to Keycloak fail until the next deploy — and **keeps** namespace
+`keycloak` and the database's claim `data-postgres-0`: the database — realms
+`tutorial` and `corp`, their users — survives, and so does what modules 17, 18
+and 19 keep in `keycloak`. The next
 `./run.sh deploy` starts on that database. By hand:
 
 <!-- walkthrough: skip -->
 ```console
-$ ./run.sh pause; ../17-keycloak-jwt/run.sh pause; ../18-keycloak-ldap/run.sh pause
+$ ./run.sh pause; ../17-keycloak-jwt/run.sh pause; ../18-keycloak-ldap/run.sh pause; ../19-shop-gateway/run.sh pause
 $ oc delete keycloakrealmimport tutorial -n keycloak
 $ oc delete keycloak keycloak -n keycloak
 $ oc delete subscription rhbk-operator -n keycloak
 $ oc delete csv rhbk-operator.v26.6.7-opr.1 -n keycloak
 $ oc delete operatorgroup keycloak -n keycloak
+$ oc delete -f manifests/70-backend-tls-policy.yaml; oc delete configmap keycloak-ca -n keycloak
 $ oc delete -f manifests/50-route.yaml -f manifests/40-keycloak.yaml -f manifests/30-certificate.yaml -f manifests/20-postgres.yaml --ignore-not-found
 ```
 
@@ -571,9 +619,10 @@ is `whenDeleted: Retain`, the default (measured on the live StatefulSet).
 
 **`./run.sh clean --delete-data` is the full wipe**, and it destroys: namespace
 `keycloak`; the database — realms `tutorial` and `corp`, their users and
-sessions; claim `data-postgres-0` **and its volume**; and everything modules 17
-and 18 keep in `keycloak` (the `ReferenceGrant`, the `BackendTLSPolicy`,
-ConfigMap `keycloak-ca`, Secrets `ldap-root-ca` and `keycloak-ldap-bind`, realm
+sessions; claim `data-postgres-0` **and its volume**; the `BackendTLSPolicy` and
+ConfigMap `keycloak-ca`; and everything modules 17, 18 and 19 keep in `keycloak`
+(the `ReferenceGrant`s, Secrets `ldap-root-ca`,
+`keycloak-ldap-bind` and `shop-kiosk-client`, realm
 import `corp`). On CRC a volume outlives its claim — the StorageClass keeps
 volumes (`reclaimPolicy: Retain`), and an earlier clean-up left one behind,
 `Released`, data and all (measured) — so it marks the volume for deletion first.
@@ -581,7 +630,7 @@ By hand:
 
 <!-- walkthrough: skip -->
 ```console
-$ ./run.sh pause; ../17-keycloak-jwt/run.sh pause; ../18-keycloak-ldap/run.sh pause
+$ ./run.sh pause; ../17-keycloak-jwt/run.sh pause; ../18-keycloak-ldap/run.sh pause; ../19-shop-gateway/run.sh pause
 $ oc patch pv "$(oc get pvc data-postgres-0 -n keycloak -o jsonpath='{.spec.volumeName}')" --type=merge -p '{"spec":{"persistentVolumeReclaimPolicy":"Delete"}}'
 $ oc delete keycloakrealmimport tutorial -n keycloak
 $ oc delete keycloak keycloak -n keycloak
@@ -596,9 +645,9 @@ operator on the cluster uses them.
 
 ## The shortcut
 
-`./run.sh deploy` does steps 2 to 8, approving the InstallPlan for you, and
-resumes Argo CD's Application if there is one; `./run.sh verify` is step 11;
-`./run.sh clean` is the clean-up, with the three Applications paused first and
+`./run.sh deploy` does steps 2 to 8 and 11, approving the InstallPlan for you, and
+resumes Argo CD's Application if there is one; `./run.sh verify` is step 12;
+`./run.sh clean` is the clean-up, with the four Applications paused first and
 the database kept (`--delete-data` wipes it);
 `./run.sh pause` and `./run.sh resume` are the [Permanent lab](#permanent-lab)'s.
 

@@ -1,0 +1,44 @@
+# What the Gateway serves, and where it sends it. Nothing about sign-in here - the
+# SecurityPolicy (70-sign-in.yaml) adds that to every route of the Gateway.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: shop
+  namespace: envoy-19
+  annotations:
+    # Argo CD applies this after everything else in the module (wave 0), the
+    # SecurityPolicy included, so the route never leads to a shop without it. Argo
+    # CD waits for a wave's objects to be healthy, and it has no health check for a
+    # SecurityPolicy (measured: no health on Application 17's two) - so this orders
+    # the two, it does not wait for Accepted. ./run.sh deploy does (README, step 6).
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  parentRefs: [{ name: eg }]
+  rules:
+  # The shop, all through its own Envoy, which turns REST+JSON into gRPC
+  # (24-shop-envoy-config.yaml) and serves the kiosk page at /. Only the paths
+  # the shop has: the REST API under /v1/ and the page itself. Its Envoy also
+  # accepts native gRPC and gRPC-Web on /legacy.inventory.v1.Inventory/...; the
+  # Gateway does not route those, so no call reaches the shop around the REST
+  # paths the authorization rules name.
+  - matches:
+    - path: { type: PathPrefix, value: /v1/ }
+    - path: { type: Exact, value: / }
+    # The sign-in's own two paths. Envoy Gateway turns the oauth2 filter on per
+    # route, so a path no route matches never reaches it: without these the
+    # callback from Keycloak and the sign-out answer 404 (measured, README
+    # Troubleshooting). The filter answers them itself; nothing is sent on.
+    - path: { type: Exact, value: /oauth2/callback }
+    - path: { type: Exact, value: /logout }
+    backendRefs: [{ name: envoy, port: 8080 }]
+  # LAB ONLY: what the app behind the Gateway is told - the echo app answers with
+  # the request headers it received, among them the Authorization header the
+  # Gateway forwards and x-user. Useful to see the JWT a browser sign-in
+  # produced (README, step 8). A real app never echoes a token back.
+  - matches:
+    - path: { type: Exact, value: /whoami }
+    filters:
+    # The session cookies stay at the Gateway: the app needs the token, not them.
+    - type: RequestHeaderModifier
+      requestHeaderModifier: { remove: [cookie] }
+    backendRefs: [{ name: echo, port: 8080 }]

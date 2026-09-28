@@ -34,8 +34,9 @@ real system uses them.
 - Modules [`14`](../14-gateway-policies/README.md) and
   [`15`](../15-backend-tls-policy/README.md) explain the two policies used here.
 - Work from this folder: `cd 17-keycloak-jwt`.
-- This module uses the namespace **`envoy-17`**, adds three small resources to
-  **`keycloak`**, and takes about 20 minutes. On the operator's CRC it is
+- This module uses the namespace **`envoy-17`**, adds a `ReferenceGrant` to
+  **`keycloak`**, uses module 16's `BackendTLSPolicy` there (step 3), and takes
+  about 20 minutes. On the operator's CRC it is
   **permanent**, kept by Argo CD: see [Permanent lab](#permanent-lab) before you
   change anything by hand there.
 
@@ -105,24 +106,29 @@ pod/client condition met
 
 To check a token, the Gateway needs Keycloak's public keys (module 16, step 9).
 It will fetch them **itself**, straight from Keycloak's Service — not through the
-router — which takes three things, all in Keycloak's namespace
-([`manifests/30-trust-keycloak.yaml`](manifests/30-trust-keycloak.yaml)):
+router — which takes two things, both in Keycloak's namespace:
 
-- the **CA** that signed Keycloak's certificate, in a ConfigMap under `ca.crt`;
-- a **`ReferenceGrant`**: the Gateway API does not let a resource in one
-  namespace point at a Service in another unless that namespace allows it. This
-  one allows `SecurityPolicy` resources in `envoy-17` to use `keycloak-service`;
-- a **`BackendTLSPolicy`** (module 15): reach `keycloak-service` over TLS, trust
-  that CA, expect the name `keycloak-service.keycloak.svc` — which module 16's
-  certificate carries for exactly this reason.
+- **TLS to the Service**: module 16's **`BackendTLSPolicy`** (module 15), made in
+  module 16, step 11 — reach `keycloak-service` over TLS, trust the CA that signed
+  Keycloak's certificate (ConfigMap `keycloak-ca`, under `ca.crt`), expect the name
+  `keycloak-service.keycloak.svc`, which that certificate carries for exactly
+  this reason. It is module 16's because every Gateway that calls Keycloak uses
+  it — this one, and module 19's — and a Service port takes one;
+- a **`ReferenceGrant`** ([`manifests/30-trust-keycloak.yaml`](manifests/30-trust-keycloak.yaml)):
+  the Gateway API does not let a resource in one namespace point at a Service in
+  another unless that namespace allows it. This one allows `SecurityPolicy`
+  resources in `envoy-17` to use `keycloak-service`.
 
 ```console
-$ oc create configmap keycloak-ca -n keycloak --from-literal=ca.crt="$(oc get secret keycloak-tls -n keycloak -o jsonpath='{.data.ca\.crt}' | base64 -d)"
-configmap/keycloak-ca created
+$ oc get backendtlspolicy keycloak-service -n keycloak -o jsonpath='{.spec.validation.hostname}  {.spec.validation.caCertificateRefs[0].name}{"\n"}'
+keycloak-service.keycloak.svc  keycloak-ca
 $ oc apply -f manifests/30-trust-keycloak.yaml
-referencegrant.gateway.networking.k8s.io/envoy-17-fetches-jwks created
-backendtlspolicy.gateway.networking.k8s.io/keycloak-service created
+Warning: resource referencegrants/envoy-17-fetches-jwks is missing the kubectl.kubernetes.io/last-applied-configuration annotation which is required by oc apply. oc apply should only be used on resources created declaratively by either oc create --save-config or oc apply. The missing annotation will be patched automatically.
+referencegrant.gateway.networking.k8s.io/envoy-17-fetches-jwks configured
 ```
+
+(On the permanent lab the grant already existed, applied by Argo CD, which is
+why `oc apply` added its own annotation; on a new cluster it says `created`.)
 
 ### Step 4 — a SecurityPolicy that trusts Keycloak
 
@@ -309,12 +315,14 @@ difference between the two answers is the difference between *who are you*
 
 Take the `BackendTLSPolicy` away and restart the Gateway's Envoy, so it must
 fetch the keys again — and now does so in plain HTTP, to a port that speaks only
-TLS (module 15, step 3). `./run.sh pause` first: on the permanent lab it stops
-Argo CD putting the policy back ([Permanent lab](#permanent-lab)); on a cluster
-without it, it does nothing.
+TLS (module 15, step 3). The policy is module 16's (step 3), so pause **module
+16's** Application first: on the permanent lab it would put the policy back
+([Permanent lab](#permanent-lab)); on a cluster without it, it does nothing.
+Every Gateway that calls Keycloak uses this policy — module 19's sign-in fails
+too until it is back.
 
 ```console
-$ ./run.sh pause >/dev/null
+$ ../16-keycloak/run.sh pause >/dev/null
 $ oc delete backendtlspolicy keycloak-service -n keycloak
 backendtlspolicy.gateway.networking.k8s.io "keycloak-service" deleted from keycloak namespace
 $ sleep 20; oc rollout restart deploy -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-namespace=envoy-17
@@ -338,12 +346,11 @@ nothing through: it **fails closed**. The counters show every fetch failing, wit
 Argo CD:
 
 ```console
-$ oc apply -f manifests/30-trust-keycloak.yaml
-referencegrant.gateway.networking.k8s.io/envoy-17-fetches-jwks unchanged
+$ oc apply -f ../16-keycloak/manifests/70-backend-tls-policy.yaml
 backendtlspolicy.gateway.networking.k8s.io/keycloak-service created
 $ sleep 20; ./token.sh alice | ./request.sh /api -o /dev/null -w '%{http_code}\n'
 200
-$ ./run.sh resume >/dev/null
+$ ../16-keycloak/run.sh resume >/dev/null
 ```
 
 Back to `200`, with no restart: the Gateway kept trying to fetch the keys, and
@@ -494,7 +501,7 @@ realm, before a request ever reaches it (module 18, steps 8 and 9).
 $ ./run.sh verify
 
 1. the policies
-  ✓ BackendTLSPolicy to keycloak-service accepted
+  ✓ module 16's BackendTLSPolicy to keycloak-service accepts this Gateway's SecurityPolicies
   ✓ SecurityPolicy keycloak-jwt accepted
   ✓ SecurityPolicy admin-only accepted
   ✓ ...and the Gateway's policy says it is overridden on /admin
@@ -562,7 +569,7 @@ all checks passed
 
 | You see | Why | Fix |
 |---|---|---|
-| `401 Jwks remote fetch is failed` for every token | the Gateway cannot fetch the keys — measured without the `BackendTLSPolicy` | step 3; `jwt_authn.jwks_fetch_failed` counts the attempts |
+| `401 Jwks remote fetch is failed` for every token | the Gateway cannot fetch the keys — measured without the `BackendTLSPolicy` | module 16, step 11; `jwt_authn.jwks_fetch_failed` counts the attempts |
 | `401 Jwt issuer is not configured` | `iss` differs from `issuer` — another realm, or Keycloak's `hostname` changed | compare with the realm's discovery document (module 16, step 9) |
 | `403 Audiences in Jwt are not allowed` | the token is not for `shop-api` — no audience mapper on its client | add the mapper (module 16's realm) |
 | `401 Jwt verification fails` | the signature does not match the claims — the token was edited | a fresh token from Keycloak |
@@ -607,12 +614,12 @@ run as written.)
 
 | What | Made by | Kept by | Why |
 |---|---|---|---|
-| namespace `envoy-17`, Gateway `eg`; HTTPRoutes `api`, `admin`; `ReferenceGrant` and `BackendTLSPolicy` in `keycloak`; SecurityPolicies `keycloak-jwt`, `admin-only` | `manifests/` | Argo CD | manifests |
+| namespace `envoy-17`, Gateway `eg`; HTTPRoutes `api`, `admin`; `ReferenceGrant` in `keycloak`; SecurityPolicies `keycloak-jwt`, `admin-only` | `manifests/` | Argo CD | manifests |
 | the echo app: ConfigMap `echo-src`, Service and Deployment `echo` | [`../_shared/echo-app.yaml`](../_shared/echo-app.yaml), applied with `-n envoy-17` | Argo CD — the Application's second source | the backend of both routes; its objects carry no namespace and take the Application's, `envoy-17` |
 | GatewayClass `eg`, EnvoyProxy `openshift-scc` | module 12's files, applied in step 2 | nobody here — module 12 owns them | shared by modules 12 to 17; only module 12's clean removes them. An Application of this module must not own another module's objects |
 | **the `nonroot-v2` grant** for the Gateway's Envoy (step 2) | `./run.sh deploy`: `oc adm policy add-scc-to-user` | nobody — `run.sh` only | `oc adm policy` writes it into one RoleBinding, `system:openshift:scc:nonroot-v2` in `envoy-gateway-system`, which every Gateway module (12 to 17) adds its own ServiceAccount to: an Application owning that object would remove the others. The grant stays in that RoleBinding until `./run.sh clean` removes it. (A RoleBinding of this module's own could hold it: Envoy Gateway names the ServiceAccount `envoy-envoy-17-eg-` plus the first 8 hex digits of the SHA-256 of `envoy-17/eg` — measured, `0d84cb63` — but every Gateway module's `gw_up` would have to change with it.) |
 | **restarting the Envoy** after the grant (step 2) | `./run.sh deploy` | — | needed once, so a pod starts now rather than after the ReplicaSet's back-off |
-| **ConfigMap `keycloak-ca`** in `keycloak` (step 3) | `./run.sh deploy`, from Secret `keycloak-tls` | nobody — `run.sh` only | it holds the cluster's own CA — `enterprise-ca`'s, which each cluster makes for itself (module 00). A copy in git would be this CRC's CA, and wrong on every other cluster. Without it the `BackendTLSPolicy` is refused — `Accepted=False` `NoValidCACertificate` (measured in module 15's Troubleshooting) — so `./run.sh verify` fails on its first check, and `./run.sh deploy` writes it again |
+| the `BackendTLSPolicy` to `keycloak-service` and its CA, ConfigMap `keycloak-ca` (step 3) | module 16 (its step 11) | Argo CD `16-keycloak`; the ConfigMap, module 16's `run.sh` | every Gateway that calls Keycloak uses them — module 19's too — and a Service port takes one `BackendTLSPolicy`. They were this module's until #15 |
 | pod `client` in `envoy-17` | `./run.sh deploy` | nobody | a test tool |
 | the Envoy's Deployment and Service in `envoy-gateway-system` | Envoy Gateway | Envoy Gateway | made from the Gateway |
 
@@ -620,10 +627,11 @@ run as written.)
 
 Step 7 deletes the `BackendTLSPolicy` to show the Gateway failing closed. With
 Argo CD on, the policy would be put back like the ConfigMap above, and the
-failure would not show. So step 7 pauses this module's Application first and
-resumes it after — `./run.sh pause`, `./run.sh resume` on its command lines, as
-in module 16's [Permanent lab](../16-keycloak/README.md#permanent-lab); they do
-nothing on a cluster without the Application.
+failure would not show. The policy is module 16's, so step 7 pauses **module
+16's** Application first and resumes it after — `../16-keycloak/run.sh pause`,
+`../16-keycloak/run.sh resume` on its command lines, as in module 16's
+[Permanent lab](../16-keycloak/README.md#permanent-lab); they do nothing on a
+cluster without the Application.
 To walk the module again from the start, `./run.sh clean` pauses it for you, and
 `./run.sh resume` hands the lab back once you are done — or `./run.sh deploy`,
 which resumes it at its end.
@@ -633,12 +641,13 @@ which resumes it at its end.
 On the permanent lab a clean-up is a deliberate reset, never the end of a
 walkthrough — leave the Gateway running, as module 16 leaves Keycloak. Pause
 Argo CD first: it would put the manifests back as you delete them, and it
-cannot put back the `nonroot-v2` grant or ConfigMap `keycloak-ca`, which are
-`run.sh`'s ([Permanent lab](#permanent-lab)). `./run.sh clean` does both.
+cannot put back the `nonroot-v2` grant, which is `run.sh`'s
+([Permanent lab](#permanent-lab)). `./run.sh clean` does both.
 
-Remove this module's Gateway and what it added next to Keycloak; the Keycloak
-lab itself stays (module 16 removes it), and so do realm `corp` (module 18) and
-the directory's shop users (the chart's `ldap-shop-users.ldif`):
+Remove this module's Gateway and what it added next to Keycloak, its
+`ReferenceGrant`; the Keycloak lab itself stays (module 16 removes it) — with its
+`BackendTLSPolicy`, which other Gateways use — and so do realm `corp` (module 18)
+and the directory's shop users (the chart's `ldap-shop-users.ldif`):
 
 <!-- walkthrough: skip -->
 ```console
@@ -650,11 +659,11 @@ $ oc delete -f manifests/10-gateway.yaml --wait=false
 namespace "envoy-17" deleted
 gateway.gateway.networking.k8s.io "eg" deleted from envoy-17 namespace
 $ oc delete -f manifests/30-trust-keycloak.yaml
-referencegrant.gateway.networking.k8s.io "envoy-17-fetches-jwks" deleted from keycloak namespace
-backendtlspolicy.gateway.networking.k8s.io "keycloak-service" deleted from keycloak namespace
-$ oc delete configmap keycloak-ca -n keycloak
-configmap "keycloak-ca" deleted from keycloak namespace
 ```
+
+(The block was run as written before #15, when `30-trust-keycloak.yaml` also held
+the `BackendTLSPolicy`; its last command has not been run since, so its output is
+not shown.)
 
 ## The shortcut
 

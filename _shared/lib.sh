@@ -119,3 +119,39 @@ incluster_sh() {
   [ -n "$CLIENT_READY" ] || client_ensure
   $KUBE exec -n "$NS" client -- sh -c "$1" 2>/dev/null
 }
+
+# checked <what> <command...> - run one clean-up step; fatal, with the command's
+# own error, when it fails. --ignore-not-found keeps a re-run at exit 0.
+checked() {
+  local what=$1 out
+  shift
+  out=$("$@" 2>&1) || { bad "cannot $what: $out"; exit 1; }
+}
+# gone <what> <resource> [-n <namespace>] - wait, three minutes at most, until the
+# object is deleted. Already gone - NotFound - counts as deleted.
+gone() {
+  local what=$1 out
+  shift
+  out=$($KUBE wait "$@" --for=delete --timeout=180s 2>&1) && return 0
+  case "$out" in (*NotFound* | *"not found"*) return 0 ;; esac
+  bad "$what is still there after 3 minutes: $out"
+  exit 1
+}
+
+# api_serves <group> <resource> - 0 when the API server serves <resource> in <group>, 1
+# when discovery answered without it, 2 (having said why, on stderr) when discovery
+# failed without naming it: an unanswered question is not "not served". Discovery can
+# fail for one unavailable aggregated API and still list the rest, so a listed
+# resource counts even then.
+api_serves() {
+  local out rc=0
+  out=$($KUBE api-resources --api-group="$1" -o name 2>&1) || rc=$?
+  case "
+$out
+" in (*"
+$2.$1
+"*) return 0 ;; esac
+  [ "$rc" -eq 0 ] && return 1
+  bad "cannot ask the API server which $1 resources it serves: $out" >&2
+  return 2
+}

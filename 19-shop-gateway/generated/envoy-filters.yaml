@@ -1,0 +1,242 @@
+# The HTTP filters Envoy Gateway v1.9.1 generated for Gateway eg in envoy-19, read from
+# its Envoy (b579d07d3ad7ee11d32b105e91a5a39ad24718d7/1.39.1/Clean/RELEASE/BoringSSL) by ../dump-filters.sh:
+#   image docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4
+#   (the image Envoy Gateway v1.9.1 pins. The shop's own Envoy, behind this one, runs
+#   the app's envoyproxy/envoy:v1.39-latest - measured 1.39.1 too; that tag tracks 1.39
+#   patches, so a later pull can be a newer 1.39.)
+#
+#   ./dump-filters.sh > generated/envoy-filters.yaml
+#
+# 1. http_filters - listener envoy-19/eg/http's chain, in the order Envoy runs it. oauth2
+#    and rbac are in it with no settings, which Envoy reads as off for a request (an
+#    OAuth2 without config, an RBAC without rules); jwt_authn holds the providers but no
+#    rules. Each route turns all three on with its own settings (2).
+# 2. route - the shop's /v1 route and what it turns on. The routes for /, /whoami,
+#    /oauth2/callback and /logout carry the same three settings (the policy targets the
+#    whole Gateway); only the route names inside them differ.
+http_filters:
+  - name: envoy.filters.http.oauth2
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2
+  - name: envoy.filters.http.jwt_authn
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+      providers:
+        corp_ce9edcdadc53325b:
+          issuer: "https://keycloak.apps-crc.testing/realms/corp"
+          audiences:
+            - shop-api
+          remote_jwks:
+            http_uri:
+              uri: "https://keycloak-service.keycloak.svc:8443/realms/corp/protocol/openid-connect/certs"
+              cluster: securitypolicy/envoy-19/sign-in/jwt/0
+              timeout: "10s"
+            cache_duration: "300s"
+            async_fetch: {}
+          forward: true
+          payload_in_metadata: corp
+          claim_to_headers:
+            - header_name: x-user
+              claim_name: preferred_username
+          normalize_payload_in_metadata:
+            space_delimited_claims:
+              - scope
+              - scp
+      requirement_map:
+        corp_c75e69e4addfef6c:
+          provider_name: corp_ce9edcdadc53325b
+  - name: envoy.filters.http.rbac
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+  - name: envoy.filters.http.router
+    typed_config:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+      suppress_envoy_headers: true
+route:
+  name: "httproute/envoy-19/shop/rule/0/match/0/*"
+  match:
+    path_separated_prefix: /v1
+  typed_per_filter_config:
+    envoy.filters.http.oauth2:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2PerRoute
+      config:
+        token_endpoint:
+          uri: "https://keycloak-service.keycloak.svc:8443/realms/corp/protocol/openid-connect/token"
+          cluster: securitypolicy/envoy-19/sign-in/oidc/0
+          timeout: "10s"
+        authorization_endpoint: "https://keycloak.apps-crc.testing/realms/corp/protocol/openid-connect/auth"
+        credentials:
+          client_id: shop-kiosk
+          token_secret:
+            name: oauth2/client_secret/securitypolicy/envoy-19/sign-in
+            sds_config:
+              ads: {}
+              resource_api_version: V3
+          hmac_secret:
+            name: oauth2/hmac_secret/securitypolicy/envoy-19/sign-in
+            sds_config:
+              ads: {}
+              resource_api_version: V3
+          cookie_names:
+            bearer_token: AccessToken-ab2789d9
+            oauth_hmac: OauthHMAC-ab2789d9
+            oauth_expires: OauthExpires-ab2789d9
+            id_token: IdToken-ab2789d9
+            refresh_token: RefreshToken-ab2789d9
+            oauth_nonce: OauthNonce-ab2789d9
+            code_verifier: CodeVerifier-ab2789d9
+        redirect_uri: "http://localhost:19080/oauth2/callback"
+        redirect_path_matcher:
+          path:
+            exact: /oauth2/callback
+        signout_path:
+          path:
+            exact: /logout
+        forward_bearer_token: true
+        pass_through_matcher:
+          - name: Authorization
+            string_match:
+              prefix: "Bearer "
+        auth_scopes:
+          - openid
+        auth_type: BASIC_AUTH
+        use_refresh_token: true
+        cookie_configs:
+          bearer_token_cookie_config:
+            same_site: LAX
+          oauth_hmac_cookie_config:
+            same_site: LAX
+          oauth_expires_cookie_config:
+            same_site: LAX
+          id_token_cookie_config:
+            same_site: LAX
+          refresh_token_cookie_config:
+            same_site: LAX
+          oauth_nonce_cookie_config:
+            same_site: LAX
+            path: /oauth2/callback
+          code_verifier_cookie_config:
+            same_site: LAX
+            path: /oauth2/callback
+        stat_prefix: securitypolicy/envoy-19/sign-in
+        end_session_endpoint: "https://keycloak.apps-crc.testing/realms/corp/protocol/openid-connect/logout"
+    envoy.filters.http.rbac:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBACPerRoute
+      rbac:
+        matcher:
+          matcher_list:
+            matchers:
+              - predicate:
+                  single_predicate:
+                    input:
+                      name: claim
+                      typed_config:
+                        "@type": type.googleapis.com/envoy.extensions.matching.common_inputs.network.v3.DynamicMetadataInput
+                        filter: envoy.filters.http.jwt_authn
+                        path:
+                          - key: corp
+                          - key: realm_access
+                          - key: roles
+                    custom_match:
+                      name: claim_matcher
+                      typed_config:
+                        "@type": type.googleapis.com/envoy.extensions.matching.input_matchers.metadata.v3.Metadata
+                        value:
+                          list_match:
+                            one_of:
+                              string_match:
+                                exact: admin
+                on_match:
+                  action:
+                    name: admins
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.config.rbac.v3.Action
+                      name: ALLOW
+              - predicate:
+                  and_matcher:
+                    predicate:
+                      - single_predicate:
+                          input:
+                            name: http_header
+                            typed_config:
+                              "@type": type.googleapis.com/envoy.type.matcher.v3.HttpRequestHeaderMatchInput
+                              header_name: ":method"
+                          value_match:
+                            exact: GET
+                            ignore_case: true
+                      - single_predicate:
+                          input:
+                            name: claim
+                            typed_config:
+                              "@type": type.googleapis.com/envoy.extensions.matching.common_inputs.network.v3.DynamicMetadataInput
+                              filter: envoy.filters.http.jwt_authn
+                              path:
+                                - key: corp
+                                - key: iss
+                          custom_match:
+                            name: claim_matcher
+                            typed_config:
+                              "@type": type.googleapis.com/envoy.extensions.matching.input_matchers.metadata.v3.Metadata
+                              value:
+                                string_match:
+                                  exact: "https://keycloak.apps-crc.testing/realms/corp"
+                on_match:
+                  action:
+                    name: signed-in-may-read
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.config.rbac.v3.Action
+                      name: ALLOW
+              - predicate:
+                  and_matcher:
+                    predicate:
+                      - single_predicate:
+                          input:
+                            name: http_header
+                            typed_config:
+                              "@type": type.googleapis.com/envoy.type.matcher.v3.HttpRequestHeaderMatchInput
+                              header_name: ":method"
+                          value_match:
+                            exact: POST
+                            ignore_case: true
+                      - single_predicate:
+                          input:
+                            name: http_header
+                            typed_config:
+                              "@type": type.googleapis.com/envoy.type.matcher.v3.HttpRequestHeaderMatchInput
+                              header_name: ":path"
+                          value_match:
+                            safe_regex:
+                              google_re2: {}
+                              regex: "^/v1/items/[A-Za-z0-9._~-]+:reserve$"
+                      - single_predicate:
+                          input:
+                            name: claim
+                            typed_config:
+                              "@type": type.googleapis.com/envoy.extensions.matching.common_inputs.network.v3.DynamicMetadataInput
+                              filter: envoy.filters.http.jwt_authn
+                              path:
+                                - key: corp
+                                - key: iss
+                          custom_match:
+                            name: claim_matcher
+                            typed_config:
+                              "@type": type.googleapis.com/envoy.extensions.matching.input_matchers.metadata.v3.Metadata
+                              value:
+                                string_match:
+                                  exact: "https://keycloak.apps-crc.testing/realms/corp"
+                on_match:
+                  action:
+                    name: signed-in-may-reserve
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.config.rbac.v3.Action
+                      name: ALLOW
+          on_no_match:
+            action:
+              name: default
+              typed_config:
+                "@type": type.googleapis.com/envoy.config.rbac.v3.Action
+                name: DENY
+                action: DENY
+    envoy.filters.http.jwt_authn:
+      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.PerRouteConfig
+      requirement_name: corp_c75e69e4addfef6c

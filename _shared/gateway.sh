@@ -10,13 +10,16 @@ gw_selector() {
 }
 
 # gw_proxy_sa <namespace> <gateway> - the ServiceAccount its Envoy runs as, or
-# nothing if the controller has not generated the Deployment yet.
+# nothing if the controller has not generated the Deployment yet. Fails, with the
+# read's own error on stderr, when the Deployments cannot be listed.
 gw_proxy_sa() {
   $KUBE get deploy -n "$GW_SYSTEM_NS" -l "$(gw_selector "$1" "$2")" \
-    -o jsonpath='{.items[0].spec.template.spec.serviceAccountName}' 2>/dev/null
+    -o jsonpath='{range .items[*]}{.spec.template.spec.serviceAccountName}{"\n"}{end}' | head -n 1
 }
 
-has_sccs() { $KUBE api-resources --api-group=security.openshift.io 2>/dev/null | grep -q '^securitycontextconstraints'; }
+# has_sccs - 0 on OpenShift (SecurityContextConstraints served), 1 where they are not,
+# 2 when the API server cannot be asked (api_serves, lib.sh).
+has_sccs() { api_serves security.openshift.io securitycontextconstraints; }
 
 # ns_settle <namespace> - wait while a namespace from an earlier `clean` is still
 # Terminating. Creating the Gateway in it is refused ("unable to create new
@@ -37,13 +40,18 @@ ns_settle() {
 # restart it, so a pod is created now rather than after the ReplicaSet's
 # back-off. Then wait until the Gateway is Programmed.
 gw_up() {
-  local sa=
-  for _ in $(seq 1 30); do sa=$(gw_proxy_sa "$1" "$2"); [ -n "$sa" ] && break; sleep 2; done
+  local sa='' s=0 out
+  for _ in $(seq 1 30); do sa=$(gw_proxy_sa "$1" "$2" 2>/dev/null); [ -n "$sa" ] && break; sleep 2; done
   [ -n "$sa" ] || { bad "Envoy Gateway generated no proxy Deployment for $1/$2"; exit 1; }
-  if has_sccs; then
-    $KUBE adm policy add-scc-to-user nonroot-v2 -z "$sa" -n "$GW_SYSTEM_NS" >/dev/null
-    $KUBE rollout restart deploy -n "$GW_SYSTEM_NS" -l "$(gw_selector "$1" "$2")" >/dev/null
-  fi
+  has_sccs || s=$?
+  case $s in
+    0) out=$($KUBE adm policy add-scc-to-user nonroot-v2 -z "$sa" -n "$GW_SYSTEM_NS" 2>&1) \
+         || { bad "cannot grant nonroot-v2 to $GW_SYSTEM_NS/$sa: $out"; exit 1; }
+       out=$($KUBE rollout restart deploy -n "$GW_SYSTEM_NS" -l "$(gw_selector "$1" "$2")" 2>&1) \
+         || { bad "cannot restart the Envoy for $1/$2: $out"; exit 1; } ;;
+    1) ;;
+    *) exit 1 ;;
+  esac
   $KUBE rollout status deploy -n "$GW_SYSTEM_NS" -l "$(gw_selector "$1" "$2")" --timeout=240s >/dev/null \
     || { bad "the Envoy for $1/$2 never became ready"; exit 1; }
   $KUBE wait "gateway/$2" -n "$1" --for=condition=Programmed --timeout=120s >/dev/null \
@@ -55,17 +63,50 @@ gw_up() {
 # Gateway is already gone - its namespace deleted by hand - the grant is still
 # there: find it by the name Envoy Gateway gives the ServiceAccount,
 # envoy-<namespace>-<gateway>-<8 hex>, among the subjects of the RoleBinding
-# that `oc adm policy add-scc-to-user` wrote, so it is not left behind.
+# that `oc adm policy add-scc-to-user` wrote, so it is not left behind. Returns 1,
+# having said why, when the grant is there and cannot be removed.
 gw_down() {
-  has_sccs || return 0
-  local sa; sa=$(gw_proxy_sa "$1" "$2")
-  [ -n "$sa" ] || sa=$($KUBE get rolebinding system:openshift:scc:nonroot-v2 -n "$GW_SYSTEM_NS" \
-    -o jsonpath='{range .subjects[*]}{.name}{"\n"}{end}' 2>/dev/null | grep -m1 -x "envoy-$1-$2-[0-9a-f]\{8\}")
-  if [ -n "$sa" ]; then
-    $KUBE adm policy remove-scc-from-user nonroot-v2 -z "$sa" -n "$GW_SYSTEM_NS" >/dev/null 2>&1
+  local s=0 sa out
+  has_sccs || s=$?
+  case $s in (0) ;; (1) return 0 ;; (*) return 1 ;; esac
+  # A read that fails is not "no grant": it says why and returns 1.
+  # stderr kept apart on success: a server warning there is not a ServiceAccount.
+  sa=$(gw_proxy_sa "$1" "$2" 2>/dev/null) \
+    || { bad "cannot read the Envoy Deployment of $1/$2: $(gw_proxy_sa "$1" "$2" 2>&1 >/dev/null)"; return 1; }
+  if [ -z "$sa" ]; then
+    if ! out=$($KUBE get rolebinding system:openshift:scc:nonroot-v2 -n "$GW_SYSTEM_NS" \
+                 -o jsonpath='{range .subjects[*]}{.name}{"\n"}{end}' 2>&1); then
+      case "$out" in (*NotFound* | *"not found"*) return 0 ;; esac
+      bad "cannot read RoleBinding $GW_SYSTEM_NS/system:openshift:scc:nonroot-v2: $out"
+      return 1
+    fi
+    sa=$(printf '%s\n' "$out" | grep -m1 -x "envoy-$1-$2-[0-9a-f]\{8\}")
+    [ -n "$sa" ] || return 0
   fi
-  return 0
+  out=$($KUBE adm policy remove-scc-from-user nonroot-v2 -z "$sa" -n "$GW_SYSTEM_NS" 2>&1) && return 0
+  # Already removed: oc says so and exits 1 (measured: "unable to find target").
+  case "$out" in (*"unable to find target"*) return 0 ;; esac
+  bad "cannot remove nonroot-v2 from $GW_SYSTEM_NS/$sa: $out"
+  return 1
 }
 
 # gw_address <namespace> <gateway> - the address the Gateway was given.
 gw_address() { $KUBE get "gateway/$2" -n "$1" -o jsonpath='{.status.addresses[0].value}'; }
+
+# keycloak_tls <namespace> - "yes" when module 16's BackendTLSPolicy keycloak/keycloak-service
+# lists the SecurityPolicies of <namespace> among its ancestors, each Accepted=True: this
+# namespace's Gateway reaches Keycloak over TLS. "no (...)" otherwise. A policy nobody uses
+# has no ancestors at all (measured, #15), so this is the consumer's check, not module 16's.
+keycloak_tls() {
+  local s
+  s=$($KUBE get backendtlspolicy keycloak-service -n keycloak \
+    -o jsonpath="{.status.ancestors[?(@.ancestorRef.namespace==\"$1\")].conditions[?(@.type==\"Accepted\")].status}" 2>/dev/null)
+  case " $s " in (*" True "*) case " $s " in (*" False "*) echo "no ($s)" ;; (*) echo yes ;; esac ;; (*) echo "no (${s:-no ancestor for $1})" ;; esac
+}
+# wait_keycloak_tls <namespace> - keycloak_tls, for a minute at most; fatal after that.
+wait_keycloak_tls() {
+  local s
+  for _ in $(seq 1 30); do s=$(keycloak_tls "$1"); [ "$s" = yes ] && return 0; sleep 2; done
+  bad "BackendTLSPolicy keycloak/keycloak-service does not accept $1's SecurityPolicies: $s - module 16, step 11"
+  exit 1
+}
