@@ -63,7 +63,7 @@ front_envoy_stale() {
     -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{range .metadata.managedFields[*]}{.time}{" "}{end}{"\n"}{end}' 2>/dev/null) \
     || { echo "yes (cannot read all front Envoy inputs)"; return; }
   started=$($KUBE get pods -n "$NS" -l app=front-envoy \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.containerStatuses[0].state.running.startedAt}{"\n"}{end}' 2>/dev/null) \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.containerStatuses[0].state.running.startedAt}{"|"}{.metadata.deletionTimestamp}{"\n"}{end}' 2>/dev/null) \
     || { echo "yes (cannot read front Envoy pods)"; return; }
   python3 -c '
 import datetime, sys
@@ -82,7 +82,11 @@ try:
         if not times.strip():
             raise ValueError()
         writes.extend(stamp(t) for t in times.split())
-    pods = [line.split("|", 1) for line in open(3).read().splitlines()]
+    # A pod being deleted - the old one, still terminating after a rollout -
+    # serves no more requests: it must not make current inputs look stale
+    # (measured: the older start of a terminating pod failed a fresh deploy, #16).
+    pods = [line.split("|", 2) for line in open(3).read().splitlines()]
+    pods = [(name, t) for name, t, deleting in pods if not deleting]
     if not pods:
         raise ValueError()
     starts = [stamp(t) for name, t in pods]
