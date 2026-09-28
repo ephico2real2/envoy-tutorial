@@ -51,20 +51,35 @@ need_lab() {
 # front_envoy_inputs - what the front Envoy reads when it starts, and never again: its
 # configuration, the oauth2 filter's two Secrets, and the CA it trusts Keycloak with.
 FRONT_ENVOY_INPUTS="configmap/front-envoy-config secret/shop-envoy-client secret/shop-envoy-hmac configmap/keycloak-ca"
-# front_envoy_stale - "no" when every front Envoy container started after the last write
-# to any of its inputs, "yes (...)" when one did not - it runs an older configuration or
-# secret than the cluster holds (Argo CD updates a ConfigMap; it restarts nothing).
+# front_envoy_stale - "no" when the running front Envoy has the inputs the cluster
+# holds now; otherwise "yes (why)". Envoy reads its files once, at start, so:
+# - envoy.yaml is a subPath mount, which the kubelet never refreshes: the file in
+#   the pod IS what Envoy started with. Compare its content with the ConfigMap
+#   (a hash each side; the pod's own sha256sum). Timestamps cannot do this: an
+#   Argo CD sync writes the ConfigMap and the rollout starts in the same second
+#   (measured 2026-09-28, both 11:58:10Z), which no clock can order.
+# - the Secrets and the CA are directory mounts the kubelet does refresh, so their
+#   content in the pod proves nothing about what Envoy loaded: for them, the pod
+#   must have started after their last write. run.sh writes them itself, before
+#   any restart, never in the same second as a sync.
+# Reads metadata and hashes only; no secret leaves the cluster in clear. A
+# partial read never counts as current.
 front_envoy_stale() {
-  local written started
-  # Read only metadata, never secret data. A partial `get` can emit usable
-  # rows AND fail; never classify that partial result as current.
-  # shellcheck disable=SC2086 # FRONT_ENVOY_INPUTS is a list of names.
-  written=$($KUBE get $FRONT_ENVOY_INPUTS -n "$NS" \
+  local pod want have written started
+  # A pod being deleted is the old one after a rollout; skip it (jsonpath cannot
+  # test for an absent field, so filter the pair name|deletionTimestamp here).
+  pod=$($KUBE get pods -n "$NS" -l app=front-envoy \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.deletionTimestamp}{"\n"}{end}' 2>/dev/null \
+    | awk -F'|' '$2 == "" { print $1; exit }')
+  [ -n "$pod" ] || { echo "yes (no running front Envoy pod)"; return; }
+  want=$($KUBE get configmap front-envoy-config -n "$NS" -o jsonpath='{.data.envoy\.yaml}' 2>/dev/null | shasum -a 256 | cut -c1-64)
+  have=$($KUBE exec -n "$NS" "$pod" -- sha256sum /etc/envoy/envoy.yaml 2>/dev/null | cut -c1-64)
+  { [ -n "$want" ] && [ -n "$have" ]; } || { echo "yes (cannot hash the configuration on both sides)"; return; }
+  [ "$want" = "$have" ] || { echo "yes (the ConfigMap changed since Envoy read it)"; return; }
+  written=$($KUBE get secret/shop-envoy-client secret/shop-envoy-hmac configmap/keycloak-ca -n "$NS" \
     -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{range .metadata.managedFields[*]}{.time}{" "}{end}{"\n"}{end}' 2>/dev/null) \
-    || { echo "yes (cannot read all front Envoy inputs)"; return; }
-  started=$($KUBE get pods -n "$NS" -l app=front-envoy \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.containerStatuses[0].state.running.startedAt}{"|"}{.metadata.deletionTimestamp}{"\n"}{end}' 2>/dev/null) \
-    || { echo "yes (cannot read front Envoy pods)"; return; }
+    || { echo "yes (cannot read the Secrets and CA)"; return; }
+  started=$($KUBE get pod "$pod" -n "$NS" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}' 2>/dev/null)
   python3 -c '
 import datetime, sys
 def stamp(s):
@@ -74,28 +89,15 @@ def stamp(s):
     return d
 try:
     rows = [line.split("|", 1) for line in sys.stdin.read().splitlines()]
-    expected = {"front-envoy-config", "shop-envoy-client", "shop-envoy-hmac", "keycloak-ca"}
-    if len(rows) != len(expected) or {r[0] for r in rows} != expected:
+    if {r[0] for r in rows} != {"shop-envoy-client", "shop-envoy-hmac", "keycloak-ca"}:
         raise ValueError()
-    writes = []
-    for name, times in rows:
-        if not times.strip():
-            raise ValueError()
-        writes.extend(stamp(t) for t in times.split())
-    # A pod being deleted - the old one, still terminating after a rollout -
-    # serves no more requests: it must not make current inputs look stale
-    # (measured: the older start of a terminating pod failed a fresh deploy, #16).
-    pods = [line.split("|", 2) for line in open(3).read().splitlines()]
-    pods = [(name, t) for name, t, deleting in pods if not deleting]
-    if not pods:
+    writes = [stamp(t) for _, times in rows for t in times.split()]
+    if not writes:
         raise ValueError()
-    starts = [stamp(t) for name, t in pods]
-    # Equal seconds cannot establish ordering; fail conservatively.
-    print("no" if max(writes) < min(starts) else "yes (inputs are not older than every running Envoy)")
+    start = stamp(sys.argv[1])
+    print("no" if max(writes) < start else "yes (a Secret or the CA was written after Envoy started)")
 except (ValueError, IndexError):
-    print("yes (incomplete input or pod timestamps)")' <<<"$written" 3<<EOF
-$started
-EOF
+    print("yes (incomplete Secret, CA or pod timestamps)")' "$started" <<<"$written"
 }
 
 # Also called after app_resume: a sync may write inputs after the first check.
@@ -346,7 +348,7 @@ print(c["exp"])' <<<"$OLD") || { bad "expiry probe lifetime was not confirmed"; 
     "$([ -n "$($KUBE get configmap keycloak-ca -n "$NS" -o jsonpath='{.data.ca\.crt}' 2>/dev/null)" ] \
        && [ "$($KUBE get configmap keycloak-ca -n "$NS" -o jsonpath='{.data.ca\.crt}')" = "$($KUBE get secret keycloak-tls -n keycloak -o jsonpath='{.data.ca\.crt}' | base64 -d)" ] \
        && echo same || echo differ)"
-  assert "it started after its configuration, Secrets and CA were last written - it runs them" "no" "$(front_envoy_stale)"
+  assert "it runs the configuration, Secrets and CA the cluster holds now" "no" "$(front_envoy_stale)"
   assert "realm corp's client shop-envoy: its redirect URI, PKCE S256" "$SHOP/oauth2/callback S256" "$(envoy_client)"
   assert "the front Envoy's filter chain: oauth2, jwt_authn, rbac, router" \
     "envoy.filters.http.oauth2 envoy.filters.http.jwt_authn envoy.filters.http.rbac envoy.filters.http.router" \

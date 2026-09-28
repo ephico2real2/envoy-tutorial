@@ -868,7 +868,7 @@ $ ./run.sh verify
   ✓ its client secret is module 18's (Secret shop-envoy-client = keycloak/shop-envoy-client)
   ✓ its cookie-signing key (Secret shop-envoy-hmac) holds 32 random bytes or more
   ✓ it trusts Keycloak's CA (ConfigMap keycloak-ca = Secret keycloak/keycloak-tls's ca.crt)
-  ✓ it started after its configuration, Secrets and CA were last written - it runs them
+  ✓ it runs the configuration, Secrets and CA the cluster holds now
   ✓ realm corp's client shop-envoy: its redirect URI, PKCE S256
   ✓ the front Envoy's filter chain: oauth2, jwt_authn, rbac, router
   ✓ corp JWT provider: explicit 5 s clock skew
@@ -1028,7 +1028,7 @@ A request no policy allows gets `403` `RBAC: access denied`.
 |---|---|---|
 | after signing in, the browser goes to `http://shop…:20443/` and fails | the front Envoy built the address from `:scheme` `http` — measured without `scheme_header_transformation`, with a client's `X-Forwarded-Proto: http` appended to by the router | keep `scheme_to_overwrite: https` on the listener |
 | the front Envoy's pod stays `ContainerCreating` | a Secret or ConfigMap it mounts is missing — `shop-envoy-client`, `shop-envoy-hmac`, `keycloak-ca` are not in git | `./run.sh deploy` writes them |
-| `verify`: "it started after its configuration, Secrets and CA were last written" fails | one of them changed after Envoy started — Argo CD updates a ConfigMap, it restarts nothing, and Envoy reads them only at start | `./run.sh deploy` restarts it |
+| `verify`: "it runs the configuration, Secrets and CA the cluster holds now" fails | the ConfigMap changed since Envoy read it (its content in the pod differs from the API's), or a Secret or the CA was written after Envoy started — Envoy reads them only at start | `./run.sh deploy` restarts it |
 | `401 Jwks doesn't have key to match kid` right after step 2 | realm `corp` was rebuilt, with new keys; Envoy keeps the old ones up to 300 s | wait (module 18, step 13) |
 | Keycloak says `Invalid parameter: redirect_uri` | the client's `redirectUris` and the filter's `redirect_uri` differ | the same value in both (step 2) |
 | the browser cannot load `shop.apps-metallb.crc.testing:20443` | no forward — CRC was restarted, or the shard cleaned — or the host is not in `/etc/hosts` | `../00-prerequisites/ingress-shard/run.sh deploy`; the Route must be admitted |
