@@ -84,7 +84,7 @@ print(f"# The HTTP filters Envoy Gateway v1.9.1 generated for Gateway eg in envo
 print(f"# its Envoy ({sys.argv[1]}) by ../dump-filters.sh:")
 print(f"#   image {sys.argv[2]}")
 print(f"#   (the image Envoy Gateway v1.9.1 pins. The shop's own Envoy, behind this one, runs")
-print(f"#   the app's envoyproxy/envoy:v1.39-latest - measured 1.39.1 too; that tag tracks 1.39")
+print(f"#   the app's envoyproxy/envoy:v1.39.1 - measured 1.39.1 (pinned, #19)")
 print(f"#   patches, so a later pull can be a newer 1.39.)")
 print(f"#")
 print(f"#   ./dump-filters.sh > generated/envoy-filters.yaml")

@@ -99,7 +99,7 @@ deployment "echo" successfully rolled out
 ```console
 $ oc exec -n envoy-01 client -- curl -s http://echo:8080/direct
 {
-  "served_by": "echo-f8fc6d5c9-59sx7",
+  "served_by": "echo-f8fc6d5c9-c2tck",
   "method": "GET",
   "path": "/direct",
   "headers": {
@@ -158,17 +158,17 @@ for traffic and `9901` for Envoy's admin interface.
 ```console
 $ oc exec -n envoy-01 client -- curl -s http://envoy:8080/direct
 {
-  "served_by": "echo-f8fc6d5c9-59sx7",
+  "served_by": "echo-f8fc6d5c9-qjgfm",
   "method": "GET",
   "path": "/direct",
   "headers": {
     "host": "envoy:8080",
     "user-agent": "curl/8.11.1",
     "accept": "*/*",
-    "x-forwarded-for": "10.217.0.139",
+    "x-forwarded-for": "10.217.1.229",
     "x-forwarded-proto": "http",
-    "x-envoy-external-address": "10.217.0.139",
-    "x-request-id": "4011b412-1faf-4f40-bf53-1ad8085e3b47",
+    "x-envoy-external-address": "10.217.1.229",
+    "x-request-id": "fac16e89-da83-42a4-9df1-b21f222a2f2d",
     "x-envoy-expected-rq-timeout-ms": "15000"
   }
 }
@@ -196,8 +196,8 @@ Twelve requests, and which of the two echo pods answered each:
 
 ```console
 $ for i in 1 2 3 4 5 6 7 8 9 10 11 12; do oc exec -n envoy-01 client -- curl -s http://envoy:8080/ | grep served_by; done | sort | uniq -c
-   6   "served_by": "echo-f8fc6d5c9-59sx7",
-   6   "served_by": "echo-f8fc6d5c9-96fwg",
+   7   "served_by": "echo-f8fc6d5c9-c2tck",
+   5   "served_by": "echo-f8fc6d5c9-qjgfm",
 ```
 
 **What just happened:** both pods answered. Two settings make that possible, and
@@ -231,8 +231,8 @@ Which endpoints does the cluster have, and are they healthy?
 
 ```console
 $ oc exec -n envoy-01 client -- curl -s http://envoy:9901/clusters | grep health_flags
-echo_service::10.217.0.141:8080::health_flags::healthy
-echo_service::10.217.0.140:8080::health_flags::healthy
+echo_service::10.217.1.231:8080::health_flags::healthy
+echo_service::10.217.1.230:8080::health_flags::healthy
 ```
 
 How many requests has each side seen?
@@ -264,10 +264,10 @@ first:
 
 ```console
 $ sleep 10; oc logs -n envoy-01 deploy/envoy | grep -- '->' | tail -4
-GET / -> 10.217.0.140:8080 200 0ms
-GET / -> 10.217.0.140:8080 200 0ms
-GET / -> 10.217.0.141:8080 200 1ms
-GET / -> 10.217.0.141:8080 200 0ms
+GET / -> 10.217.1.231:8080 200 0ms
+GET / -> 10.217.1.231:8080 200 0ms
+GET / -> 10.217.1.230:8080 200 0ms
+GET / -> 10.217.1.231:8080 200 1ms
 ```
 
 **What just happened:** the `->` address on each line is the pod that served the

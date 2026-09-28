@@ -2,7 +2,7 @@
 # its Envoy (b579d07d3ad7ee11d32b105e91a5a39ad24718d7/1.39.1/Clean/RELEASE/BoringSSL) by ../dump-filters.sh:
 #   image docker.io/envoyproxy/envoy:distroless-v1.39.1@sha256:eb2c01c13125d1629637cb4e4cce7207009fb7cc2c8027f9742758549d15b6f4
 #   (the image Envoy Gateway v1.9.1 pins. The shop's own Envoy, behind this one, runs
-#   the app's envoyproxy/envoy:v1.39-latest - measured 1.39.1 too; that tag tracks 1.39
+#   the app's envoyproxy/envoy:v1.39.1 - measured 1.39.1 (pinned, #19)
 #   patches, so a later pull can be a newer 1.39.)
 #
 #   ./dump-filters.sh > generated/envoy-filters.yaml

@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
       - name: envoy
-        image: envoyproxy/envoy:v1.39-latest
+        image: envoyproxy/envoy:v1.39.1
         args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
         ports:
         - { name: https, containerPort: 8443 }

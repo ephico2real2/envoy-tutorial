@@ -76,7 +76,7 @@ One Envoy, three of its filters, in this order — written by hand in
 ### The choices, and why
 
 Researched before building — Envoy 1.39.1's source (`envoyproxy/envoy` at tag
-`v1.39.1`, the version `envoyproxy/envoy:v1.39-latest` runs: measured, `envoy
+`v1.39.1`, the pinned `envoyproxy/envoy:v1.39.1` (#19): measured, `envoy
 --version` in the pod says `1.39.1`, image digest `sha256:57e14a54…`, the tag's
 digest on Docker Hub), the Keycloak documentation, module 19 — and measured on
 CRC:
