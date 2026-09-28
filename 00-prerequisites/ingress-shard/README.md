@@ -34,7 +34,8 @@ CRC's network proxy.
 ## Before you start
 
 - Module [`00`](../README.md)'s `check.sh` passes, including MetalLB and the
-  `enterprise-ca` ClusterIssuer.
+  `enterprise-ca` ClusterIssuer. How MetalLB was installed, and its pool
+  `mongot-pool` (step 1): [`../metallb/`](../metallb/README.md).
 - You are a cluster admin. This adds an `IngressController`, a MetalLB pool and
   a certificate in `openshift-ingress`, and changes the **default**
   IngressController (step 5).

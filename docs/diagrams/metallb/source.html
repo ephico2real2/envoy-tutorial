@@ -1,0 +1,200 @@
+<title>MetalLB on CRC</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground: #f5f6f8; --surface: #ffffff; --ink: #18212c; --muted: #58636f; --rule: #d7dce3;
+  --host: #a55a0b; --host-wash: #fbf1e4; --remote: #0e6f68; --remote-wash: #e3f3f1;
+  --gap: #b3261e; --gap-wash: #fbe9e7; --none: #6b7684; --none-wash: #eef0f3;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+    --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+    --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0e131a; --surface: #151c25; --ink: #e5e9ef; --muted: #9aa5b3; --rule: #2a3440;
+  --host: #f0a53c; --host-wash: #2a2014; --remote: #3fcfc0; --remote-wash: #122a28;
+  --gap: #f2857c; --gap-wash: #2d1614; --none: #9aa5b3; --none-wash: #1b232d;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.55; margin: 0; }
+.page { max-width: 1060px; margin: 0 auto; padding-inline: 16px; padding-block: 40px 72px; display: grid; gap: 44px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.15; margin: 0; font-weight: 700; text-wrap: balance; }
+h2 { font-size: 20px; margin: 0 0 6px; font-weight: 600; text-wrap: balance; }
+p { margin: 0; max-width: 72ch; }
+.lede { font-size: 17px; max-width: 70ch; }
+.muted { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+section { display: grid; gap: 14px; }
+figure { margin: 0; display: grid; gap: 10px; }
+.fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px; }
+.fig-scroll svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--ink); }
+figcaption { font-size: 13.5px; color: var(--muted); max-width: 80ch; }
+.tbl { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--ground); }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--remote); font-weight: 600; } .no { color: var(--gap); font-weight: 600; }
+.cell-gap { background: var(--gap-wash); }
+.decisions { display: grid; gap: 12px; }
+.decision { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 16px 20px; display: grid; gap: 8px; }
+.decision .id { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.decision .q { font-weight: 600; }
+.decision .rec { font-size: 14px; border-left: 3px solid var(--remote); padding-left: 10px; }
+.decision .rec.warn { border-left-color: var(--host); }
+a { color: var(--remote); }
+:focus-visible { outline: 2px solid var(--remote); outline-offset: 2px; }
+</style>
+
+<div class="page">
+  <header>
+    <div class="eyebrow">envoy-tutorial · 00-prerequisites · MetalLB on CRC</div>
+    <h1>An address from a pool, announced on br-ex</h1>
+    <p class="lede">Drawn from <code>00-prerequisites/metallb/manifests/</code> and the README's walk; every value was read on CRC 4.22.7 on 2026-09-28. MetalLB was installed there on 2026-09-24 by <code>mongodb-poc</code>.</p>
+  </header>
+
+  <section>
+    <h2>What the install made, and who uses it</h2>
+    <figure>
+      <div class="fig-scroll">
+<svg viewBox="0 0 1180 812" role="img" aria-label="MetalLB on CRC, as installed on 2026-09-24 and read on 2026-09-28. The install, in order: the catalog redhat-operators offers metallb-operator on channel stable, with install mode AllNamespaces only; namespace metallb-system holds OperatorGroup metallb-operator with spec {} and Subscription metallb-operator-sub (stable, redhat-operators, Automatic); an OperatorGroup with targetNamespaces metallb-system instead leaves the CSV Failed, reason UnsupportedOperatorGroup. The CSV metallb-operator.v4.22.0-202609151747 reached Succeeded 48 seconds after the Subscription and runs the operator and its webhook. The MetalLB resource metallb, with an empty spec, starts the speaker and the controller, and also turns on FRR-K8s, for BGP. The speaker, a DaemonSet with one pod per node on the host network under SCC privileged, answers ARP on br-ex for the addresses it announces. The controller reads IPAddressPool mongot-pool, 192.168.127.100 to 120 with autoAssign false, whose L2Advertisement mongot-l2 names interface br-ex, and gives each LoadBalancer Service an address from a pool it may use, written to the Service&#x27;s status and to the annotation metallb.io/ip-allocated-from-pool. On node crc, br-ex is 192.168.127.2/24 on the CRC network 192.168.127.0/24, where .1 is gvproxy and .254 is host.crc.testing; the node&#x27;s InternalIP, 192.168.126.11, is on another interface. Four Services hold addresses: 192.168.127.100, mongodb-poc, from mongot-pool, allocated but not announced because it had no ready endpoint; 192.168.127.101, module 17&#x27;s Gateway, and 192.168.127.102, module 19&#x27;s Gateway, both from mongot-pool and announced from crc on br-ex; 192.168.127.130, the ingress shard&#x27;s router, from the shard&#x27;s own ingress-shard-pool, announced from crc on br-ex. The laptop has no route to 192.168.127.0/24: route -n get sends 192.168.127.102 to en0 and its gateway 192.168.166.1, and curl straight to it timed out, exit 28. It reaches the addresses through gvproxy, CRC&#x27;s network proxy at 192.168.127.1, with forwards added through its API by _shared/crc-forward.sh: 127.0.0.1:19080 to 192.168.127.102 port 80 for module 19, and 127.0.0.1:20443 to 192.168.127.130 port 443 for the ingress shard.">
+  <defs><marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker><marker id="m1t" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--remote)"/></marker><marker id="m1n" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--none)"/></marker></defs>
+  <g font-family="IBM Plex Sans, sans-serif" font-size="12.5" fill="currentColor">
+<!-- ============ main column: the laptop to the Services ============ -->
+<!-- the laptop -->
+<rect x="20" y="14" width="660" height="86" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="34" y="36" font-weight="600">your laptop — curl, a browser</text>
+<text x="34" y="55" font-family="IBM Plex Mono, monospace" font-size="11.5">route -n get 192.168.127.102 → en0, gateway 192.168.166.1</text>
+<text x="34" y="74" fill="var(--gap)">direct: curl http://192.168.127.102/ → timed out, exit 28</text>
+<text x="34" y="91" fill="var(--muted)">it has no route to the CRC network 192.168.127.0/24</text>
+<!-- the direct attempt, refused -->
+<line x1="60" y1="100" x2="60" y2="236" stroke="var(--gap)" stroke-width="1.3" stroke-dasharray="4 4"/>
+<text x="60" y="246" text-anchor="middle" font-weight="700" fill="var(--gap)" font-size="15">✕</text>
+<!-- laptop to gvproxy -->
+<line x1="430" y1="100" x2="430" y2="126" stroke="var(--remote)" stroke-width="1.3" marker-end="url(#m1t)"/>
+<text x="422" y="118" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--remote)">:19080</text>
+<line x1="588" y1="100" x2="588" y2="126" stroke="var(--remote)" stroke-width="1.3" marker-end="url(#m1t)"/>
+<text x="580" y="118" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--remote)">:20443</text>
+<!-- gvproxy -->
+<rect x="100" y="128" width="580" height="96" rx="7" fill="var(--none-wash)" stroke="currentColor" stroke-width="1.3"/>
+<text x="114" y="149" font-weight="600">gvproxy — CRC&#x27;s network proxy · 192.168.127.1</text>
+<text x="114" y="168" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--remote)">127.0.0.1:19080 → 192.168.127.102:80</text>
+<text x="480" y="168" fill="var(--muted)">module 19</text>
+<text x="114" y="186" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--remote)">127.0.0.1:20443 → 192.168.127.130:443</text>
+<text x="480" y="186" fill="var(--muted)">the ingress shard</text>
+<text x="114" y="208" fill="var(--muted)">forwards added through its API (_shared/crc-forward.sh)</text>
+<!-- the boundary -->
+<line x1="20" y1="250" x2="690" y2="250" stroke="var(--rule)" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text x="84" y="244" font-family="IBM Plex Mono, monospace" font-size="11.5" font-weight="600" fill="var(--muted)">LAPTOP</text>
+<text x="24" y="270" font-family="IBM Plex Mono, monospace" font-size="11.5" font-weight="600" fill="var(--muted)">CRC VM NETWORK · 192.168.127.0/24</text>
+<text x="24" y="289" fill="var(--muted)">.1 gvproxy · .2 the node · .254 host.crc.testing</text>
+<text x="24" y="306" fill="var(--muted)">the pool, .100–.120, avoids all three</text>
+<!-- gvproxy into the network -->
+<line x1="430" y1="224" x2="430" y2="430" stroke="var(--remote)" stroke-width="1.3" marker-end="url(#m1t)"/>
+<text x="438" y="330" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--remote)">.102:80</text>
+<line x1="588" y1="224" x2="588" y2="430" stroke="var(--remote)" stroke-width="1.3" marker-end="url(#m1t)"/>
+<text x="596" y="330" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--remote)">.130:443</text>
+<!-- the node -->
+<rect x="20" y="398" width="660" height="298" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="34" y="420" font-weight="600">node crc</text>
+<text x="100" y="420" fill="var(--muted)">· its InternalIP, 192.168.126.11, is on another interface</text>
+<rect x="40" y="432" width="620" height="36" rx="5" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="54" y="455"><tspan font-weight="600" fill="var(--remote)">br-ex</tspan><tspan font-family="IBM Plex Mono, monospace" font-size="11.5"> 192.168.127.2/24</tspan><tspan fill="var(--muted)"> · the node&#x27;s interface on the CRC network</tspan></text>
+<line x1="430" y1="468" x2="430" y2="494" stroke="var(--remote)" stroke-width="1.3" marker-end="url(#m1t)"/>
+<line x1="588" y1="468" x2="588" y2="494" stroke="var(--remote)" stroke-width="1.3" marker-end="url(#m1t)"/>
+<!-- the four Services -->
+<rect x="40" y="496" width="148" height="116" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="52" y="518" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="500">192.168.127.100</text>
+<text x="52" y="536" font-weight="600">mongodb-poc</text>
+<text x="52" y="554" fill="var(--muted)">pool mongot-pool</text>
+<text x="52" y="578" fill="var(--none)">allocated, not</text>
+<text x="52" y="595" fill="var(--none)">announced</text>
+<rect x="198" y="496" width="148" height="116" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="210" y="518" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="500">192.168.127.101</text>
+<text x="210" y="536" font-weight="600">module 17 Gateway</text>
+<text x="210" y="554" fill="var(--muted)">pool mongot-pool</text>
+<text x="210" y="578" fill="var(--remote)">announced</text>
+<text x="210" y="595" fill="var(--remote)">from crc, br-ex</text>
+<rect x="356" y="496" width="148" height="116" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="368" y="518" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="500">192.168.127.102</text>
+<text x="368" y="536" font-weight="600">module 19 Gateway</text>
+<text x="368" y="554" fill="var(--muted)">pool mongot-pool</text>
+<text x="368" y="578" fill="var(--remote)">announced</text>
+<text x="368" y="595" fill="var(--remote)">from crc, br-ex</text>
+<rect x="514" y="496" width="148" height="116" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="526" y="518" font-family="IBM Plex Mono, monospace" font-size="12" font-weight="500">192.168.127.130</text>
+<text x="526" y="536" font-weight="600">ingress shard</text>
+<text x="526" y="554" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)">ingress-shard-pool</text>
+<text x="526" y="578" fill="var(--remote)">announced</text>
+<text x="526" y="595" fill="var(--remote)">from crc, br-ex</text>
+<text x="40" y="640" fill="var(--muted)">Each is a LoadBalancer Service; ip-allocated-from-pool names its pool. .100 had no ready</text>
+<text x="40" y="658" fill="var(--muted)">endpoint on 2026-09-28, so the speaker does not announce it: no ServiceL2Status.</text>
+<text x="40" y="681" fill="var(--muted)">ingress-shard-pool (.130/32) and its L2Advertisement are the ingress shard&#x27;s own.</text>
+<!-- ============ side column: the install ============ -->
+<text x="720" y="10" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="600" fill="var(--muted)" dominant-baseline="hanging">THE INSTALL, IN ORDER</text>
+<rect x="720" y="30" width="440" height="70" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="734" y="50" font-weight="600">catalog redhat-operators</text>
+<text x="734" y="68" font-family="IBM Plex Mono, monospace" font-size="11.5">metallb-operator · channel stable</text>
+<text x="734" y="87" fill="var(--muted)">install modes: AllNamespaces only</text>
+<line x1="940" y1="100" x2="940" y2="118" stroke="var(--none)" stroke-width="1.3" marker-end="url(#m1n)"/>
+<rect x="720" y="120" width="440" height="122" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="734" y="140" font-weight="600">ns metallb-system · 10-olm.yaml</text>
+<text x="734" y="158" font-family="IBM Plex Mono, monospace" font-size="11.5">OperatorGroup metallb-operator  spec: {}</text>
+<text x="734" y="176" font-family="IBM Plex Mono, monospace" font-size="11.5">Subscription metallb-operator-sub</text>
+<text x="734" y="193" fill="var(--muted)">stable · redhat-operators · Automatic</text>
+<text x="734" y="215" fill="var(--gap)">targetNamespaces: [metallb-system] instead →</text>
+<text x="734" y="232" fill="var(--gap)">CSV Failed, UnsupportedOperatorGroup</text>
+<line x1="940" y1="242" x2="940" y2="260" stroke="var(--none)" stroke-width="1.3" marker-end="url(#m1n)"/>
+<rect x="720" y="262" width="440" height="70" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="734" y="282" font-weight="600">CSV Succeeded, 48 s after the Subscription</text>
+<text x="734" y="300" font-family="IBM Plex Mono, monospace" font-size="11.5">metallb-operator.v4.22.0-202609151747</text>
+<text x="734" y="319" fill="var(--muted)">the operator and its webhook</text>
+<line x1="940" y1="332" x2="940" y2="350" stroke="var(--none)" stroke-width="1.3" marker-end="url(#m1n)"/>
+<rect x="720" y="352" width="440" height="52" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="734" y="372" font-weight="600">MetalLB metallb · empty spec · 20-metallb.yaml</text>
+<text x="734" y="391" fill="var(--muted)">starts the two below; also turns on FRR-K8s, for BGP</text>
+<line x1="900" y1="404" x2="900" y2="422" stroke="var(--none)" stroke-width="1.3" marker-end="url(#m1n)"/>
+<line x1="1140" y1="404" x2="1140" y2="506" stroke="var(--none)" stroke-width="1.3" marker-end="url(#m1n)"/>
+<!-- the speaker -->
+<rect x="720" y="424" width="400" height="70" rx="7" fill="var(--remote-wash)" stroke="var(--remote)" stroke-width="1.3"/>
+<text x="734" y="444" font-weight="600" fill="var(--remote)">speaker · DaemonSet, one pod per node</text>
+<text x="734" y="462">host network, SCC privileged</text>
+<text x="734" y="481" fill="var(--muted)">answers ARP for the addresses it announces</text>
+<line x1="718" y1="450" x2="662" y2="450" stroke="var(--remote)" stroke-width="1.3" marker-end="url(#m1t)"/>
+<text x="699" y="443" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--remote)">ARP</text>
+<!-- the controller -->
+<rect x="720" y="508" width="440" height="88" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+<text x="734" y="528" font-weight="600">controller · Deployment</text>
+<text x="734" y="546">gives each LoadBalancer Service an address from a pool</text>
+<text x="734" y="564">it may use, and writes it to the Service&#x27;s status</text>
+<text x="734" y="583" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)">+ metallb.io/ip-allocated-from-pool</text>
+<line x1="718" y1="554" x2="683" y2="554" stroke="currentColor" stroke-width="1.3" marker-end="url(#m1)"/>
+<!-- the pool -->
+<line x1="940" y1="624" x2="940" y2="598" stroke="var(--none)" stroke-width="1.3" marker-end="url(#m1n)"/>
+<text x="948" y="616" fill="var(--muted)">reads</text>
+<rect x="720" y="626" width="440" height="70" rx="7" fill="var(--none-wash)" stroke="var(--none)" stroke-width="1.3"/>
+<text x="734" y="646" font-weight="600">IPAddressPool mongot-pool · 30-pool.yaml</text>
+<text x="734" y="664" font-family="IBM Plex Mono, monospace" font-size="11.5">192.168.127.100-120 · autoAssign: false</text>
+<text x="734" y="683" fill="var(--muted)">L2Advertisement mongot-l2: interfaces br-ex</text>
+<!-- takeaway -->
+<text x="20" y="740">The controller gives a LoadBalancer Service an address from a pool; the speaker answers ARP for it on br-ex, while the Service has a ready endpoint.</text>
+<text x="20" y="762">From the laptop, a MetalLB address is reachable only through a gvproxy forward.</text>
+<text x="20" y="790" fill="var(--muted)">Grey boxes configure what they point at; teal is the path traffic takes; red is what fails. All read on CRC 4.22.7, 2026-09-28.</text>
+  </g>
+</svg>
+      </div>
+      <figcaption>The Subscription and an OperatorGroup with spec {} install the operator; the MetalLB resource starts the controller, which gives each LoadBalancer Service an address from its pool, and the speaker, which announces it on br-ex. From the laptop, only a gvproxy forward reaches those addresses.</figcaption>
+    </figure>
+  </section>
+</div>

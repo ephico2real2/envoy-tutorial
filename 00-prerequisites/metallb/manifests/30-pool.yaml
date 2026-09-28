@@ -1,0 +1,32 @@
+# The addresses, and how they are announced (README, steps 5-6).
+#
+# mongot-pool: 192.168.127.100-120, on the CRC network 192.168.127.0/24 where the
+# node's br-ex is 192.168.127.2. It avoids gvproxy's own addresses there: .1 the
+# gateway, .254 the host. autoAssign: false, so only a Service that names the pool
+# (annotation metallb.io/address-pool, or the deprecated metallb.universe.tf/address-pool)
+# gets one of its addresses.
+#
+# mongot-l2: the node answers ARP for the pool's addresses on br-ex only. Without
+# `interfaces`, the speaker would answer on every interface of the node.
+#
+# mongodb-poc's manifests/06-metallb-config.yaml, second and third documents.
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: mongot-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 192.168.127.100-192.168.127.120
+  autoAssign: false
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: mongot-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - mongot-pool
+  interfaces:
+  - br-ex

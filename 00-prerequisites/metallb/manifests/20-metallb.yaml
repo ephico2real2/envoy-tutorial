@@ -1,0 +1,11 @@
+# MetalLB itself (README, step 4). The operator acts on this one object: it runs
+# MetalLB's controller (a Deployment, which hands out addresses) and speaker (a
+# DaemonSet, one pod per node, which announces them). An empty spec takes the
+# defaults: the speaker on every Linux node.
+#
+# mongodb-poc's manifests/06-metallb-config.yaml, first document.
+apiVersion: metallb.io/v1beta1
+kind: MetalLB
+metadata:
+  name: metallb
+  namespace: metallb-system
