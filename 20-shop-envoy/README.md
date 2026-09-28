@@ -509,12 +509,12 @@ for `*.apps-metallb…` points at it: no forward, and the port is 443.
 
 [`browser.sh`](browser.sh) does what a browser does, with `curl` in the client
 pod, so each hop can be seen: it asks the shop, follows the redirect to the login
-page, posts the user name and password to its form, and brings the code back to
+page, posts the login to its form, and brings the code back to
 the front Envoy. It asks for `https://shop.apps-metallb.crc.testing:20443`, as the
 browser does, and sends the connection to the shard's address (`curl
 --connect-to`): the router and the front Envoy see the same Host, redirect URI and
-cookies as from the laptop. The password — the directory's published lab value —
-goes to the pod on standard input.
+cookies as from the laptop. It logs in with `shop.alice` / `Ldap123!` (a lab user),
+sent to the pod on standard input.
 
 ```console
 $ ./browser.sh sign-in shop.alice
