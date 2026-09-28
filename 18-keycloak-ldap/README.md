@@ -80,23 +80,27 @@ nothing else. [`manifests/20-realm.yaml`](manifests/20-realm.yaml) is the realm:
 | **attribute mappers** | user name ← `uid`, email ← `mail`, first name ← `cn`, last name ← `sn` |
 | a **group mapper** | the groups `(cn=app-ocp-rbac-ocp-*)` under `ou=Groups`, read from each group's `member`, flat, read-only |
 | realm role **`admin`** | and the group `app-ocp-rbac-ocp-keycloak-admin` that grants it — step 10 |
-| clients | `shop-api` (the audience) and `shop-cli` (password grant), as in `tutorial`; `shop-kiosk`, module 19's browser sign-in (confidential, authorization code with PKCE) |
+| clients | `shop-api` (the audience) and `shop-cli` (password grant), as in `tutorial`; `shop-kiosk`, module 19's browser sign-in, and `shop-envoy`, module 20's (each confidential, authorization code with PKCE); `shop-envoy-cli`, module 20's expiry probe (public, password grant, 45-second access tokens) |
 | **no user cache** | `cachePolicy: NO_CACHE` — each login reads the person and their groups from the directory, so a change there counts at the next login (module 19, step 13) |
 
-The realm file names the bind password only as `${LDAP_BIND_PASSWORD}`, and
-`shop-kiosk`'s client secret only as `${SHOP_KIOSK_CLIENT_SECRET}`; the import's
-`placeholders` field fills each from a Secret, inside the import Job. The client
-secret is one only Keycloak and module 19's Gateway need to know, so it is written
-nowhere: its Secret, `shop-kiosk-client`, gets a random value once, and keeps it —
-an existing one is never replaced (the realm keeps the value it was imported
-with). Module 19 copies it for its Gateway. `./run.sh deploy` does the same:
+The realm file names the bind password only as `${LDAP_BIND_PASSWORD}`, and the
+client secrets of `shop-kiosk` and `shop-envoy` only as
+`${SHOP_KIOSK_CLIENT_SECRET}` and `${SHOP_ENVOY_CLIENT_SECRET}`; the import's
+`placeholders` field fills each from a Secret, inside the import Job. A client
+secret is one only Keycloak and its client need to know, so it is written
+nowhere: its Secret, `shop-kiosk-client` or `shop-envoy-client`, gets a random
+value once, and keeps it — an existing one is never replaced (the realm keeps the
+value it was imported with). Module 19 copies the first for its Gateway, module 20
+the second for its Envoy. `./run.sh deploy` does the same:
 
 ```console
 $ oc get secret shop-kiosk-client -n keycloak >/dev/null 2>&1 && echo "Secret shop-kiosk-client kept" || python3 -c 'import secrets; print(secrets.token_urlsafe(32), end="")' | oc create secret generic shop-kiosk-client -n keycloak --from-file=client-secret=/dev/stdin
 secret/shop-kiosk-client created
+$ oc get secret shop-envoy-client -n keycloak >/dev/null 2>&1 && echo "Secret shop-envoy-client kept" || python3 -c 'import secrets; print(secrets.token_urlsafe(32), end="")' | oc create secret generic shop-envoy-client -n keycloak --from-file=client-secret=/dev/stdin
+secret/shop-envoy-client created
 ```
 
-The value goes from Python's `secrets` module straight into the Secret, on
+Each value goes from Python's `secrets` module straight into the Secret, on
 standard input: never on a command line, never on the screen. Now the bind
 password and the realm:
 
@@ -536,6 +540,7 @@ $ ./run.sh verify
   ✓ provider: test authentication (the bind account)
   ✓ provider: cachePolicy NO_CACHE - the directory is read at every login
   ✓ client shop-kiosk (module 19): its secret is Secret shop-kiosk-client's
+  ✓ client shop-envoy (module 20): its secret is Secret shop-envoy-client's
 
 3. who gets a corp token
   ✓ sarah.jones (gate member): issued by corp
@@ -660,7 +665,7 @@ run as written.)
 | What | Made by | Kept by | Why |
 |---|---|---|---|
 | Secret `keycloak-ldap-bind`, `KeycloakRealmImport corp` | `manifests/` | Argo CD | manifests. Measured: a deleted import was back in 0.7 s, and its new Job logged `Realm 'corp' already exists. Import skipped` |
-| **Secret `shop-kiosk-client`** — client `shop-kiosk`'s secret (step 2) | `./run.sh deploy`: a random value, once; never replaced | nobody — `run.sh` only | a secret in git is a published secret. Not in git, so not Argo CD's: measured, after `./run.sh resume` the Application is `Synced/Healthy`, lists only `keycloak-ldap-bind` and `corp`, and the Secret carries no tracking annotation. **The import needs it:** measured with it missing, the import said `Started=True`, `Import Job running`, and its Job's pod waited in `CreateContainerConfigError` (`secret "shop-kiosk-client" not found`) — 1 min 48 s, no failure; created then, the same Job ran and the import was `Done` 17 s later. So on a new cluster run `./run.sh deploy` before `oc apply -f argocd/` (as [`../argocd`](../argocd/README.md) says); an import Argo CD applies first waits, and completes once `deploy` writes the Secret. `./run.sh deploy` also checks that the realm's client has the Secret's value, and fails with the fix (step 13) when a realm predates the Secret |
+| **Secrets `shop-kiosk-client` and `shop-envoy-client`** — the secrets of clients `shop-kiosk` (module 19) and `shop-envoy` (module 20) (step 2) | `./run.sh deploy`: a random value, once; never replaced | nobody — `run.sh` only | a secret in git is a published secret. Not in git, so not Argo CD's: measured, after `./run.sh resume` the Application is `Synced/Healthy`, lists only `keycloak-ldap-bind` and `corp`, and the Secret carries no tracking annotation. **The import needs it:** measured with it missing, the import said `Started=True`, `Import Job running`, and its Job's pod waited in `CreateContainerConfigError` (`secret "shop-kiosk-client" not found`) — 1 min 48 s, no failure; created then, the same Job ran and the import was `Done` 17 s later. So on a new cluster run `./run.sh deploy` before `oc apply -f argocd/` (as [`../argocd`](../argocd/README.md) says); an import Argo CD applies first waits, and completes once `deploy` writes the Secret. `./run.sh deploy` also checks that each client in the realm has its Secret's value, and fails with the fix (step 13) when a realm predates the Secret or the client |
 | realm `corp` itself, in Keycloak's database | the import's Job, once | nobody | an import only creates. A deleted realm is not imported again while its import says `Done` (step 13), and Argo CD sees nothing to repair: the import is unchanged. `./run.sh deploy` repairs it — it pauses the Application, deletes the import and applies it again (measured with Argo CD on: realm deleted, `deploy` brought it back and resumed the Application, `Synced/Healthy`) |
 | **Secret `ldap-root-ca`** — the directory's root CA, fetched from the wire and checked (steps 4 to 6) | `./run.sh deploy` | nobody — `run.sh` only | [below](#why-the-directorys-root-is-not-in-git) |
 | the truststore entry that mounts it | module 16's `Keycloak` resource | Argo CD, `16-keycloak` | one owner (step 6) |
@@ -708,16 +713,18 @@ cluster without the Application.
 ## Clean up
 
 Leave `corp` in place if you go on: module 17's Gateway accepts its tokens beside
-realm `tutorial`'s (module 17, steps 8 to 10), and module 19's shop signs people in
-on it — it needs the realm, its LDAP provider, client `shop-kiosk` and Secret
-`shop-kiosk-client`, which module 19 copies for its Gateway. Cleaning this module
-breaks both until `./run.sh deploy` (re-importing `corp` if needed), then
-`../17-keycloak-jwt/run.sh deploy` and `../19-shop-gateway/run.sh deploy`, which
-copies the new client secret.
+realm `tutorial`'s (module 17, steps 8 to 10), and modules 19's and 20's shops sign
+people in on it — they need the realm, its LDAP provider, clients `shop-kiosk` and
+`shop-envoy` and Secrets `shop-kiosk-client` and `shop-envoy-client`, which they
+copy. Cleaning this module breaks all three until `./run.sh deploy` (re-importing
+`corp` if needed), then `../17-keycloak-jwt/run.sh deploy`,
+`../19-shop-gateway/run.sh deploy` and `../20-shop-envoy/run.sh deploy`, which copy
+the new client secrets.
 On the permanent lab a clean-up is a deliberate reset: pause Argo CD first
-(`./run.sh pause`, and `../19-shop-gateway/run.sh pause` once module 19's
-Application exists), or it puts the import and the bind Secret back as you delete
-them. `./run.sh clean` pauses both. To remove what this module added — the realm, its import, the three Secrets.
+(`./run.sh pause`, and `../19-shop-gateway/run.sh pause` and
+`../20-shop-envoy/run.sh pause` once their Applications exist), or it puts the
+import and the bind Secret back as you delete them. `./run.sh clean` pauses all
+three. To remove what this module added — the realm, its import, the four Secrets.
 Module 16's `Keycloak` keeps its `truststores` entry: it is optional. But the
 Secret it names is gone, so the operator **restarts Keycloak** — measured: it
 stopped `keycloak-0` 5 seconds after the delete, and the new Keycloak trusts the
@@ -732,7 +739,7 @@ $ ./run.sh pause
 $ ./admin.sh DELETE /admin/realms/corp
 $ oc delete keycloakrealmimport corp -n keycloak
 $ oc delete -f manifests/10-bind-secret.yaml
-$ oc delete secret shop-kiosk-client -n keycloak
+$ oc delete secret shop-kiosk-client shop-envoy-client -n keycloak
 $ rm -f chain-1.pem chain-2.pem ldap-root-ca.pem
 $ old=$(oc get pod keycloak-0 -n keycloak -o jsonpath='{.metadata.uid}'); new=$old; oc delete secret ldap-root-ca -n keycloak && for i in $(seq 1 60); do new=$(oc get pod keycloak-0 -n keycloak -o jsonpath='{.metadata.uid}'); [ -n "$new" ] && [ "$new" != "$old" ] && break; sleep 5; done; [ -n "$new" ] && [ "$new" != "$old" ] && oc wait pod/keycloak-0 -n keycloak --for=condition=Ready --timeout=300s && oc wait keycloak/keycloak -n keycloak --for=condition=Ready --timeout=300s || { echo "Keycloak has not restarted and become Ready - oc get pod keycloak-0 -n keycloak"; false; }
 ```

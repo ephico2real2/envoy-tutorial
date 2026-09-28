@@ -90,34 +90,35 @@ realm_state() {
   esac
 }
 
-# kiosk_secret - Secret shop-kiosk-client: the secret realm corp's client shop-kiosk
-# (module 19) gets from the import's placeholder. Generated once, a random value from
-# python's secrets module, straight into the Secret on stdin; an existing one is kept,
-# never replaced - the realm keeps the value it was imported with.
-kiosk_secret() {
-  if $KUBE get secret shop-kiosk-client -n "$NS" >/dev/null 2>&1; then
-    ok "Secret shop-kiosk-client kept"
+# client_secret <Secret> - the Secret a confidential client of realm corp gets from the
+# import's placeholder: shop-kiosk-client for shop-kiosk (module 19), shop-envoy-client
+# for shop-envoy (module 20). Generated once, a random value from python's secrets
+# module, straight into the Secret on stdin; an existing one is kept, never replaced -
+# the realm keeps the value it was imported with.
+client_secret() {
+  if $KUBE get secret "$1" -n "$NS" >/dev/null 2>&1; then
+    ok "Secret $1 kept"
     return 0
   fi
   python3 -c 'import secrets; print(secrets.token_urlsafe(32), end="")' \
-    | $KUBE create secret generic shop-kiosk-client -n "$NS" --from-file=client-secret=/dev/stdin >/dev/null \
-    || { bad "Secret shop-kiosk-client could not be created"; exit 1; }
-  ok "Secret shop-kiosk-client generated"
+    | $KUBE create secret generic "$1" -n "$NS" --from-file=client-secret=/dev/stdin >/dev/null \
+    || { bad "Secret $1 could not be created"; exit 1; }
+  ok "Secret $1 generated"
 }
-# kiosk_secret_state - "same" when realm corp's client shop-kiosk has the value Secret
-# shop-kiosk-client holds, "differ" when not, "unknown: ..." when either cannot be read.
-# Both values reach python on stdin and fd 3, and are never printed.
-kiosk_secret_state() {
+# client_secret_state <client> <Secret> - "same" when realm corp's client <client> has
+# the value Secret <Secret> holds, "differ" when not, "unknown: ..." when either cannot
+# be read. Both values reach python on stdin and fd 3, and are never printed.
+client_secret_state() {
   local id
-  id=$(./admin.sh GET '/admin/realms/corp/clients?clientId=shop-kiosk' 2>/dev/null \
+  id=$(./admin.sh GET "/admin/realms/corp/clients?clientId=$1" 2>/dev/null \
     | python3 -c 'import json, sys; c = json.load(sys.stdin); print(c[0]["id"] if c else "")' 2>/dev/null)
-  [ -n "$id" ] || { echo "unknown: realm corp has no client shop-kiosk"; return; }
+  [ -n "$id" ] || { echo "unknown: realm corp has no client $1"; return; }
   ./admin.sh GET "/admin/realms/corp/clients/$id/client-secret" 2>/dev/null | python3 -c '
 import base64, json, sys
 realm = json.load(sys.stdin).get("value", "")
 secret = base64.b64decode(open(3).read().strip() or "").decode()
 print("unknown: an empty value" if not realm or not secret else "same" if realm == secret else "differ")' \
-    3< <($KUBE get secret shop-kiosk-client -n "$NS" -o jsonpath='{.data.client-secret}' 2>/dev/null) 2>/dev/null \
+    3< <($KUBE get secret "$2" -n "$NS" -o jsonpath='{.data.client-secret}' 2>/dev/null) 2>/dev/null \
     || echo "unknown: unreadable"
 }
 
@@ -165,8 +166,9 @@ deploy() {
 
   $KUBE apply -f manifests/10-bind-secret.yaml >/dev/null \
     || { bad "Secret keycloak-ldap-bind could not be applied"; exit 1; }
-  # Before the import: its Job reads this Secret, and waits while it is missing.
-  kiosk_secret
+  # Before the import: its Job reads these Secrets, and waits while one is missing.
+  client_secret shop-kiosk-client
+  client_secret shop-envoy-client
   # An import only creates. With the realm gone but its import still Done, applying
   # the import again does nothing (README step 13, measured): delete the import, so
   # the apply below creates it anew and its Job runs.
@@ -191,11 +193,14 @@ deploy() {
   [ "$(realm_state)" = present ] \
     || { bad "the import says Done, but realm corp does not exist - README step 13"; exit 1; }
   ok "realm corp exists, federated from ldaps://$LDAP_HOST:443"
-  # An import only creates: a realm imported before this Secret existed (or with an
-  # earlier value) keeps its own. Say so rather than report success.
-  state=$(kiosk_secret_state)
-  [ "$state" = same ] || { bad "client shop-kiosk's secret in realm corp and Secret shop-kiosk-client: $state - re-import corp (README step 13)"; exit 1; }
-  ok "client shop-kiosk's secret in realm corp is the one in Secret shop-kiosk-client"
+  # An import only creates: a realm imported before a client or its Secret existed (or
+  # with an earlier value) keeps its own. Say so rather than report success.
+  local client
+  for client in shop-kiosk shop-envoy; do
+    state=$(client_secret_state "$client" "$client-client")
+    [ "$state" = same ] || { bad "client $client's secret in realm corp and Secret $client-client: $state - re-import corp (README step 13)"; exit 1; }
+    ok "client $client's secret in realm corp is the one in Secret $client-client"
+  done
   state=$(ldap_cache_policy)
   [ "$state" = NO_CACHE ] \
     || { bad "realm corp's LDAP provider has cachePolicy $state, not NO_CACHE - the realm predates it: re-import corp (README step 13)"; exit 1; }
@@ -261,7 +266,8 @@ verify() {
   assert "provider: test connection" "HTTP 204" "$(./admin.sh test-ldap connection | tail -n 1)"
   assert "provider: test authentication (the bind account)" "HTTP 204" "$(./admin.sh test-ldap authentication | tail -n 1)"
   assert "provider: cachePolicy NO_CACHE - the directory is read at every login" "NO_CACHE" "$(ldap_cache_policy)"
-  assert "client shop-kiosk (module 19): its secret is Secret shop-kiosk-client's" "same" "$(kiosk_secret_state)"
+  assert "client shop-kiosk (module 19): its secret is Secret shop-kiosk-client's" "same" "$(client_secret_state shop-kiosk shop-kiosk-client)"
+  assert "client shop-envoy (module 20): its secret is Secret shop-envoy-client's" "same" "$(client_secret_state shop-envoy shop-envoy-client)"
 
   say "3. who gets a corp token"
   local S L B C gate
@@ -330,10 +336,11 @@ keycloak_restarted() {
 
 clean() {
   local out failed=0 pod root
-  # Argo CD would put the import and the bind Secret back as they are deleted. Module
-  # 19's shop signs in on this realm and copies Secret shop-kiosk-client: its
-  # Application pauses too, so it does not keep re-applying a shop that cannot sign in.
-  app_pause 18-keycloak-ldap 19-shop-gateway
+  # Argo CD would put the import and the bind Secret back as they are deleted. Modules
+  # 19's and 20's shops sign in on this realm and copy Secrets shop-kiosk-client and
+  # shop-envoy-client: their Applications pause too, so they do not keep re-applying a
+  # shop that cannot sign in.
+  app_pause 18-keycloak-ldap 19-shop-gateway 20-shop-envoy
   # The realm first: deleting the KeycloakRealmImport leaves the realm it made. If
   # the realm cannot be removed, stop - its import and Secrets stay, for a retry.
   out=$(./admin.sh DELETE /admin/realms/corp 2>&1) \
@@ -342,6 +349,7 @@ clean() {
   remove keycloakrealmimport corp || failed=1
   remove secret keycloak-ldap-bind || failed=1
   remove secret shop-kiosk-client || failed=1
+  remove secret shop-envoy-client || failed=1
   # Module 16's truststore stays declared (optional: true). Removing the Secret it
   # names restarts Keycloak, so module 16's Keycloak is "as it was" only once the
   # restarted one is Ready - wait for it, unless the Secret was already gone.

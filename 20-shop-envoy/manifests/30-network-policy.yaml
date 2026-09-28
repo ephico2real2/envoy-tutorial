@@ -1,0 +1,119 @@
+# The front Envoy is the only way in. Without these, any pod in the cluster could
+# call the shop's own Envoy at envoy.envoy-20.svc:8080 - or the front Envoy's port
+# itself - and skip the Route: the sign-in guards what comes through the front
+# Envoy, not the Services beside it.
+#
+# A pod that one NetworkPolicy selects accepts only the traffic some policy allows
+# (Kubernetes NetworkPolicy; OVN-Kubernetes enforces it on this cluster). So each
+# layer admits only the layer in front of it:
+#
+#   the shard's router (openshift-ingress)  -> the front Envoy
+#   the front Envoy                         -> the shop's Envoy, the echo app
+#   the shop's Envoy                        -> the kiosk, the inventory
+#   the inventory                           -> MongoDB
+#
+# The client pod is selected by none of them: the README's step 5 shows it is
+# refused by each layer directly, yet served through the Route.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: front-envoy-from-shard-router
+  namespace: envoy-20
+spec:
+  podSelector:
+    matchLabels: { app: front-envoy }
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    # One entry with both selectors: pods with this label IN that namespace - the
+    # router of IngressController metallb (../../00-prerequisites/ingress-shard), which
+    # runs on the pod network. The default router runs on the node's own network
+    # (HostNetwork) and matches no pod selector, so it is not admitted either: only
+    # the shard serves this Route (80-route.yaml).
+    - namespaceSelector:
+        matchLabels: { kubernetes.io/metadata.name: openshift-ingress }
+      podSelector:
+        matchLabels: { ingresscontroller.operator.openshift.io/deployment-ingresscontroller: metallb }
+    ports:
+    - { protocol: TCP, port: 8080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: shop-envoy-from-front-envoy
+  namespace: envoy-20
+spec:
+  podSelector:
+    matchLabels: { app: envoy }
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: { app: front-envoy }
+    ports:
+    - { protocol: TCP, port: 8080 }
+---
+# /whoami (70-front-envoy-config.yaml) - the front Envoy only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: echo-from-front-envoy
+  namespace: envoy-20
+spec:
+  podSelector:
+    matchLabels: { app: echo }
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: { app: front-envoy }
+    ports:
+    - { protocol: TCP, port: 8080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kiosk-from-shop-envoy
+  namespace: envoy-20
+spec:
+  podSelector:
+    matchLabels: { app: kiosk }
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: { app: envoy }
+    ports:
+    - { protocol: TCP, port: 8080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: inventory-from-shop-envoy
+  namespace: envoy-20
+spec:
+  podSelector:
+    matchLabels: { app: inventory }
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: { app: envoy }
+    ports:
+    - { protocol: TCP, port: 50051 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-from-inventory
+  namespace: envoy-20
+spec:
+  podSelector:
+    matchLabels: { app: inventory-db }
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels: { app: inventory }
+    ports:
+    - { protocol: TCP, port: 27017 }

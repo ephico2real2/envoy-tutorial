@@ -13,9 +13,9 @@ metadata:
   namespace: keycloak
 spec:
   keycloakCRName: keycloak
-  # ${LDAP_BIND_PASSWORD} and ${SHOP_KIOSK_CLIENT_SECRET} below are replaced, in
-  # the import Job only, with these Secrets' values. The realm file holds no
-  # credential.
+  # ${LDAP_BIND_PASSWORD}, ${SHOP_KIOSK_CLIENT_SECRET} and ${SHOP_ENVOY_CLIENT_SECRET}
+  # below are replaced, in the import Job only, with these Secrets' values. The realm
+  # file holds no credential.
   placeholders:
     # 10-bind-secret.yaml.
     LDAP_BIND_PASSWORD:
@@ -25,6 +25,9 @@ spec:
     # for the Secret (README, "Permanent lab").
     SHOP_KIOSK_CLIENT_SECRET:
       secret: { name: shop-kiosk-client, key: client-secret }
+    # The same, for client shop-envoy (module 20).
+    SHOP_ENVOY_CLIENT_SECRET:
+      secret: { name: shop-envoy-client, key: client-secret }
   realm:
     realm: corp
     enabled: true
@@ -66,6 +69,24 @@ spec:
           included.client.audience: shop-api
           access.token.claim: "true"
           id.token.claim: "false"
+    # Module 20's expiry probe only. Keep shop-cli's lifetime unchanged for
+    # modules 17 and 19; browser clients inherit the realm's 300 seconds too.
+    # Re-import an existing corp using module 18 README step 13.
+    - clientId: shop-envoy-cli
+      enabled: true
+      publicClient: true
+      standardFlowEnabled: false
+      directAccessGrantsEnabled: true
+      attributes:
+        access.token.lifespan: "45"
+      protocolMappers:
+      - name: audience-shop-api
+        protocol: openid-connect
+        protocolMapper: oidc-audience-mapper
+        config:
+          included.client.audience: shop-api
+          access.token.claim: "true"
+          id.token.claim: "false"
     # The shop's kiosk (module 19): a person signs in on this realm's login page,
     # and Envoy Gateway - this confidential client - swaps the code for tokens.
     # Its tokens carry shop-api in aud, as shop-cli's do, so the Gateway checks
@@ -88,6 +109,32 @@ spec:
         # Where Keycloak may send the browser after /logout: the Gateway's root,
         # the address Envoy asks for (post_logout_redirect_uri).
         post.logout.redirect.uris: "http://localhost:19080/"
+      protocolMappers:
+      - name: audience-shop-api
+        protocol: openid-connect
+        protocolMapper: oidc-audience-mapper
+        config:
+          included.client.audience: shop-api
+          access.token.claim: "true"
+          id.token.claim: "false"
+    # The same shop behind module 20's standalone Envoy, on an OpenShift Route: the
+    # same sign-in as shop-kiosk, for another front door. Its own client - its own
+    # secret and its one redirect URI - so either door can be changed or revoked
+    # without touching the other, and Keycloak's events name the door (clientId).
+    - clientId: shop-envoy
+      enabled: true
+      publicClient: false
+      # From Secret shop-envoy-client (placeholders, above). Module 20's run.sh copies
+      # the same value into its Envoy's namespace.
+      secret: ${SHOP_ENVOY_CLIENT_SECRET}
+      standardFlowEnabled: true
+      directAccessGrantsEnabled: false
+      # Module 20's Route on the MetalLB ingress shard, which a browser on the CRC
+      # laptop reaches at port 20443 (module 20, "The choices").
+      redirectUris: ["https://shop.apps-metallb.crc.testing:20443/oauth2/callback"]
+      attributes:
+        pkce.code.challenge.method: S256
+        post.logout.redirect.uris: "https://shop.apps-metallb.crc.testing:20443/"
       protocolMappers:
       - name: audience-shop-api
         protocol: openid-connect
