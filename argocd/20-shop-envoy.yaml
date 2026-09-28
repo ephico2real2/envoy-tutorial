@@ -1,0 +1,54 @@
+# Module 20 - the shop behind a standalone Envoy in envoy-20, on an OpenShift Route:
+# the namespace, the shop (its database, inventory service, own Envoy and kiosk,
+# vendored from envoy-grpc-modernization), the NetworkPolicies, the front Envoy (its
+# configuration, written by hand, and its Deployment) and, in a later sync wave, the
+# Route on the MetalLB ingress shard (../20-shop-envoy/manifests); and the echo app
+# behind /whoami (../_shared/echo-app.yaml, which run.sh applies with -n envoy-20; its
+# objects carry no namespace, so they take this destination's).
+#
+# Not the front Envoy's inputs that are not in git: Secrets shop-envoy-client (a copy of
+# keycloak/shop-envoy-client) and shop-envoy-hmac (its cookie-signing key, generated
+# once), and ConfigMap keycloak-ca. ../20-shop-envoy/run.sh deploy writes them, and must
+# run before this Application's first sync - without them the front Envoy's pod does
+# not start, and the Route, in the later wave, is not applied.
+#
+# Argo CD updates the front Envoy's ConfigMap, but restarts nothing, and Envoy reads it
+# only when it starts: after a change to 70-front-envoy-config.yaml, run
+# ../20-shop-envoy/run.sh deploy, which restarts it; ./run.sh verify fails until then
+# (the README's "Permanent lab").
+#
+# No resources-finalizer: deleting this Application leaves the shop running.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: 20-shop-envoy
+  namespace: openshift-gitops
+  annotations:
+    # Diff by a server-side dry run: the API server's defaults (a Route's weight and
+    # wildcardPolicy, a Deployment's strategy) are then part of both sides, not a
+    # difference Argo CD would "heal" forever.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: default
+  sources:
+  - repoURL: https://github.com/ephico2real2/envoy-tutorial.git
+    targetRevision: main
+    path: 20-shop-envoy/manifests
+  - repoURL: https://github.com/ephico2real2/envoy-tutorial.git
+    targetRevision: main
+    path: _shared
+    directory:
+      include: echo-app.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: envoy-20
+  syncPolicy:
+    automated:
+      enabled: true
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff: { duration: 5s, factor: 2, maxDuration: 3m }
+    syncOptions:
+    - ServerSideApply=true

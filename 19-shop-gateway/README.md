@@ -13,7 +13,7 @@ what each person may do.
 Everything here is the Gateway API and Envoy Gateway's own policy: a `Gateway`,
 an `HTTPRoute` and **one `SecurityPolicy`**. Module 20 builds the same shop with a
 standalone Envoy — the `oauth2`, `jwt_authn` and `rbac` filters written by hand —
-behind an OpenShift Route; [the last section](#module-20-does-this-by-hand) maps
+behind an OpenShift Route; [the last section](#module-19-and-module-20-side-by-side) maps
 one onto the other.
 
 ## What you'll learn
@@ -1057,10 +1057,9 @@ and resumes Argo CD's Application if there is one; `./run.sh verify` is step 15;
 `./run.sh clean` is the clean-up; `./run.sh pause` and `./run.sh resume` are the
 [Permanent lab](#permanent-lab)'s.
 
-## Module 20 does this by hand
+## What Envoy Gateway made of each field
 
-Module 20 builds the same shop with a standalone Envoy behind an OpenShift Route,
-writing these filters itself. What Envoy Gateway generated, from
+What Envoy Gateway generated, from
 [`generated/envoy-filters.yaml`](generated/envoy-filters.yaml) (step 14), and the
 Gateway API object each part came from:
 
@@ -1076,6 +1075,126 @@ Gateway API object each part came from:
 | the two clusters' TLS to `keycloak-service` | `BackendTLSPolicy keycloak/keycloak-service` (module 16), allowed by the `ReferenceGrant` |
 | per route, `rbac` matchers `admins`, `signed-in-may-read`, `signed-in-may-reserve` — the claims read from `jwt_authn`'s metadata under `corp`; `:method` and `:path` headers — and `on_no_match` `DENY` | `authorization.rules`, `authorization.defaultAction` |
 | the routes `path_separated_prefix: /v1`, `path: /`, `/oauth2/callback`, `/logout`, `/whoami` | `HTTPRoute shop` |
+
+## Module 19 and module 20, side by side
+
+The same shop, the same realm and the same rules, built two ways: module 19 with
+the **Gateway API and Envoy Gateway** (a `Gateway`, an `HTTPRoute`, one
+`SecurityPolicy`), module 20 with **a standalone Envoy configured by hand**
+behind an **OpenShift Route**. Both run Envoy 1.39.1 and the same three filters
+in the same order, `oauth2` → `jwt_authn` → `rbac` (module 19's step 14, module
+20's step 14). This section is the same in both modules' READMEs.
+
+### The same answers
+
+Measured on CRC; module 20's `./run.sh verify` sends the command-line requests to
+both front doors with the same tokens and compares the answers (its section 7):
+
+| Case | Module 19 (Gateway) | Module 20 (Route + Envoy) |
+|---|---|---|
+| a browser with no session | `302` to `corp`'s login page, client `shop-kiosk`, PKCE `S256` | `302` to `corp`'s login page, client `shop-envoy`, PKCE `S256` |
+| `shop.alice`: list, reserve | `200` | `200` |
+| `shop.alice`: create, delete, reset, `PATCH`, `:restock`, `:reserve?x=1` | `403 RBAC: access denied` | `403 RBAC: access denied` |
+| `shop.alice`: `…%2Fx:reserve` | `307`, then `403` | `307`, then `403` |
+| `shop.alice`: `post` in lower case | `400 Bad Request` (HTTP/1 codec) | `400 Bad Request` (HTTP/1 codec, behind the router) |
+| `shop.bob`: create, delete, reset | `200` | `200` |
+| `bob.wilson` | cannot sign in, `user_not_found` | cannot sign in, `user_not_found` |
+| a bearer JWT from the command line | the same answers as the browser | the same answers as the browser |
+| an edited JWT; a `tutorial` JWT; an expired JWT | `401 Jwt verification fails`; `401 Jwt issuer is not configured`; `401 Jwt is expired` | the same three |
+| the layers behind it, called directly | no answer (NetworkPolicies) | no answer (NetworkPolicies) |
+| `shop.bob` out of the LDAP group, signed in again | `403`; back in: `200` | `403`; back in: `200` (module 20, step 13, both measured) |
+| the JWT the app receives | `azp: shop-kiosk`, `x-user`, no cookie on `/whoami` | `azp: shop-envoy`, `x-user`, no cookie on any route |
+
+**Measured differences:**
+
+- **A path the shop does not have** (`/nothing`), without a session: module 19
+  answers `404` at once — Envoy Gateway turns the filters on per route, and no
+  route matches; module 20 answers `302` to the login page, then `404` once
+  signed in — its filters are on at the listener. With a token both answer `404`;
+  neither routes the shop's native gRPC paths (`404` at both).
+- **The browser's address.** Module 19: `http://localhost:19080`, plain HTTP —
+  Chromium keeps Envoy's `Secure` cookies over plain HTTP only on `localhost`.
+  Module 20: `https://shop.apps-metallb.crc.testing:20443`, the router's
+  certificate — and so a setting module 19 does not need: the router appends to a
+  client's `X-Forwarded-Proto`, which made the `oauth2` filter send the browser
+  back to `http://` until the listener said `scheme_to_overwrite: https`.
+- **The cookies.** Module 19's are named by Envoy Gateway, with a suffix
+  (`AccessToken-ab2789d9` …); module 20's are Envoy's defaults (`BearerToken` …).
+  Both `Secure`, `HttpOnly`, `SameSite=Lax`.
+- **The Envoy's pod.** Module 19's runs under the `nonroot-v2` SCC, granted by its
+  `run.sh` (module 12, step 4); module 20's under the default `restricted-v2`, no
+  grant (measured, `openshift.io/scc` on each pod).
+
+### Where each piece of configuration lives
+
+| What | Module 19 | Module 20 |
+|---|---|---|
+| the way in | `Gateway eg` (a MetalLB address) + `HTTPRoute shop`, and a CRC forward from `127.0.0.1:19080` | `Route shop`, label `ingress-shard=metallb`, edge TLS on the shard's certificate, and the shard's forward from `127.0.0.1:20443` |
+| the sign-in | `SecurityPolicy sign-in` → `oidc` | `70-front-envoy-config.yaml` → `http_filters` → `envoy.filters.http.oauth2` |
+| the JWT check | `SecurityPolicy sign-in` → `jwt.providers[corp]` | → `envoy.filters.http.jwt_authn`, provider `corp`, one rule for `/` |
+| the permissions | `SecurityPolicy sign-in` → `authorization.rules` | → `envoy.filters.http.rbac`, three `policies` |
+| the order of the filters | Envoy Gateway's (`httpfilters.go`) | the order written in the file |
+| the client secret | Secret `envoy-19/shop-kiosk-oidc`, a copy of `keycloak/shop-kiosk-client`; Envoy gets it by SDS from Envoy Gateway | Secret `envoy-20/shop-envoy-client`, a copy of `keycloak/shop-envoy-client`, mounted as a file; a static secret, read at start |
+| the cookie-signing key | Envoy Gateway's `envoy-gateway-system/envoy-oidc-hmac`, one for every OIDC policy of the controller | Secret `envoy-20/shop-envoy-hmac`, generated once by `run.sh`, mounted as a file |
+| TLS to Keycloak's Service | module 16's `BackendTLSPolicy keycloak-service` and a `ReferenceGrant` in `keycloak` | a cluster with an `UpstreamTlsContext` (SNI, the certificate's name) and ConfigMap `envoy-20/keycloak-ca`, `run.sh`'s copy |
+| the paths | `HTTPRoute shop`'s matches | the virtual host's `routes` |
+| the client in realm `corp` | `shop-kiosk`, redirect `http://localhost:19080/oauth2/callback` | `shop-envoy`, redirect `https://shop.apps-metallb.crc.testing:20443/oauth2/callback` |
+| who reaches the shop | NetworkPolicies: this Gateway's Envoy pods only | NetworkPolicies: the shard's router pods reach the front Envoy, the front Envoy reaches the shop |
+
+### What Envoy Gateway generated, and what module 20 writes by hand
+
+Module 19's [`generated/envoy-filters.yaml`](generated/envoy-filters.yaml) is
+read from its running Envoy: 242 lines for the listener's chain and **one** route
+of five, generated from 63 lines of `SecurityPolicy` (without comments). Module
+20's [`manifests/70-front-envoy-config.yaml`](../20-shop-envoy/manifests/70-front-envoy-config.yaml)
+is Envoy's **whole** configuration — listener, routes, filters, clusters, secrets
+— in 186 lines (without comments). Filter by filter:
+
+| | Envoy Gateway generated (module 19) | Written by hand (module 20) |
+|---|---|---|
+| where each filter's settings are | at the listener, `oauth2` and `rbac` **empty** (off); each of the five routes turns all three on in `typed_per_filter_config` — the same `oauth2` block five times | at the listener, once, for every route |
+| `oauth2` | `OAuth2PerRoute.config`: the endpoints, `credentials` with `token_secret`/`hmac_secret` by SDS name (`oauth2/client_secret/securitypolicy/envoy-19/sign-in`), `cookie_names` with a suffix, `cookie_configs` `LAX` (nonce and verifier on `/oauth2/callback`), `forward_bearer_token`, `pass_through_matcher` `Authorization: Bearer `, `auth_type: BASIC_AUTH`, `use_refresh_token`, `end_session_endpoint` | the same fields, with `token_secret`/`hmac_secret` naming static secrets read from files, Envoy's default cookie names, and `post_logout_redirect_uri` written out |
+| `jwt_authn` | provider `corp_ce9edcdadc53325b` (a hash), cluster `securitypolicy/envoy-19/sign-in/jwt/0`, `cache_duration: 300s`, `async_fetch`, `forward`, `payload_in_metadata: corp`, `claim_to_headers`; a `requirement_map`, chosen per route by `requirement_name` | provider `corp`, cluster `keycloak`, the same settings; one `rules` entry, prefix `/` |
+| `rbac` | the **matcher** API: a `matcher_list` of predicates on `DynamicMetadataInput` (`jwt_authn`/`corp`/…) and `HttpRequestHeaderMatchInput` (`:method` with `ignore_case`, `:path` with a `safe_regex`), first match wins, `on_no_match: DENY` | the **policy** API: `action: ALLOW` and three named `policies`, each `permissions` (`:method`, `:path`) and `principals` (`sourced_metadata` from `jwt_authn`/`corp`); no policy matches → `403` |
+| the listener | `normalize_path`, `merge_slashes`, `path_with_escaped_slashes_action: UNESCAPE_AND_REDIRECT`, set by Envoy Gateway | the same three, written out, and `scheme_header_transformation` (the router in front) |
+| names | derived: `httproute/envoy-19/shop/rule/0/match/0/*`, `securitypolicy/envoy-19/sign-in/oidc/0` | chosen: `shop`, `keycloak`, `echo` |
+
+### When to choose which — from what was measured
+
+**The Gateway (module 19)** when the platform runs a Gateway API controller and
+wants one object per concern:
+
+- the sign-in, the JWT check and the permissions are 63 lines of one
+  `SecurityPolicy`; Envoy Gateway writes the 242-line per-route filter
+  configuration, the Keycloak clusters, the SDS secrets and the cookie key;
+- the policy targets the Gateway, so every route gets the same three filters,
+  per route: a path no route has gets `404` without a sign-in;
+- TLS to Keycloak is one shared `BackendTLSPolicy` (module 16's), allowed by a
+  `ReferenceGrant`;
+- what it costs: Envoy Gateway's names and choices (cookie names, the matcher
+  API, the filter order), a controller to run, and the Gateway's `nonroot-v2`
+  grant on OpenShift. A field its API does not expose — `grpc_json_transcoder`
+  (module 19, "The choices", item 3) — needs `EnvoyPatchPolicy`, off by default,
+  or another Envoy behind it, as here.
+
+**A standalone Envoy (module 20)** when a team runs its own Envoy, behind
+OpenShift's routers, or needs a filter setting no Gateway API exposes:
+
+- every field is in one file, read top to bottom in the order Envoy runs it;
+  nothing is generated, and the names are the team's;
+- anything Envoy has is one field away — here `scheme_header_transformation`,
+  needed because an OpenShift router ends TLS in front (measured);
+- the default `restricted-v2` SCC is enough: no extra grant;
+- what it costs, measured and read in the source: Envoy reads its configuration
+  and static secrets **once, at start** — a change is a restart, which
+  `./run.sh deploy` does and `./run.sh verify` checks; Argo CD updates the
+  ConfigMap and restarts nothing. Three inputs are `run.sh`'s, not git's — the
+  client secret's copy, the cookie key, the CA's copy — where Envoy Gateway keeps
+  the key itself and reads the client secret by SDS. And the configuration is
+  186 lines to own, against 63.
+
+Both give the same answers to the same requests; the choice is who writes the
+Envoy configuration, and who keeps it running.
 
 ## References
 

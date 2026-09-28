@@ -1,0 +1,31 @@
+# The way in: an OpenShift Route to the front Envoy, served by the MetalLB ingress
+# shard (../../00-prerequisites/ingress-shard) - its label is what the shard's
+# routeSelector admits, and what keeps the default router off it.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: shop
+  namespace: envoy-20
+  labels:
+    ingress-shard: metallb
+  annotations:
+    # Argo CD applies this after everything else in the module (wave 0) is healthy -
+    # the front Envoy's Deployment among them, which runs only with its sign-in
+    # configuration and its secrets. ./run.sh deploy keeps the same order.
+    argocd.argoproj.io/sync-wave: "1"
+    # No affinity cookie from the router: the session is in the front Envoy's own
+    # cookies, signed with the key every replica mounts, so any replica can serve any
+    # request. Left on, the router adds a Secure, SameSite=None cookie of its own
+    # (measured with Chromium, README "The choices").
+    haproxy.router.openshift.io/disable_cookies: "true"
+spec:
+  # Under the shard's domain; CRC writes it into the laptop's /etc/hosts as 127.0.0.1,
+  # and the laptop's port 20443 is forwarded to the shard (README, step 7).
+  host: shop.apps-metallb.crc.testing
+  to: { kind: Service, name: front-envoy }
+  port: { targetPort: http }
+  # Edge: the shard's router ends TLS with its certificate for
+  # *.apps-metallb.crc.testing (enterprise-ca), tells the front Envoy so in
+  # X-Forwarded-Proto: https, and speaks plain HTTP to it on the pod network
+  # (README, "The choices").
+  tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }

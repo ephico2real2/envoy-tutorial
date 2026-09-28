@@ -1,0 +1,297 @@
+# The front Envoy's whole configuration, written by hand: the sign-in, the token
+# check and the permissions of module 19's SecurityPolicy, as three of Envoy's own
+# HTTP filters. Envoy runs a request through them in the order they are listed:
+#
+#   oauth2     a browser without a session is sent to realm corp's login page; after
+#              it, the session lives in cookies, and every request is sent on with
+#              the access token as "Authorization: Bearer <JWT>"
+#   jwt_authn  that JWT - or one a command-line caller sends itself - is checked:
+#              corp's signature, issuer, audience, expiry
+#   rbac       what the checked JWT may do: its realm roles, the method, the path
+#   router     then on to the shop's own Envoy, which turns REST+JSON into gRPC
+#              (24-shop-envoy-config.yaml, the app's file, unchanged)
+#
+# What Envoy Gateway generated from module 19's policy is in
+# ../../19-shop-gateway/generated/envoy-filters.yaml; the README's last section puts
+# the two side by side.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: front-envoy-config
+  namespace: envoy-20
+data:
+  envoy.yaml: |
+    # The admin API answers on the pod's loopback only - ../admin.sh reaches it through
+    # oc port-forward. It can change what Envoy does; nothing in the cluster reaches it.
+    admin:
+      address:
+        socket_address: { address: 127.0.0.1, port_value: 9901 }
+
+    static_resources:
+      # The oauth2 filter's two secrets, each read from a file of the volume "oauth2"
+      # (71-front-envoy.yaml): the client secret, ../run.sh deploy's copy of module 18's
+      # keycloak/shop-envoy-client, and the key the session cookies are signed with,
+      # generated once by ../run.sh deploy. Neither is in git. Envoy reads the files once,
+      # when it starts: a new value takes a restart (../run.sh deploy does it).
+      secrets:
+      - name: client-secret
+        generic_secret: { secret: { filename: /etc/envoy/oauth2/client-secret } }
+      - name: hmac-secret
+        generic_secret: { secret: { filename: /etc/envoy/oauth2/hmac-secret } }
+
+      listeners:
+      - name: shop
+        address:
+          socket_address: { address: 0.0.0.0, port_value: 8080 }
+        filter_chains:
+        - filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: shop
+              # Every request here came over HTTPS: the shard's router ends TLS and only
+              # it may connect (the Route, 30-network-policy.yaml). Say so, whatever
+              # X-Forwarded-Proto claims - the router appends to one a client sends, and
+              # "http,https" would make the oauth2 filter send the browser back to http://
+              # after the sign-in (measured). This sets :scheme and X-Forwarded-Proto to
+              # https (v1.39.1, conn_manager_utility.cc, mutateRequestHeaders).
+              scheme_header_transformation: { scheme_to_overwrite: https }
+              # The path as the rules below read it, set as Envoy Gateway sets module 19's
+              # listener: "." and ".." resolved, "//" merged, and an escaped slash (%2F)
+              # answered with a redirect to the unescaped path - so an item's name can
+              # never smuggle a "/" past the reserve rule (README, step 12).
+              normalize_path: true
+              merge_slashes: true
+              path_with_escaped_slashes_action: UNESCAPE_AND_REDIRECT
+              access_log:
+              - name: envoy.access_loggers.stdout
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                  log_format:
+                    json_format:
+                      t: "%START_TIME%"
+                      method: "%REQ(:METHOD)%"
+                      path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+                      status: "%RESPONSE_CODE%"
+                      # Which filter answered, and why: e.g. rbac_access_denied_matched_policy[none],
+                      # jwt_authn_access_denied{Jwt_is_expired}, oauth.missing_credentials.
+                      details: "%RESPONSE_CODE_DETAILS%"
+                      user: "%REQ(X-USER)%"
+              route_config:
+                name: shop
+                virtual_hosts:
+                - name: shop
+                  domains: ["*"]
+                  # The session cookies stay here: the shop and /whoami get the access
+                  # token as a header, and have no use for the cookies (the oauth2 filter
+                  # itself drops only its flow cookies - v1.39.1, filter.cc,
+                  # removeOAuthFlowCookies).
+                  request_headers_to_remove: [cookie]
+                  routes:
+                  # Only the paths the shop has - the REST API under /v1/ and the kiosk
+                  # page at / - as module 19's HTTPRoute. Its Envoy also accepts native
+                  # gRPC and gRPC-Web on /legacy.inventory.v1.Inventory/...; nothing routes
+                  # there, so no call reaches the shop around the REST paths the rules
+                  # below name. Any other path: 404, after the sign-in.
+                  - match: { path_separated_prefix: /v1 }
+                    route: { cluster: shop }
+                  - match: { path: / }
+                    route: { cluster: shop }
+                  # LAB ONLY: the echo app answers with the headers it received - the
+                  # Authorization header this Envoy forwards among them (README, step 8).
+                  # A real app never echoes a token back.
+                  - match: { path: /whoami }
+                    route: { cluster: echo }
+              http_filters:
+              # 1. The browser's sign-in: OpenID Connect's authorization-code flow, with
+              #    PKCE (Envoy always sends an S256 challenge; realm corp's client requires
+              #    one). The code is swapped for tokens here, at Keycloak's Service.
+              - name: envoy.filters.http.oauth2
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3.OAuth2
+                  config:
+                    # Where the BROWSER goes to sign in: Keycloak's public name, through its
+                    # Route (module 16).
+                    authorization_endpoint: https://keycloak.apps-crc.testing/realms/corp/protocol/openid-connect/auth
+                    # Where THIS ENVOY swaps the code for tokens: Keycloak's Service, over TLS
+                    # (cluster keycloak, below).
+                    token_endpoint:
+                      uri: https://keycloak-service.keycloak.svc:8443/realms/corp/protocol/openid-connect/token
+                      cluster: keycloak
+                      timeout: 10s
+                    # Where /logout sends the browser, so Keycloak ends its session too...
+                    end_session_endpoint: https://keycloak.apps-crc.testing/realms/corp/protocol/openid-connect/logout
+                    # ...and where Keycloak sends it back: the address registered for the
+                    # client (post.logout.redirect.uris).
+                    post_logout_redirect_uri: { uri: "https://shop.apps-metallb.crc.testing:20443/" }
+                    # The confidential client in realm corp
+                    # (../../18-keycloak-ldap/manifests/20-realm.yaml), and the two secrets
+                    # declared above, by name.
+                    credentials:
+                      client_id: shop-envoy
+                      token_secret: { name: client-secret }
+                      hmac_secret: { name: hmac-secret }
+                    # Where Keycloak sends the browser back: the Route's host on the port a
+                    # browser on the CRC laptop uses (README, "The choices"). Fixed, and the
+                    # client's only redirect URI.
+                    redirect_uri: https://shop.apps-metallb.crc.testing:20443/oauth2/callback
+                    redirect_path_matcher: { path: { exact: /oauth2/callback } }
+                    signout_path: { path: { exact: /logout } }
+                    # Send the session's access token on as "Authorization: Bearer <JWT>" -
+                    # for jwt_authn, and for the shop.
+                    forward_bearer_token: true
+                    # A request that already carries "Authorization: Bearer ..." skips the
+                    # sign-in and goes straight to jwt_authn: a command-line caller with a
+                    # token is checked, not sent to a login page (README, step 12).
+                    pass_through_matcher:
+                    - name: authorization
+                      string_match: { prefix: "Bearer " }
+                    auth_scopes: [openid]
+                    # The client proves itself with HTTP Basic at the token endpoint.
+                    auth_type: BASIC_AUTH
+                    # An expired access token is renewed with the refresh token, so an open
+                    # session follows the directory at its next refresh (README, step 13).
+                    use_refresh_token: true
+                    # The cookies go back to this Envoy on the redirect from Keycloak (a
+                    # top-level GET from another site) and on the kiosk's own calls, never on
+                    # a cross-site POST. The nonce and the PKCE verifier only ever go to the
+                    # callback.
+                    cookie_configs:
+                      bearer_token_cookie_config: { same_site: LAX }
+                      id_token_cookie_config: { same_site: LAX }
+                      refresh_token_cookie_config: { same_site: LAX }
+                      oauth_hmac_cookie_config: { same_site: LAX }
+                      oauth_expires_cookie_config: { same_site: LAX }
+                      oauth_nonce_cookie_config: { same_site: LAX, path: /oauth2/callback }
+                      code_verifier_cookie_config: { same_site: LAX, path: /oauth2/callback }
+              # 2. The JWT - from the session, or the caller's own - checked against realm
+              #    corp: its issuer, its audience, its signature with corp's public keys
+              #    (fetched from Keycloak's Service, kept 300 s), its expiry. Every path.
+              - name: envoy.filters.http.jwt_authn
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                  providers:
+                    corp:
+                      # Must equal the token's iss exactly: only realm corp's tokens pass.
+                      issuer: https://keycloak.apps-crc.testing/realms/corp
+                      # Meant for the shop's API: shop-envoy's tokens (a browser sign-in) and
+                      # shop-cli's (the command line) both carry it.
+                      audiences: [shop-api]
+                      remote_jwks:
+                        http_uri:
+                          uri: https://keycloak-service.keycloak.svc:8443/realms/corp/protocol/openid-connect/certs
+                          cluster: keycloak
+                          timeout: 10s
+                        cache_duration: 300s
+                        # Fetch the keys when Envoy starts, not at the first request; the
+                        # listener opens once that first fetch is done.
+                        async_fetch: {}
+                      # Keep the Authorization header: the shop gets the JWT too.
+                      forward: true
+                      # The verified claims, for rbac below, under the key "corp".
+                      payload_in_metadata: corp
+                      # Who is calling, as a header the app can trust: this Envoy checked it.
+                      claim_to_headers:
+                      - { header_name: x-user, claim_name: preferred_username }
+                  rules:
+                  - match: { prefix: / }
+                    requires: { provider_name: corp }
+              # 3. What the verified JWT may do. A request is allowed when one of the
+              #    policies matches it - both its permission (what) and its principal
+              #    (who); anything else is denied: 403 "RBAC: access denied".
+              - name: envoy.filters.http.rbac
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.rbac.v3.RBAC
+                  rules:
+                    action: ALLOW
+                    policies:
+                      # The shop's admins may do anything - create, delete, reset. admin is
+                      # the realm role corp gives the LDAP group
+                      # app-ocp-rbac-ocp-keycloak-admin (module 18, step 10): the directory
+                      # decides who has it.
+                      admins:
+                        permissions: [{ any: true }]
+                        principals:
+                        - sourced_metadata:
+                            metadata_matcher:
+                              filter: envoy.filters.http.jwt_authn
+                              path: [{ key: corp }, { key: realm_access }, { key: roles }]
+                              value: { list_match: { one_of: { string_match: { exact: admin } } } }
+                      # Everyone corp signs in - only the members of its login gate,
+                      # app-ssb-autobahnusers, get a token at all - may read: the kiosk
+                      # page, the items, the warehouses...
+                      signed-in-may-read:
+                        permissions:
+                        - header: { name: ":method", string_match: { exact: GET } }
+                        principals:
+                        - sourced_metadata:
+                            metadata_matcher:
+                              filter: envoy.filters.http.jwt_authn
+                              path: [{ key: corp }, { key: iss }]
+                              value: { string_match: { exact: "https://keycloak.apps-crc.testing/realms/corp" } }
+                      # ...and reserve stock: POST /v1/items/{sku}:reserve, and no other
+                      # POST. ":path" is the whole path as sent, query included, nothing
+                      # decoded, so the item's name is an allow-list - RFC 3986's unreserved
+                      # characters, as module 19's rule: no "%", so no encoded "/", "?" or
+                      # ";"; no ":", so no second verb (README, step 9).
+                      signed-in-may-reserve:
+                        permissions:
+                        - and_rules:
+                            rules:
+                            - header: { name: ":method", string_match: { exact: POST } }
+                            - header:
+                                name: ":path"
+                                string_match: { safe_regex: { regex: "^/v1/items/[A-Za-z0-9._~-]+:reserve$" } }
+                        principals:
+                        - sourced_metadata:
+                            metadata_matcher:
+                              filter: envoy.filters.http.jwt_authn
+                              path: [{ key: corp }, { key: iss }]
+                              value: { string_match: { exact: "https://keycloak.apps-crc.testing/realms/corp" } }
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+      clusters:
+      # The shop's own Envoy (26-shop-envoy.yaml).
+      - name: shop
+        type: STRICT_DNS
+        connect_timeout: 2s
+        load_assignment:
+          cluster_name: shop
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: envoy, port_value: 8080 } } }
+      # The echo app behind /whoami (../../_shared/echo-app.yaml).
+      - name: echo
+        type: STRICT_DNS
+        connect_timeout: 2s
+        load_assignment:
+          cluster_name: echo
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: echo, port_value: 8080 } } }
+      # Keycloak's Service, for the token endpoint and corp's public keys, over TLS:
+      # the certificate must name keycloak-service.keycloak.svc and chain to the CA in
+      # ConfigMap keycloak-ca - ../run.sh deploy's copy of the one module 16's Keycloak
+      # certificate is signed by (enterprise-ca), as module 16's BackendTLSPolicy trusts
+      # for the Gateways.
+      - name: keycloak
+        type: STRICT_DNS
+        connect_timeout: 5s
+        load_assignment:
+          cluster_name: keycloak
+          endpoints:
+          - lb_endpoints:
+            - endpoint: { address: { socket_address: { address: keycloak-service.keycloak.svc, port_value: 8443 } } }
+        transport_socket:
+          name: envoy.transport_sockets.tls
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+            sni: keycloak-service.keycloak.svc
+            common_tls_context:
+              validation_context:
+                trusted_ca: { filename: /etc/envoy/keycloak-ca/ca.crt }
+                match_typed_subject_alt_names:
+                - san_type: DNS
+                  matcher: { exact: keycloak-service.keycloak.svc }

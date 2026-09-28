@@ -15,6 +15,7 @@ with it. One per module, in OpenShift GitOps' instance
 | [`17-keycloak-jwt`](17-keycloak-jwt.yaml) | `17-keycloak-jwt/manifests`, and `_shared/echo-app.yaml` into `envoy-17` | namespace `envoy-17`, Gateway `eg`, its routes and SecurityPolicies, the `ReferenceGrant` in `keycloak`, the echo app |
 | [`18-keycloak-ldap`](18-keycloak-ldap.yaml) | `18-keycloak-ldap/manifests` | the LDAP bind password's Secret, realm import `corp` (not Secret `shop-kiosk-client`, which `run.sh` generates) |
 | [`19-shop-gateway`](19-shop-gateway.yaml) | `19-shop-gateway/manifests`, and `_shared/echo-app.yaml` into `envoy-19` | namespace `envoy-19`, Gateway `eg`, the shop (vendored from `envoy-grpc-modernization`), its NetworkPolicies, route and `SecurityPolicy`, the `ReferenceGrant` in `keycloak` (not the client Secret, which `run.sh` copies), the echo app behind `/whoami` — an integration of the offering (module 16's index) |
+| [`20-shop-envoy`](20-shop-envoy.yaml) | `20-shop-envoy/manifests`, and `_shared/echo-app.yaml` into `envoy-20` | namespace `envoy-20` (`Prune=false`), the shop (vendored, as 19's), its NetworkPolicies, the front Envoy's configuration, Deployment and Service, and — in sync wave 1 — Route `shop` on the MetalLB ingress shard (not the two Secrets and the CA copy, which `run.sh` writes, nor the front Envoy's restart after a change, which `run.sh deploy` does) — an integration of the offering (module 16's index) |
 
 Beside the Keycloak offering, one more Application keeps a piece of platform that
 module 20 builds on
@@ -41,7 +42,7 @@ object, an edited field. It does **not** run `run.sh`: what `deploy` does by han
 CA, fetching and checking the directory's root — stays `run.sh`'s, each with its
 reason in the module's "Permanent lab" section
 ([16](../16-keycloak/README.md#permanent-lab), [17](../17-keycloak-jwt/README.md#permanent-lab),
-[18](../18-keycloak-ldap/README.md#permanent-lab), [19](../19-shop-gateway/README.md#permanent-lab)).
+[18](../18-keycloak-ldap/README.md#permanent-lab), [19](../19-shop-gateway/README.md#permanent-lab), [20](../20-shop-envoy/README.md#permanent-lab)).
 
 ## Putting them on a cluster
 
@@ -49,7 +50,7 @@ reason in the module's "Permanent lab" section
 must pass. Then the Applications:
 
 ```bash
-16-keycloak/run.sh deploy && 18-keycloak-ldap/run.sh deploy && 17-keycloak-jwt/run.sh deploy && 19-shop-gateway/run.sh deploy
+16-keycloak/run.sh deploy && 18-keycloak-ldap/run.sh deploy && 17-keycloak-jwt/run.sh deploy && 19-shop-gateway/run.sh deploy && 20-shop-envoy/run.sh deploy
 oc apply -f argocd/
 ```
 

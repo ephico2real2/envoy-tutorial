@@ -1,0 +1,67 @@
+# The front Envoy: the pinned Envoy image with the configuration written by hand in
+# 70-front-envoy-config.yaml. The Route (80-route.yaml) leads here, and only here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: front-envoy
+  namespace: envoy-20
+  labels: { app: front-envoy }
+spec:
+  selector: { app: front-envoy }
+  ports:
+  - { name: http, port: 8080, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: front-envoy
+  namespace: envoy-20
+  labels: { app: front-envoy }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: front-envoy } }
+  template:
+    metadata:
+      labels: { app: front-envoy }
+    spec:
+      containers:
+      - name: envoy
+        # The same tag as the shop's own Envoy (26-shop-envoy.yaml).
+        image: envoyproxy/envoy:v1.39-latest
+        args: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+        ports:
+        - { name: http, containerPort: 8080 }
+        volumeMounts:
+        - { name: config, mountPath: /etc/envoy/envoy.yaml, subPath: envoy.yaml }
+        - { name: oauth2, mountPath: /etc/envoy/oauth2, readOnly: true }
+        - { name: keycloak-ca, mountPath: /etc/envoy/keycloak-ca, readOnly: true }
+        # The listener opens once corp's public keys have been fetched (async_fetch in
+        # the configuration), so an open port is a ready Envoy. The admin API, which
+        # has a /ready, answers on the pod's loopback only.
+        readinessProbe:
+          tcpSocket: { port: 8080 }
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        resources:
+          requests: { cpu: "50m",  memory: "64Mi" }
+          limits:   { cpu: "500m", memory: "256Mi" }
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }
+      volumes:
+      - name: config
+        configMap: { name: front-envoy-config }
+      # Two Secrets ../run.sh deploy writes, not in git; until both exist the pod does
+      # not start, and nothing is served.
+      - name: oauth2
+        projected:
+          sources:
+          - secret:
+              name: shop-envoy-client
+              items: [{ key: client-secret, path: client-secret }]
+          - secret:
+              name: shop-envoy-hmac
+              items: [{ key: hmac-secret, path: hmac-secret }]
+      # ../run.sh deploy's copy of the CA Keycloak's certificate chains to.
+      - name: keycloak-ca
+        configMap: { name: keycloak-ca }
