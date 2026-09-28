@@ -150,8 +150,8 @@ ones its git files declare (gitops-engine, `pkg/cache/cluster.go`,
 and git no longer declares, it **prunes** (`prune: true`). An object git declares
 for an Application while another's annotation is on it gets a
 `SharedResourceWarning` (`controller/state.go`), and a sync of the declaring
-Application writes its own annotation (read in the source, not yet measured for
-an object another Application annotated — step 3 below checks it).
+Application writes its own annotation over another Application's (measured at
+#15's merge, below).
 
 So when a file moves from one module's `manifests/` to another's — the
 `BackendTLSPolicy` `keycloak/keycloak-service`, from 17 to 16 (#15) — the old
@@ -166,6 +166,14 @@ and no file, it deletes the object. The order, around the merge:
 4. `17-keycloak-jwt/run.sh resume` — the annotation is not 17's any more: nothing
    to prune.
 5. The object's `uid` is the one recorded before step 1: it was never deleted.
+
+**Measured at #15's merge (`1abee92`, 2026-09-27):**
+- **Before step 1:** uid `0590bf8a-…`, tracking-id `17-keycloak-jwt:…`.
+- **After step 3:** tracking-id `16-keycloak:gateway.networking.k8s.io/BackendTLSPolicy:keycloak/keycloak-service`, the same uid; 16 lists the object Synced.
+- **After step 4:** still the same uid and still tracked by 16.
+- **Afterwards:** `verify` passed for 16, 17, 18 and 19.
+
+The steps and output are on #15.
 
 ## How these differ from the cluster's other Applications
 
