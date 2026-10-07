@@ -428,4 +428,10 @@ namespace "envoy-11" deleted
 
 The figures are rendered from [`docs/diagrams/11-resilience/source.html`](../docs/diagrams/11-resilience/source.html)
 (inline SVG, light and dark). Change the page and re-render the PNGs together,
-with the `/visual` skill's `render.py`.
+with [diagram-kit](https://github.com/ephico2real2/diagram-kit) (MPL-2.0), which writes a PNG only when the page
+passes its checks (the install is in the [root README](../README.md#tooling)):
+
+```bash
+# from the repository root
+diagram-render docs/diagrams/11-resilience/source.html docs/diagrams/11-resilience retry-paths,ejection-and-breaker
+```

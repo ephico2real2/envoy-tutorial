@@ -392,4 +392,10 @@ included; `./run.sh clean` removes the namespace and `ca.crt`.
 
 The figures are rendered from [`docs/diagrams/09-grpc-end-to-end/source.html`](../docs/diagrams/09-grpc-end-to-end/source.html)
 (inline SVG, light and dark). Change the page and re-render the PNGs together,
-with the `/visual` skill's `render.py`.
+with [diagram-kit](https://github.com/ephico2real2/diagram-kit) (MPL-2.0), which writes a PNG only when the page
+passes its checks (the install is in the [root README](../README.md#tooling)):
+
+```bash
+# from the repository root
+diagram-render docs/diagrams/09-grpc-end-to-end/source.html docs/diagrams/09-grpc-end-to-end end-to-end,rotation
+```
