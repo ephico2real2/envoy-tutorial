@@ -122,6 +122,13 @@ output — a module either passes or names the claim that failed.
   UI, and a `verify.py` that fails a capture with a wide flat margin.
 - [`_shared/client.yaml`](_shared/client.yaml) — the in-cluster pod every
   walkthrough runs `curl` from.
+- [diagram-kit](https://github.com/ephico2real2/diagram-kit) (MPL-2.0) — renders
+  every figure from its `docs/diagrams/<module>/source.html` to a light and a
+  dark PNG, and writes them only when the page passes its checks (a font that
+  did not load, a label past its box, text unreadable in one theme). Install
+  it once, pinned, and put it on your `PATH`:
+  `python3 -m venv .venv && .venv/bin/pip install "diagram-kit @ git+https://github.com/ephico2real2/diagram-kit@v0.2.0" && .venv/bin/playwright install chromium`
+  Each module's *Diagram sources* section gives its `diagram-render` command.
 - [`argocd/`](argocd/README.md) — the Argo CD Applications that keep modules 16,
   17 and 18 as declared, and how to pause them.
 

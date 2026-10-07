@@ -332,4 +332,10 @@ steps 5 and 6's failures, and the way back; `./run.sh clean` is the clean-up.
 
 The figure is rendered from [`docs/diagrams/15-backend-tls-policy/source.html`](../docs/diagrams/15-backend-tls-policy/source.html)
 (inline SVG, light and dark). Change the page and re-render the PNGs together,
-with the `/visual` skill's `render.py`.
+with [diagram-kit](https://github.com/ephico2real2/diagram-kit) (MPL-2.0), which writes a PNG only when the page
+passes its checks (the install is in the [root README](../README.md#tooling)):
+
+```bash
+# from the repository root
+diagram-render docs/diagrams/15-backend-tls-policy/source.html docs/diagrams/15-backend-tls-policy outcomes
+```

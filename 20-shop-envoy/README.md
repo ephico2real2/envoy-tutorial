@@ -1248,4 +1248,10 @@ Envoy configuration, and who keeps it running.
 
 The figure is rendered from [`docs/diagrams/20-shop-envoy/source.html`](../docs/diagrams/20-shop-envoy/source.html)
 (inline SVG, light and dark). Change the page and re-render the PNGs together,
-with the `/visual` skill's `render.py`.
+with [diagram-kit](https://github.com/ephico2real2/diagram-kit) (MPL-2.0), which writes a PNG only when the page
+passes its checks (the install is in the [root README](../README.md#tooling)):
+
+```bash
+# from the repository root
+diagram-render docs/diagrams/20-shop-envoy/source.html docs/diagrams/20-shop-envoy flow
+```
