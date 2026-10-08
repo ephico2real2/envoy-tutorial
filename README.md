@@ -127,7 +127,7 @@ output — a module either passes or names the claim that failed.
   dark PNG, and writes them only when the page passes its checks (a font that
   did not load, a label past its box, text unreadable in one theme). Install
   it once, pinned, and put it on your `PATH`:
-  `python3 -m venv .venv && .venv/bin/pip install "diagram-kit @ git+https://github.com/ephico2real2/diagram-kit@v0.2.3" && .venv/bin/playwright install chromium`
+  `python3 -m venv .venv && .venv/bin/pip install "diagram-kit @ git+https://github.com/ephico2real2/diagram-kit@v0.2.4" && .venv/bin/playwright install chromium`
   Each module's *Diagram sources* section gives its `diagram-render` command.
 - [`argocd/`](argocd/README.md) — the Argo CD Applications that keep modules 16,
   17 and 18 as declared, and how to pause them.
